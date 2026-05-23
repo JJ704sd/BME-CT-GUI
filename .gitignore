@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.test-output/
+
+server/work/
+server/__pycache__/
+**/__pycache__/
+
+nnunetv2_files/
+*.nii
+*.nii.gz
+*.pth
+*.pt
+
+.env
+.env.*
+*.log

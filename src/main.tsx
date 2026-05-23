@@ -1,0 +1,1557 @@
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type DragEvent, type PointerEvent } from "react";
+import { createRoot } from "react-dom/client";
+import * as nifti from "nifti-reader-js";
+import {
+  Activity,
+  AlertTriangle,
+  BadgeCheck,
+  BarChart3,
+  BrainCircuit,
+  CheckCircle2,
+  ChevronDown,
+  CircleDot,
+  ClipboardCheck,
+  Columns2,
+  Database,
+  Download,
+  Eye,
+  EyeOff,
+  FileStack,
+  FileText,
+  FolderOpen,
+  Gauge,
+  Layers3,
+  ListChecks,
+  MousePointer2,
+  Pause,
+  Plus,
+  Play,
+  RotateCcw,
+  ScanLine,
+  Settings2,
+  SlidersHorizontal,
+  Sparkles,
+  Stethoscope,
+  Target,
+  Trash2,
+  Upload,
+  X,
+  ZoomIn
+} from "lucide-react";
+import demoCtImage from "./assets/demo-abdomen-ct.png";
+import demoChestCtImage from "./assets/demo-chest-ct.png";
+import demoPancreasCtImage from "./assets/demo-pancreas-ct.png";
+import { OrthogonalViewer } from "./components/OrthogonalViewer";
+import { buildLabelLookup, defaultOrganLabels, getOrganDetail } from "./data/organDetails";
+import { createInferenceJob, downloadInferenceResult, fetchModelLabels, getInferenceResultMeta, getInferenceStatusCopy, parseInferenceEvent, type InferenceStatus, type ValidationSummary } from "./inference/inferenceClient";
+import type { VoxelCoord } from "./imaging/voxelMapping";
+import { buildCustomCaseId, getAlignmentCaptionCopy, getCustomCasePanelCopy, getDisplayAspectRatio, getRegistrationStatus, getSplitPositionFromClientX, getStableSliceWindowStart, volumesShareDisplayGrid } from "./viewerLogic";
+import "./styles.css";
+
+type ViewMode = "CT" | "Mask" | "3D";
+type RunState = "idle" | "running" | "complete";
+type ModuleId = "项目" | "数据" | "分割" | "评估" | "报告";
+type CompareMode = "split" | "overlay" | "side" | "difference";
+type UploadRole = "source" | "result";
+type RemovalTarget = "source" | "result" | "session";
+type QualityState = "accepted" | "review";
+type NiftiRenderMode = "intensity" | "mask";
+
+type NiftiVolume = {
+  image: ArrayBuffer;
+  columns: number;
+  rows: number;
+  slices: number;
+  spacingX: number;
+  spacingY: number;
+  spacingZ: number;
+  datatypeCode: number;
+  datatype: string;
+  littleEndian: boolean;
+  bytesPerVoxel: number;
+  slope: number;
+  intercept: number;
+  spacing: string;
+};
+
+type LoadedImage = {
+  src: string;
+  name: string;
+  kind: "Demo" | "Image" | "NIfTI";
+  meta: string;
+  dimensions?: string;
+  sizeText?: string;
+  format?: string;
+  volume?: NiftiVolume;
+  sliceIndex?: number;
+  file?: File;
+};
+
+type Organ = {
+  id: string;
+  name: string;
+  color: string;
+  score: number;
+  volume: string;
+  visible: boolean;
+  quality: QualityState;
+};
+
+type CaseItem = {
+  id: string;
+  sex: string;
+  age: number;
+  phase: string;
+  slices: number;
+  target: string;
+  demoImage: string;
+  imageName: string;
+  imageMeta: string;
+  organs: Organ[];
+  custom?: boolean;
+  sourceImage?: LoadedImage;
+  resultImage?: LoadedImage | null;
+};
+
+type Measurement = {
+  id: number;
+  label: string;
+  x: number;
+  y: number;
+  hu: number;
+  diameter: string;
+  slice: number;
+};
+
+type ReportState = {
+  draftSaved: boolean;
+  reviewQueued: boolean;
+  exportCount: number;
+  lastExport: string;
+};
+
+const organSets = {
+  abdomen: [
+    { id: "liver", name: "肝脏", color: "#4fd1a5", score: 96.8, volume: "1421 ml", visible: true, quality: "accepted" },
+    { id: "pancreas", name: "胰腺", color: "#f4b95f", score: 91.4, volume: "72 ml", visible: true, quality: "accepted" },
+    { id: "stomach", name: "胃", color: "#7cc7ff", score: 93.1, volume: "318 ml", visible: true, quality: "review" },
+    { id: "colon", name: "结肠", color: "#ef8aa8", score: 89.7, volume: "514 ml", visible: true, quality: "review" },
+    { id: "gallbladder", name: "胆囊", color: "#a5e567", score: 88.9, volume: "31 ml", visible: false, quality: "review" }
+  ] satisfies Organ[],
+  lung: [
+    { id: "right-lung", name: "右肺", color: "#4fd1a5", score: 95.2, volume: "2520 ml", visible: true, quality: "accepted" },
+    { id: "left-lung", name: "左肺", color: "#7cc7ff", score: 94.7, volume: "2388 ml", visible: true, quality: "accepted" },
+    { id: "airway", name: "气管树", color: "#f4b95f", score: 90.6, volume: "41 ml", visible: true, quality: "review" },
+    { id: "vessel", name: "肺血管", color: "#ef8aa8", score: 88.5, volume: "126 ml", visible: true, quality: "review" },
+    { id: "nodule", name: "肺结节", color: "#a5e567", score: 86.9, volume: "4.8 ml", visible: false, quality: "review" }
+  ] satisfies Organ[],
+  pancreas: [
+    { id: "liver", name: "肝脏", color: "#4fd1a5", score: 95.9, volume: "1368 ml", visible: true, quality: "accepted" },
+    { id: "pancreas", name: "胰腺", color: "#f4b95f", score: 92.6, volume: "83 ml", visible: true, quality: "accepted" },
+    { id: "stomach", name: "胃", color: "#7cc7ff", score: 90.2, volume: "286 ml", visible: true, quality: "review" },
+    { id: "spleen", name: "脾脏", color: "#ef8aa8", score: 91.5, volume: "178 ml", visible: true, quality: "review" },
+    { id: "gallbladder", name: "胆囊", color: "#a5e567", score: 89.4, volume: "38 ml", visible: true, quality: "review" }
+  ] satisfies Organ[]
+};
+
+const cases: CaseItem[] = [
+  {
+    id: "Case_FLARE_024",
+    sex: "男",
+    age: 62,
+    phase: "Portal Venous",
+    slices: 320,
+    target: "腹部消化器官",
+    demoImage: demoCtImage,
+    imageName: "demo-abdomen-ct.png",
+    imageMeta: "腹部增强 CT · 多器官演示",
+    organs: organSets.abdomen
+  },
+  {
+    id: "Case_LUNG_112",
+    sex: "女",
+    age: 54,
+    phase: "Chest CT",
+    slices: 384,
+    target: "肺叶与气管树",
+    demoImage: demoChestCtImage,
+    imageName: "demo-chest-ct.png",
+    imageMeta: "胸部 CT · 肺叶与气管树演示",
+    organs: organSets.lung
+  },
+  {
+    id: "Case_PANC_038",
+    sex: "男",
+    age: 68,
+    phase: "Pancreatic",
+    slices: 286,
+    target: "胰腺与周围器官",
+    demoImage: demoPancreasCtImage,
+    imageName: "demo-pancreas-ct.png",
+    imageMeta: "胰腺期 CT · 消化器官演示",
+    organs: organSets.pancreas
+  }
+];
+
+const moduleItems: { id: ModuleId; icon: typeof FolderOpen; hint: string }[] = [
+  { id: "项目", icon: FolderOpen, hint: "病例总览" },
+  { id: "数据", icon: Database, hint: "导入与配准" },
+  { id: "分割", icon: ScanLine, hint: "模型与图层" },
+  { id: "评估", icon: BarChart3, hint: "质控指标" },
+  { id: "报告", icon: FileText, hint: "导出与复核" }
+];
+
+const toolbarHints = [
+  { label: "窗宽窗位", detail: "切换软组织与肺窗预设" },
+  { label: "缩放", detail: "放大当前影像视图" },
+  { label: "重置", detail: "恢复缩放与切片位置" },
+  { label: "测量", detail: "在影像上添加测量标记" },
+  { label: "热区", detail: "显示或隐藏 AI 关注区域" },
+  { label: "分屏", detail: "拖动分割线对比原图与掩膜" }
+];
+
+const modelOptions = [
+  { id: "abdomen", name: "Abdomen-TotalSegmentator", scope: "肝脏、胰腺、胆囊、胃肠道", speed: "32 s" },
+  { id: "lung", name: "Lung-Lobe-AirwayNet", scope: "肺叶、气管树、肺血管、结节", speed: "26 s" },
+  { id: "hybrid", name: "RespDigest-Hybrid", scope: "胸腹联合器官分割", speed: "41 s" }
+];
+
+const windowPresets = [
+  { id: "soft", label: "软组织", level: 40, width: 360 },
+  { id: "lung", label: "肺窗", level: -600, width: 1500 },
+  { id: "bone", label: "骨窗", level: 300, width: 1500 }
+];
+
+const runSteps = ["数据预处理", "器官候选区定位", "掩膜后处理", "质控指标刷新", "报告草稿同步"];
+const baseLogs = ["演示病例已加载", "支持 PNG/JPG/WebP 与 .nii/.nii.gz 体数据", "侧栏支持导入、删除、质控与报告"];
+const FOOTER_SLICE_COUNT = 7;
+
+function toArrayBuffer(data: ArrayBufferLike) {
+  if (data instanceof ArrayBuffer) return data;
+  const copy = new Uint8Array(data.byteLength);
+  copy.set(new Uint8Array(data));
+  return copy.buffer;
+}
+
+function getNiftiValue(view: DataView, byteOffset: number, datatypeCode: number, littleEndian: boolean) {
+  switch (datatypeCode) {
+    case 2:
+      return view.getUint8(byteOffset);
+    case 4:
+      return view.getInt16(byteOffset, littleEndian);
+    case 8:
+      return view.getInt32(byteOffset, littleEndian);
+    case 16:
+      return view.getFloat32(byteOffset, littleEndian);
+    case 64:
+      return view.getFloat64(byteOffset, littleEndian);
+    case 256:
+      return view.getInt8(byteOffset);
+    case 512:
+      return view.getUint16(byteOffset, littleEndian);
+    case 768:
+      return view.getUint32(byteOffset, littleEndian);
+    default:
+      throw new Error(`暂不支持该 NIfTI 数据类型：${datatypeCode}`);
+  }
+}
+
+function parseNiftiVolume(buffer: ArrayBuffer): NiftiVolume {
+  let data = buffer;
+  if (nifti.isCompressed(data)) {
+    data = toArrayBuffer(nifti.decompress(data));
+  }
+  if (!nifti.isNIFTI(data)) {
+    throw new Error("该文件不是有效的 NIfTI 数据。");
+  }
+
+  const header = nifti.readHeader(data);
+  const image = nifti.readImage(header, data);
+  const datatype = typeof header.getDatatypeCodeString === "function"
+    ? header.getDatatypeCodeString(header.datatypeCode)
+    : `DT ${header.datatypeCode}`;
+  const spacingX = header.pixDims[1] || 1;
+  const spacingY = header.pixDims[2] || 1;
+  const spacingZ = header.pixDims[3] || 1;
+
+  return {
+    image,
+    columns: header.dims[1] || 1,
+    rows: header.dims[2] || 1,
+    slices: Math.max(1, header.dims[3] || 1),
+    spacingX,
+    spacingY,
+    spacingZ,
+    datatypeCode: header.datatypeCode,
+    datatype,
+    littleEndian: header.littleEndian,
+    bytesPerVoxel: Math.max(1, header.numBitsPerVoxel / 8),
+    slope: header.scl_slope && Number.isFinite(header.scl_slope) ? header.scl_slope : 1,
+    intercept: Number.isFinite(header.scl_inter) ? header.scl_inter : 0,
+    spacing: `${spacingX.toFixed(2)} x ${spacingY.toFixed(2)} x ${spacingZ.toFixed(2)} mm`
+  };
+}
+
+function clampSliceIndex(sliceIndex: number, slices: number) {
+  return Math.max(0, Math.min(Math.max(0, slices - 1), sliceIndex));
+}
+
+function renderNiftiSliceToDataUrl(volume: NiftiVolume, sliceIndex: number, mode: NiftiRenderMode = "intensity") {
+  const { columns, rows, bytesPerVoxel, datatypeCode, littleEndian, slope, intercept } = volume;
+  const safeSliceIndex = clampSliceIndex(sliceIndex, volume.slices);
+  const view = new DataView(volume.image);
+  const values = new Float32Array(columns * rows);
+  const maskPalette = [
+    [80, 232, 190],
+    [244, 185, 95],
+    [124, 199, 255],
+    [239, 138, 168],
+    [165, 229, 103],
+    [174, 141, 255]
+  ];
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+
+  for (let y = 0; y < rows; y += 1) {
+    for (let x = 0; x < columns; x += 1) {
+      const sourceIndex = x + y * columns + safeSliceIndex * columns * rows;
+      const value = getNiftiValue(view, sourceIndex * bytesPerVoxel, datatypeCode, littleEndian) * slope + intercept;
+      const displayIndex = x + y * columns;
+      values[displayIndex] = value;
+      if (mode === "intensity" && Number.isFinite(value)) {
+        min = Math.min(min, value);
+        max = Math.max(max, value);
+      }
+    }
+  }
+
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min === max) {
+    min = 0;
+    max = 1;
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = columns;
+  canvas.height = rows;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("浏览器无法创建 Canvas 渲染上下文。");
+  const imageData = context.createImageData(columns, rows);
+
+  for (let index = 0; index < values.length; index += 1) {
+    const pixelOffset = index * 4;
+    if (mode === "mask") {
+      const label = Math.round(values[index]);
+      if (label <= 0 || !Number.isFinite(label)) {
+        imageData.data[pixelOffset + 3] = 0;
+      } else {
+        const color = maskPalette[(label - 1) % maskPalette.length];
+        imageData.data[pixelOffset] = color[0];
+        imageData.data[pixelOffset + 1] = color[1];
+        imageData.data[pixelOffset + 2] = color[2];
+        imageData.data[pixelOffset + 3] = 190;
+      }
+    } else {
+      const normalized = Math.max(0, Math.min(1, (values[index] - min) / Math.max(1e-6, max - min)));
+      const gray = Math.round(normalized * 255);
+      imageData.data[pixelOffset] = gray;
+      imageData.data[pixelOffset + 1] = gray;
+      imageData.data[pixelOffset + 2] = gray;
+      imageData.data[pixelOffset + 3] = 255;
+    }
+  }
+
+  context.putImageData(imageData, 0, 0);
+  return canvas.toDataURL("image/png");
+}
+
+function getImageDimensions(src: string) {
+  return new Promise<string>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(`${image.naturalWidth}x${image.naturalHeight}`);
+    image.onerror = () => reject(new Error("无法读取图片尺寸"));
+    image.src = src;
+  });
+}
+
+function getReadableFileType(file: File, fallback: string) {
+  if (file.type) return file.type.replace("image/", "").toUpperCase();
+  if (file.name.toLowerCase().endsWith(".nii.gz")) return "NII.GZ";
+  const extension = file.name.split(".").pop();
+  return extension ? extension.toUpperCase() : fallback;
+}
+
+function revokeObjectUrl(src?: string) {
+  if (src?.startsWith("blob:")) URL.revokeObjectURL(src);
+}
+
+function formatDiceMetric(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value) ? value.toFixed(3) : "待验证";
+}
+
+function formatSeconds(value: number | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "待记录";
+  const totalSeconds = Math.max(0, Math.round(value));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}分${seconds}秒` : `${seconds}秒`;
+}
+
+function formatBytes(value: number | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "待生成";
+  if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(2)} MB`;
+  if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${value} B`;
+}
+
+function getValidationStatusCopy(validation: ValidationSummary | null) {
+  if (!validation) return "等待样例推理";
+  if (validation.status === "passed") return "标准答案通过";
+  if (validation.status === "review") return "建议人工复核";
+  return "无法自动验证";
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="metric">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function DemoMaskPreview({ src }: { src: string }) {
+  return (
+    <div className="demo-mask-preview">
+      <img src={src} alt="" />
+      <span className="mask-shape mask-liver" />
+      <span className="mask-shape mask-pancreas" />
+      <span className="mask-shape mask-stomach" />
+    </div>
+  );
+}
+
+function OrganDetailCard({ organId, label, coord, onClose }: { organId: string; label?: number; coord: VoxelCoord; onClose: () => void }) {
+  const detail = getOrganDetail(organId);
+  return (
+    <aside className="organ-detail-card">
+      <div className="organ-detail-head">
+        <div>
+          <span>器官说明</span>
+          <strong>{detail.nameZh} <em>{detail.nameEn}</em></strong>
+        </div>
+        <button onClick={onClose} aria-label="关闭器官说明">×</button>
+      </div>
+      <dl>
+        <dt>解剖位置</dt><dd>{detail.anatomicalLocation}</dd>
+        <dt>生理功能</dt><dd>{detail.functionSummary}</dd>
+        <dt>常见关注</dt><dd>{detail.commonFindings}</dd>
+        <dt>分割提示</dt><dd>{detail.segmentationNotes}</dd>
+      </dl>
+      <div className="organ-detail-foot">
+        <span>Label {label ?? "-"}</span>
+        <span>Voxel ({coord.x}, {coord.y}, {coord.z})</span>
+      </div>
+    </aside>
+  );
+}
+
+function App() {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const resultFileInputRef = useRef<HTMLInputElement>(null);
+  const autoLoadAttemptedRef = useRef(false);
+  const [viewMode, setViewMode] = useState<ViewMode>("Mask");
+  const [runState, setRunState] = useState<RunState>("complete");
+  const [progress, setProgress] = useState(100);
+  const [activeModule, setActiveModule] = useState<ModuleId>("分割");
+  const [selectedSlice, setSelectedSlice] = useState(151);
+  const [footerSliceStart, setFooterSliceStart] = useState(1);
+  const [voxelCoord, setVoxelCoord] = useState<VoxelCoord>({ x: 256, y: 256, z: 150 });
+  const [selectedCase, setSelectedCase] = useState(cases[0]);
+  const [customCases, setCustomCases] = useState<CaseItem[]>([]);
+  const [showCaseMenu, setShowCaseMenu] = useState(false);
+  const [showReport, setShowReport] = useState(false);
+  const [pendingRemoval, setPendingRemoval] = useState<RemovalTarget | null>(null);
+  const [selectedOrganId, setSelectedOrganId] = useState("liver");
+  const [zoom, setZoom] = useState(1);
+  const [windowLevel, setWindowLevel] = useState(40);
+  const [windowWidth, setWindowWidth] = useState(360);
+  const [maskOpacity, setMaskOpacity] = useState(58);
+  const [comparePosition, setComparePosition] = useState(52);
+  const [isDraggingSplit, setIsDraggingSplit] = useState(false);
+  const splitDragActiveRef = useRef(false);
+  const [compareMode, setCompareMode] = useState<CompareMode>("split");
+  const [measureMode, setMeasureMode] = useState(false);
+  const [heatmapVisible, setHeatmapVisible] = useState(true);
+  const [loadedImage, setLoadedImage] = useState<LoadedImage>({
+    src: cases[0].demoImage,
+    name: cases[0].imageName,
+    kind: "Demo",
+    meta: cases[0].imageMeta
+  });
+  const [resultImage, setResultImage] = useState<LoadedImage | null>(null);
+  const [organs, setOrgans] = useState<Organ[]>(cases[0].organs);
+  const [modelLabels, setModelLabels] = useState(defaultOrganLabels);
+  const [measurements, setMeasurements] = useState<Measurement[]>([
+    { id: 1, label: "M1", x: 51.8, y: 52.4, hu: 48, diameter: "18.6 mm", slice: 151 }
+  ]);
+  const [logs, setLogs] = useState(baseLogs);
+  const [toast, setToast] = useState("演示病例已加载");
+  const [inferenceStatus, setInferenceStatus] = useState<InferenceStatus>({ status: "idle" });
+  const [validationSummary, setValidationSummary] = useState<ValidationSummary | null>(null);
+  const [sampleLoadState, setSampleLoadState] = useState<{ status: "idle" | "loading" | "ready" | "failed"; message: string }>({ status: "idle", message: "等待载入本地 AMOS 样例" });
+  const [selectedOrganDetail, setSelectedOrganDetail] = useState<{ id: string; label?: number; coord: VoxelCoord } | null>(null);
+  const [dragTarget, setDragTarget] = useState<UploadRole | null>(null);
+  const [lastImport, setLastImport] = useState("等待导入本地影像或分割结果图");
+  const [selectedModelId, setSelectedModelId] = useState("abdomen");
+  const [confidenceThreshold, setConfidenceThreshold] = useState(72);
+  const [postprocessConfig, setPostprocessConfig] = useState({
+    removeIslands: true,
+    smoothBoundary: true,
+    fillHoles: true
+  });
+  const [reportState, setReportState] = useState<ReportState>({
+    draftSaved: false,
+    reviewQueued: false,
+    exportCount: 0,
+    lastExport: "尚未导出"
+  });
+
+  const compareModeLabel: Record<CompareMode, string> = {
+    split: "滑动分屏",
+    overlay: "透明叠加",
+    side: "左右并排",
+    difference: "差异增强"
+  };
+  const allCases = useMemo(() => [...cases, ...customCases], [customCases]);
+  const currentTotalSlices = loadedImage.volume?.slices ?? resultImage?.volume?.slices ?? selectedCase.slices;
+  const currentSliceIndex = clampSliceIndex(selectedSlice - 1, currentTotalSlices);
+  const selectedOrgan = organs.find((organ) => organ.id === selectedOrganId) ?? organs[0];
+  const selectedModel = modelOptions.find((model) => model.id === selectedModelId) ?? modelOptions[0];
+  const visibleOrgans = useMemo(() => new Set(organs.filter((organ) => organ.visible).map((organ) => organ.id)), [organs]);
+  const labelLookup = useMemo(() => buildLabelLookup(modelLabels), [modelLabels]);
+  const visibleLabels = useMemo(() => new Set(modelLabels.filter((label) => visibleOrgans.has(label.id) || !organs.some((organ) => organ.id === label.id)).map((label) => label.label)), [modelLabels, organs, visibleOrgans]);
+  const acceptedCount = organs.filter((organ) => organ.quality === "accepted").length;
+  const reviewCount = organs.length - acceptedCount;
+  const averageDice = organs.length ? (organs.reduce((sum, organ) => sum + organ.score / 100, 0) / organs.length).toFixed(3) : "0.000";
+  const displayedAverageDice = validationSummary?.mean_dice != null ? formatDiceMetric(validationSummary.mean_dice) : averageDice;
+  const validationStatusCopy = getValidationStatusCopy(validationSummary);
+  const validationMessage = validationSummary?.message ?? "载入本地 AMOS 样例并运行分割后，将自动用标准答案计算 Dice。";
+  const inferenceDurationCopy = inferenceStatus.status === "succeeded" ? formatSeconds(inferenceStatus.duration_seconds) : "待记录";
+  const inferenceResultSizeCopy = inferenceStatus.status === "succeeded" ? formatBytes(inferenceStatus.result_size_bytes) : "待生成";
+  const hasLocalSource = loadedImage.kind !== "Demo";
+  const hasImportedFiles = hasLocalSource || Boolean(resultImage);
+  const customCasePanelCopy = useMemo(
+    () => getCustomCasePanelCopy(customCases.length, hasLocalSource, Boolean(selectedCase.custom)),
+    [customCases.length, hasLocalSource, selectedCase.custom]
+  );
+  const imageContrast = Math.max(0.82, Math.min(1.34, 1.08 + (360 - windowWidth) / 1800 + Math.abs(windowLevel - 40) / 2200));
+  const imageBrightness = Math.max(0.7, Math.min(1.16, 0.92 + (windowLevel - 40) / 1800));
+
+  const loadedDisplaySrc = useMemo(
+    () => loadedImage.volume ? renderNiftiSliceToDataUrl(loadedImage.volume, currentSliceIndex, "intensity") : loadedImage.src,
+    [currentSliceIndex, loadedImage]
+  );
+  const resultDisplaySrc = useMemo(
+    () => resultImage?.volume ? renderNiftiSliceToDataUrl(resultImage.volume, currentSliceIndex, "mask") : resultImage?.src,
+    [currentSliceIndex, resultImage]
+  );
+  const displayAspectRatio = useMemo(() => getDisplayAspectRatio(loadedImage), [loadedImage]);
+  const registrationStatus = useMemo(() => getRegistrationStatus(loadedImage, resultImage), [loadedImage, resultImage]);
+  const volumeRegistration = registrationStatus.label;
+  const alignmentCaption = useMemo(
+    () => getAlignmentCaptionCopy(loadedImage, resultImage, registrationStatus),
+    [loadedImage, registrationStatus, resultImage]
+  );
+  const footerSlicePreviews = useMemo(() => {
+    const count = Math.min(FOOTER_SLICE_COUNT, currentTotalSlices);
+    const start = getStableSliceWindowStart(footerSliceStart, selectedSlice, currentTotalSlices, FOOTER_SLICE_COUNT);
+    return Array.from({ length: count }, (_, index) => {
+      const slice = start + index;
+      return {
+        slice,
+        src: loadedImage.volume ? renderNiftiSliceToDataUrl(loadedImage.volume, slice - 1, "intensity") : loadedDisplaySrc
+      };
+    });
+  }, [currentTotalSlices, footerSliceStart, loadedDisplaySrc, loadedImage, selectedSlice]);
+
+  const readinessChecks = [
+    { label: "原图", value: loadedImage.kind === "Demo" ? "演示图" : "本地文件", ready: true },
+    { label: "结果图", value: resultImage ? "已导入" : "内置掩膜", ready: true },
+    {
+      label: "尺寸校验",
+      value: resultImage ? registrationStatus.label : "等待结果图",
+      ready: registrationStatus.ready
+    },
+    {
+      label: "NIfTI 同步",
+      value: loadedImage.volume && resultImage?.volume ? `切片 ${selectedSlice}` : loadedImage.volume ? "等待掩膜体数据" : "二维图像模式",
+      ready: Boolean(loadedImage.volume && resultImage?.volume) || !loadedImage.volume
+    },
+    {
+      label: "体数据配准",
+      value: volumeRegistration,
+      ready: registrationStatus.ready
+    },
+    { label: "对比模式", value: compareModeLabel[compareMode], ready: true }
+  ];
+
+  const comparisonStats = [
+    { label: "对比模式", value: compareModeLabel[compareMode] },
+    { label: "原图来源", value: loadedImage.kind },
+    { label: "结果来源", value: resultImage ? resultImage.kind : "模拟掩膜" },
+    { label: "原图尺寸", value: loadedImage.dimensions ?? "演示切片" },
+    { label: "结果尺寸", value: resultImage?.dimensions ?? "随原图生成" },
+    { label: "体数据配准", value: volumeRegistration },
+    { label: "同步切片", value: `${selectedSlice}/${currentTotalSlices}` },
+    { label: "叠加透明度", value: `${maskOpacity}%` }
+  ];
+
+  const aiFindings = [
+    `${selectedOrgan.name} 边界置信度 ${selectedOrgan.score}%`,
+    `当前切片 ${selectedSlice} 已显示 ${visibleOrgans.size} 个器官`,
+    reviewCount > 0 ? `${reviewCount} 个器官建议人工复核` : "所有器官已通过质控",
+    measurements.length > 0 ? `已记录 ${measurements.length} 个测量点` : "尚未添加测量点"
+  ];
+
+  useEffect(() => {
+    if (!loadedImage.volume) return;
+    setVoxelCoord((coord) => ({
+      x: Math.max(0, Math.min(loadedImage.volume!.columns - 1, coord.x)),
+      y: Math.max(0, Math.min(loadedImage.volume!.rows - 1, coord.y)),
+      z: Math.max(0, Math.min(loadedImage.volume!.slices - 1, selectedSlice - 1))
+    }));
+  }, [loadedImage.volume, selectedSlice]);
+
+  useEffect(() => {
+    setSelectedSlice((slice) => Math.max(1, Math.min(slice, currentTotalSlices)));
+  }, [currentTotalSlices]);
+
+  useEffect(() => {
+    setFooterSliceStart((start) => getStableSliceWindowStart(start, selectedSlice, currentTotalSlices, FOOTER_SLICE_COUNT));
+  }, [currentTotalSlices, selectedSlice]);
+
+  useEffect(() => {
+    setSelectedSlice((slice) => loadedImage.volume ? Math.max(1, Math.min(currentTotalSlices, voxelCoord.z + 1)) : slice);
+  }, [voxelCoord.z, loadedImage.volume, currentTotalSlices]);
+
+  useEffect(() => {
+    setToast(getInferenceStatusCopy(inferenceStatus));
+  }, [inferenceStatus]);
+
+  useEffect(() => {
+    void fetchModelLabels("http://127.0.0.1:8000")
+      .then((labels) => {
+        if (labels.length) setModelLabels(labels);
+      })
+      .catch(() => {
+        setModelLabels(defaultOrganLabels);
+      });
+  }, []);
+
+  useEffect(() => {
+    if (autoLoadAttemptedRef.current || loadedImage.volume) return;
+    autoLoadAttemptedRef.current = true;
+    void loadLocalAmosSample();
+  }, [loadedImage.volume]);
+
+  function updateSplitPositionFromPointer(event: PointerEvent<HTMLDivElement>) {
+    if (compareMode !== "split" || measureMode) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    setComparePosition(getSplitPositionFromClientX(event.clientX, rect.left, rect.width));
+  }
+
+  function handleSplitPointerDown(event: PointerEvent<HTMLDivElement>) {
+    if (compareMode !== "split" || measureMode) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    splitDragActiveRef.current = true;
+    setIsDraggingSplit(true);
+    updateSplitPositionFromPointer(event);
+  }
+
+  function handleSplitPointerMove(event: PointerEvent<HTMLDivElement>) {
+    if (!splitDragActiveRef.current || compareMode !== "split" || measureMode) return;
+    event.preventDefault();
+    event.stopPropagation();
+    updateSplitPositionFromPointer(event);
+  }
+
+  function handleSplitPointerEnd(event: PointerEvent<HTMLDivElement>) {
+    if (!splitDragActiveRef.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    splitDragActiveRef.current = false;
+    setIsDraggingSplit(false);
+  }
+  async function startSegmentation(sourceOverride?: LoadedImage) {
+    let sourceImage = sourceOverride ?? loadedImage;
+    if (!sourceImage.volume || !sourceImage.file) {
+      const loaded = await loadLocalAmosSample();
+      if (!loaded) {
+        setInferenceStatus({ status: "failed", message: "请先导入 .nii/.nii.gz 原图，或确认本地 AMOS 样例服务已启动" });
+        return;
+      }
+      sourceImage = loaded;
+    }
+
+    setRunState("running");
+    setProgress(0);
+    setViewMode("Mask");
+    setCompareMode("overlay");
+    setValidationSummary(null);
+    setInferenceStatus({ status: "submitting" });
+    setLogs([`提交本地 nnUNetv2 任务：${selectedModel.name}`, `质控提示阈值 ${confidenceThreshold}% · 后处理 ${Object.values(postprocessConfig).filter(Boolean).length}/3`, ...baseLogs]);
+
+    try {
+      const endpoint = "http://127.0.0.1:8000";
+      const job = await createInferenceJob(endpoint, sourceImage.file!, {
+        modelId: selectedModelId,
+        confidenceThreshold,
+        postprocess: postprocessConfig
+      });
+      setInferenceStatus({ status: "running", jobId: job.job_id, progress: 1, stage: job.mode === "debug-label-fallback" ? "使用本地标签调试回退" : "后端真实推理已启动" });
+
+      let durationSeconds: number | undefined;
+      let resultSizeBytes: number | undefined;
+      await new Promise<void>((resolve, reject) => {
+        const events = new EventSource(`${endpoint}/api/segment/jobs/${job.job_id}/events`);
+        events.onmessage = (event) => {
+          try {
+            const parsed = parseInferenceEvent(`data: ${event.data}`);
+            if (parsed.type === "error") {
+              events.close();
+              reject(new Error(parsed.log_tail ? `${parsed.message}\n${parsed.log_tail}` : parsed.message));
+              return;
+            }
+            setProgress(parsed.progress);
+            setInferenceStatus({ status: "running", jobId: job.job_id, progress: parsed.progress, stage: parsed.stage });
+            setLogs((items) => [`${parsed.stage} · ${parsed.progress}%`, ...items].slice(0, 8));
+            if (parsed.type === "complete") {
+              const validation = parsed.validation;
+              if (validation) {
+                setValidationSummary(validation);
+                setLogs((items) => [`标准答案验证：${formatDiceMetric(validation.mean_dice)} · ${validation.message ?? "已生成验证摘要"}`, ...items].slice(0, 8));
+              }
+              durationSeconds = parsed.duration_seconds;
+              resultSizeBytes = parsed.result_size_bytes;
+              events.close();
+              resolve();
+            }
+          } catch (error) {
+            events.close();
+            reject(error);
+          }
+        };
+        events.onerror = () => {
+          events.close();
+          reject(new Error("无法连接本地推理服务，请确认 server 已在 127.0.0.1:8000 启动"));
+        };
+      });
+
+      const resultBuffer = await downloadInferenceResult(endpoint, job.job_id);
+      const resultVol = parseNiftiVolume(resultBuffer);
+      const sliceIndex = Math.min(resultVol.slices - 1, voxelCoord.z);
+      setResultImage({
+        src: renderNiftiSliceToDataUrl(resultVol, sliceIndex, "mask"),
+        name: `${sourceImage.name.replace(/\.nii(\.gz)?$/i, "")}_seg.nii.gz`,
+        kind: "NIfTI",
+        meta: getInferenceResultMeta(job.mode, `${resultVol.columns}x${resultVol.rows}x${resultVol.slices}`),
+        dimensions: `${resultVol.columns}x${resultVol.rows}x${resultVol.slices}`,
+        sizeText: `${(resultBuffer.byteLength / 1024 / 1024).toFixed(2)} MB`,
+        format: "NII.GZ",
+        volume: resultVol,
+        sliceIndex
+      });
+      setProgress(100);
+      setRunState("complete");
+      setInferenceStatus({ status: "succeeded", jobId: job.job_id, mode: job.mode, duration_seconds: durationSeconds, result_size_bytes: resultSizeBytes });
+      setLastImport(`${job.mode === "debug-label-fallback" ? "调试结果" : "真实推理结果"}就绪：${job.job_id}`);
+      setLogs((items) => [`分割结果已加载到三正交视图 · ${formatSeconds(durationSeconds)} · ${formatBytes(resultSizeBytes)}`, ...items].slice(0, 8));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "推理失败";
+      setRunState("idle");
+      setProgress(0);
+      setInferenceStatus({ status: "failed", message });
+      setLogs((items) => [`推理失败：${message}`, ...items].slice(0, 8));
+    }
+  }
+
+  function resetView() {
+    setZoom(1);
+    setWindowLevel(40);
+    setWindowWidth(360);
+    setSelectedSlice(Math.min(currentTotalSlices, loadedImage.volume ? Math.floor(currentTotalSlices / 2) + 1 : selectedCase.id.includes("LUNG") ? 188 : 151));
+    setToast("视图已重置");
+  }
+
+  function applyWindowPreset(preset: typeof windowPresets[number]) {
+    setWindowLevel(preset.level);
+    setWindowWidth(preset.width);
+    setLogs((items) => [`窗宽窗位切换：${preset.label} · WL ${preset.level} / WW ${preset.width}`, ...items].slice(0, 8));
+  }
+
+  function selectCase(nextCase: CaseItem) {
+    setSelectedCase(nextCase);
+    setShowCaseMenu(false);
+    const nextSource = nextCase.sourceImage ?? { src: nextCase.demoImage, name: nextCase.imageName, kind: "Demo" as const, meta: nextCase.imageMeta };
+    const nextResult = nextCase.resultImage ?? null;
+    const nextSlice = nextSource.sliceIndex ?? Math.floor((nextSource.volume?.slices ?? nextCase.slices) / 2);
+    setSelectedSlice(nextCase.custom ? nextSlice + 1 : nextCase.id.includes("LUNG") ? 188 : 151);
+    setViewMode(nextCase.custom ? "CT" : nextCase.id.includes("LUNG") ? "CT" : "Mask");
+    setLoadedImage(nextSource);
+    setResultImage(nextResult);
+    setValidationSummary(null);
+    setOrgans(nextCase.organs);
+    setSelectedOrganId(nextCase.organs[0].id);
+    setMeasurements([{ id: 1, label: "M1", x: 51.8, y: 52.4, hu: 48, diameter: "18.6 mm", slice: nextCase.id.includes("LUNG") ? 188 : 151 }]);
+    setLogs((items) => [`病例切换：${nextCase.id} · ${nextCase.target}`, ...items].slice(0, 8));
+    setLastImport(`演示病例就绪：${nextCase.id}`);
+  }
+
+  function createCustomCaseFromCurrent() {
+    if (!hasLocalSource) {
+      setToast("请先上传原图，再新建自定义病例");
+      return;
+    }
+    const id = buildCustomCaseId(allCases.map((caseItem) => caseItem.id));
+    const slices = loadedImage.volume?.slices ?? resultImage?.volume?.slices ?? selectedCase.slices;
+    const nextCase: CaseItem = {
+      id,
+      sex: "自定义",
+      age: 0,
+      phase: loadedImage.format ?? loadedImage.kind,
+      slices,
+      target: resultImage ? "自定义原图与结果图" : "自定义原图",
+      demoImage: loadedImage.src,
+      imageName: loadedImage.name,
+      imageMeta: loadedImage.meta,
+      organs: organs.map((organ) => ({ ...organ })),
+      custom: true,
+      sourceImage: loadedImage,
+      resultImage
+    };
+    setCustomCases((items) => [...items, nextCase]);
+    selectCase(nextCase);
+    setToast(`已新建自定义病例 ${id}`);
+  }
+
+  function customCasesUseSrc(src?: string) {
+    return Boolean(src && customCases.some((caseItem) => caseItem.sourceImage?.src === src || caseItem.resultImage?.src === src));
+  }
+
+  function revokeCaseAssets(caseItem: CaseItem) {
+    revokeObjectUrl(caseItem.sourceImage?.src);
+    revokeObjectUrl(caseItem.resultImage?.src);
+  }
+
+  function deleteCustomCase(caseId: string) {
+    const deletedCase = customCases.find((caseItem) => caseItem.id === caseId);
+    if (!deletedCase) return;
+    setCustomCases((items) => items.filter((caseItem) => caseItem.id !== caseId));
+    if (selectedCase.id === caseId) selectCase(cases[0]);
+    revokeCaseAssets(deletedCase);
+    setToast(`已删除自定义病例 ${caseId}`);
+  }
+
+  function resetSourceImage() {
+    if (!customCasesUseSrc(loadedImage.src)) revokeObjectUrl(loadedImage.src);
+    if (!customCasesUseSrc(resultImage?.src)) revokeObjectUrl(resultImage?.src);
+    const fallbackSource = selectedCase.sourceImage ?? { src: selectedCase.demoImage, name: selectedCase.imageName, kind: "Demo" as const, meta: selectedCase.imageMeta };
+    setLoadedImage(fallbackSource);
+    setResultImage(null);
+    setLastImport(`本地文件已移除，恢复演示病例：${selectedCase.id}`);
+    setToast("本地上传文件已从当前演示中移除");
+  }
+
+  function clearResultImage() {
+    if (!customCasesUseSrc(resultImage?.src)) revokeObjectUrl(resultImage?.src);
+    setResultImage(null);
+    setLastImport("结果图已清除，当前使用内置掩膜预览");
+    setToast("结果图已移除");
+  }
+
+  function requestRemoval(target: RemovalTarget) {
+    if (target === "source" && !hasLocalSource) return;
+    if (target === "result" && !resultImage) return;
+    if (target === "session" && !hasImportedFiles) {
+      setToast("当前没有需要清空的本地导入文件");
+      return;
+    }
+    setPendingRemoval(target);
+  }
+
+  function confirmRemoval() {
+    if (pendingRemoval === "result") clearResultImage();
+    if (pendingRemoval === "source" || pendingRemoval === "session") resetSourceImage();
+    setPendingRemoval(null);
+  }
+
+  async function loadVisualizationFile(file: File): Promise<LoadedImage> {
+    const lowerName = file.name.toLowerCase();
+    const sizeText = `${(file.size / 1024 / 1024).toFixed(2)} MB`;
+    if (lowerName.endsWith(".nii") || lowerName.endsWith(".nii.gz")) {
+      const volume = parseNiftiVolume(await file.arrayBuffer());
+      const sliceIndex = Math.floor(volume.slices / 2);
+      const dimensions = `${volume.columns}x${volume.rows}x${volume.slices}`;
+      return {
+        src: renderNiftiSliceToDataUrl(volume, sliceIndex),
+        name: file.name,
+        kind: "NIfTI",
+        meta: `${dimensions} 路 ${volume.datatype} 路 ${volume.spacing}`,
+        dimensions,
+        sizeText,
+        format: lowerName.endsWith(".nii.gz") ? "NII.GZ" : "NII",
+        volume,
+        sliceIndex,
+        file
+      };
+    }
+    if (file.type.startsWith("image/") || /\.(png|jpg|jpeg|webp)$/i.test(lowerName)) {
+      const src = URL.createObjectURL(file);
+      const dimensions = await getImageDimensions(src).catch(() => undefined);
+      return {
+        src,
+        name: file.name,
+        kind: "Image",
+        meta: `${sizeText} · ${dimensions ?? "浏览器预览"}`,
+        dimensions,
+        sizeText,
+        format: getReadableFileType(file, "IMAGE"),
+        file
+      };
+    }
+    throw new Error("暂不支持该格式。请上传 PNG/JPG/WebP 或 NIfTI(.nii/.nii.gz) 文件。");
+  }
+
+  async function processVisualizationFile(file: File, role: UploadRole) {
+    const image = await loadVisualizationFile(file);
+    if (role === "source") {
+      setLoadedImage(image);
+      setValidationSummary(null);
+      if (image.volume) setSelectedSlice((image.sliceIndex ?? Math.floor(image.volume.slices / 2)) + 1);
+      if (image.volume) setVoxelCoord({ x: Math.floor(image.volume.columns / 2), y: Math.floor(image.volume.rows / 2), z: image.sliceIndex ?? Math.floor(image.volume.slices / 2) });
+      setLogs((items) => [`原图已载入：${file.name}`, ...items].slice(0, 8));
+      setToast("原图已载入，可继续上传结果图对比");
+      setLastImport(`原图就绪：${file.name}`);
+      return;
+    }
+    setResultImage(image);
+    setValidationSummary(null);
+    if (!loadedImage.volume && image.volume) setSelectedSlice((image.sliceIndex ?? Math.floor(image.volume.slices / 2)) + 1);
+    setViewMode("CT");
+    setCompareMode("split");
+    const mismatch = loadedImage.volume && image.volume
+      ? !volumesShareDisplayGrid(loadedImage.volume, image.volume)
+      : Boolean(image.dimensions && loadedImage.dimensions && image.dimensions !== loadedImage.dimensions);
+    setLogs((items) => [`结果图已载入：${file.name}`, ...items].slice(0, 8));
+    setToast(mismatch ? "结果图已载入，但尺寸与原图不一致，建议复核配准" : "结果图已载入，正在进行同步对比");
+    setLastImport(mismatch ? `结果图需复核：${file.name}` : `结果图就绪：${file.name}`);
+  }
+
+  async function loadLocalAmosSample(): Promise<LoadedImage | null> {
+    try {
+      setSampleLoadState({ status: "loading", message: "正在从本地后端读取 AMOS CT 样例..." });
+      setToast("正在载入本地 AMOS 样例原图");
+      const response = await fetch("http://127.0.0.1:8000/api/samples/amos_0117/original");
+      if (!response.ok) throw new Error("无法从本地后端读取 AMOS 样例，请确认 server 已启动");
+      const buffer = await response.arrayBuffer();
+      const file = new File([buffer], "amos_0117_original.nii.gz", { type: "application/octet-stream" });
+      const image = await loadVisualizationFile(file);
+      setLoadedImage(image);
+      setValidationSummary(null);
+      if (image.volume) {
+        setSelectedSlice((image.sliceIndex ?? Math.floor(image.volume.slices / 2)) + 1);
+        setVoxelCoord({ x: Math.floor(image.volume.columns / 2), y: Math.floor(image.volume.rows / 2), z: image.sliceIndex ?? Math.floor(image.volume.slices / 2) });
+      }
+      setLogs((items) => [`本地 AMOS 样例已载入：${file.name}`, ...items].slice(0, 8));
+      setToast("本地 AMOS 样例已载入");
+      setSampleLoadState({ status: "ready", message: `已载入 ${file.name}` });
+      setLastImport(`原图就绪：${file.name}`);
+      setActiveModule("分割");
+      return image;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "本地样例载入失败";
+      setToast(message);
+      setSampleLoadState({ status: "failed", message });
+      return null;
+    }
+  }
+
+  async function handleFileSelected(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      await processVisualizationFile(file, "source");
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "文件解析失败");
+    } finally {
+      event.target.value = "";
+    }
+  }
+
+  async function handleResultFileSelected(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      await processVisualizationFile(file, "result");
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "结果图解析失败");
+    } finally {
+      event.target.value = "";
+    }
+  }
+
+  function handleDrag(event: DragEvent<HTMLElement>, role: UploadRole | null) {
+    event.preventDefault();
+    setDragTarget(role);
+  }
+
+  async function handleDrop(event: DragEvent<HTMLElement>, role: UploadRole) {
+    event.preventDefault();
+    setDragTarget(null);
+    const file = event.dataTransfer.files?.[0];
+    if (!file) return;
+    try {
+      await processVisualizationFile(file, role);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "鏂囦欢瑙ｆ瀽澶辫触");
+    }
+  }
+
+  function handleCanvasClick() {
+    if (!measureMode) return;
+    const nextId = measurements.length + 1;
+    const x = 38 + (nextId * 9) % 28;
+    const y = 43 + (nextId * 7) % 22;
+    setMeasurements((items) => [...items, { id: nextId, label: `M${nextId}`, x, y, hu: windowLevel + nextId * 12, diameter: `${(9 + nextId * 2.4).toFixed(1)} mm`, slice: selectedSlice }].slice(-6));
+    setLogs((items) => [`新增测量标记：切片 ${selectedSlice}`, ...items].slice(0, 8));
+  }
+
+  function toggleOrgan(id: string) {
+    setSelectedOrganId(id);
+    setSelectedOrganDetail({ id, coord: voxelCoord });
+    setOrgans((items) => items.map((organ) => organ.id === id ? { ...organ, visible: !organ.visible } : organ));
+  }
+
+  function setOrganQuality(id: string, quality: QualityState) {
+    setSelectedOrganId(id);
+    setOrgans((items) => items.map((organ) => organ.id === id ? { ...organ, quality } : organ));
+  }
+
+  function switchModule(moduleId: ModuleId) {
+    setActiveModule(moduleId);
+    setToast(`已切换到${moduleId}模块`);
+  }
+
+  function saveReportDraft() {
+    setReportState((state) => ({ ...state, draftSaved: true }));
+    setToast("报告草稿已保存");
+  }
+
+  function queueReportReview() {
+    setReportState((state) => ({ ...state, reviewQueued: true }));
+    setToast("已加入复核清单");
+  }
+
+  function handleExport() {
+    setReportState((state) => ({ ...state, exportCount: state.exportCount + 1, lastExport: new Date().toLocaleTimeString() }));
+    setToast("演示报告摘要已生成");
+  }
+
+  return (
+    <main className="app-shell">
+      <nav className="rail">
+        <div className="brand"><BrainCircuit size={25} /></div>
+        {moduleItems.map((item) => {
+          const Icon = item.icon;
+          return (
+            <button
+              key={item.id}
+              className={activeModule === item.id ? "active" : ""}
+              data-hint={item.hint}
+              title={`${item.id} 路 ${item.hint}`}
+              aria-current={activeModule === item.id ? "page" : undefined}
+              onClick={() => switchModule(item.id)}
+            >
+              <Icon size={22} />
+              <span>{item.id}</span>
+            </button>
+          );
+        })}
+        <div className="rail-status" title="本地演示服务运行中">
+          <i />
+          <span>本地</span>
+        </div>
+      </nav>
+
+      <section className="main-stage">
+        <input ref={fileInputRef} type="file" hidden accept=".nii,.nii.gz,.png,.jpg,.jpeg,.webp,image/*" onChange={handleFileSelected} />
+        <input ref={resultFileInputRef} type="file" hidden accept=".nii,.nii.gz,.png,.jpg,.jpeg,.webp,image/*" onChange={handleResultFileSelected} />
+
+        <header className="topbar">
+          <div>
+            <h1>智能 CT 器官分割工作站</h1>
+            <p>原图与分割结果图对比可视化</p>
+          </div>
+          <div className="case-wrap">
+            <button className="case-selector" onClick={() => setShowCaseMenu((value) => !value)}>
+              <Stethoscope size={18} />
+              <span>{selectedCase.id}</span>
+              <ChevronDown size={16} />
+            </button>
+            {showCaseMenu ? (
+              <div className="case-menu">
+                {allCases.map((caseItem) => (
+                  <div key={caseItem.id} className={caseItem.custom ? "case-row custom-case-row" : "case-row"}>
+                    <button className={selectedCase.id === caseItem.id ? "case-option active" : "case-option"} onClick={() => selectCase(caseItem)}>
+                      <strong>{caseItem.id}</strong>
+                      <span>{caseItem.sex} · {caseItem.age || "-"} 岁 · {caseItem.phase}</span>
+                      <small>{caseItem.target} · {caseItem.slices} 层</small>
+                    </button>
+                    {caseItem.custom ? (
+                      <button className="case-delete" title="删除自定义病例" aria-label={`删除 ${caseItem.id}`} onClick={() => deleteCustomCase(caseItem.id)}>
+                        <Trash2 size={15} />
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+                <button className="case-create" onClick={createCustomCaseFromCurrent} disabled={!hasLocalSource}>
+                  <Plus size={15} />
+                  <span>从当前上传新建病例</span>
+                </button>
+              </div>
+            ) : null}
+          </div>
+          <div className="top-actions">
+            <button className="ghost-button" onClick={() => fileInputRef.current?.click()}><Upload size={17} />上传原图</button>
+            <button className="ghost-button" onClick={() => resultFileInputRef.current?.click()}><Upload size={17} />上传结果图</button>
+            <button className="ghost-button" onClick={() => void loadLocalAmosSample()}><Database size={17} />载入 AMOS 样例</button>
+            <button className="primary-button" onClick={() => void startSegmentation()} disabled={runState === "running"}>
+              {runState === "running" ? <Pause size={17} /> : <Play size={17} />}
+              {runState === "running" ? "推理中" : "运行分割"}
+            </button>
+            <button className="ghost-button" onClick={handleExport}><Download size={17} />导出报告</button>
+          </div>
+        </header>
+
+        <section className="content-grid">
+          <section className="study-column">
+            <div className="viewer-toolbar">
+              <div className="tool-group">
+                <button title="窗宽窗位" onClick={() => setWindowLevel((value) => value === 40 ? 80 : 40)}><SlidersHorizontal size={18} /></button>
+                <button title="缩放" onClick={() => setZoom((value) => value >= 1.18 ? 1 : value + 0.09)}><ZoomIn size={18} /></button>
+                <button title="重置视图" onClick={resetView}><RotateCcw size={18} /></button>
+                <button className={measureMode ? "active-tool" : ""} title="测量标记" onClick={() => setMeasureMode((value) => !value)}><MousePointer2 size={18} /></button>
+                <button className={heatmapVisible ? "active-tool" : ""} title="AI 热区提示" onClick={() => setHeatmapVisible((value) => !value)}><Target size={18} /></button>
+                <button className={compareMode === "split" ? "active-tool" : ""} title="前后对比" onClick={() => setCompareMode("split")}><Columns2 size={18} /></button>
+              </div>
+              <div className="scan-status">
+                <CircleDot size={12} />
+                切片 {selectedSlice}/{currentTotalSlices} · WL {windowLevel}/WW {windowWidth} · {zoom.toFixed(2)}x
+              </div>
+              <div className="preset-strip" aria-label="窗宽窗位预设">
+                {windowPresets.map((preset) => (
+                  <button key={preset.id} onClick={() => applyWindowPreset(preset)}>{preset.label}</button>
+                ))}
+              </div>
+              <label className="range-control slice-range">
+                切片
+                <input type="range" min="1" max={currentTotalSlices} value={selectedSlice} onChange={(event) => setSelectedSlice(Number(event.target.value))} />
+                <span>{selectedSlice}/{currentTotalSlices}</span>
+              </label>
+              <label className="range-control">
+                透明度
+                <input type="range" min="20" max="85" value={maskOpacity} onChange={(event) => setMaskOpacity(Number(event.target.value))} />
+                <span>{maskOpacity}%</span>
+              </label>
+              {compareMode === "split" ? (
+                <label className="range-control compare-range">
+                  分屏
+                  <input type="range" min="25" max="75" value={comparePosition} onChange={(event) => setComparePosition(Number(event.target.value))} />
+                  <span>{comparePosition}%</span>
+                </label>
+              ) : null}
+              <div className="tool-group">
+                {(["split", "overlay", "side", "difference"] as CompareMode[]).map((mode) => (
+                  <button key={mode} className={compareMode === mode ? "active-tool" : ""} onClick={() => setCompareMode(mode)}>
+                    {mode === "split" ? "分屏" : mode === "overlay" ? "叠加" : mode === "side" ? "并排" : "差异"}
+                  </button>
+                ))}
+              </div>
+              <div className="tool-help-strip" aria-label="工具栏说明">
+                {toolbarHints.map((item) => (
+                  <span key={item.label}>
+                    <strong>{item.label}</strong>
+                    <small>{item.detail}</small>
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div
+              className={`viewer-frame mode-${viewMode.toLowerCase()} compare-${compareMode}`}
+              style={{
+                "--mask-opacity": maskOpacity / 100,
+                "--compare-position": `${comparePosition}%`,
+                "--image-contrast": imageContrast,
+                "--image-brightness": imageBrightness,
+                "--display-aspect-ratio": displayAspectRatio
+              } as CSSProperties}
+            >
+              <div className="ruler horizontal" />
+              <div className="ruler vertical" />
+              <div className={measureMode ? "ct-canvas measure-mode" : "ct-canvas"} style={{ "--zoom": zoom } as CSSProperties} onClick={handleCanvasClick}>
+                {viewMode === "3D" ? (
+                  <div className="volume-preview">
+                    {organs.filter((organ) => organ.visible).map((organ, index) => (
+                      <span className={`volume-lobe volume-${organ.id}`} key={organ.id} style={{ "--organ-color": organ.color, "--i": index } as CSSProperties} />
+                    ))}
+                  </div>
+                ) : loadedImage.volume ? (
+                  <div className="orthogonal-shell">
+                    <OrthogonalViewer
+                      sourceVolume={loadedImage.volume}
+                      maskVolume={resultImage?.volume}
+                      coord={voxelCoord}
+                      opacity={maskOpacity}
+                      compareMode={compareMode}
+                      visibleLabels={visibleLabels}
+                      labels={modelLabels}
+                      sourceName={loadedImage.name}
+                      resultName={resultImage?.name}
+                      onCoordChange={setVoxelCoord}
+                      onOrganPick={(label, coord) => {
+                        const organLabel = labelLookup.byLabel.get(label);
+                        if (!organLabel) return;
+                        setSelectedOrganId(organLabel.id);
+                        setSelectedOrganDetail({ id: organLabel.id, label, coord });
+                      }}
+                    />
+                    {selectedOrganDetail ? (
+                      <OrganDetailCard
+                        organId={selectedOrganDetail.id}
+                        label={selectedOrganDetail.label}
+                        coord={selectedOrganDetail.coord}
+                        onClose={() => setSelectedOrganDetail(null)}
+                      />
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="sample-load-panel">
+                    <Database size={34} />
+                    <strong>{sampleLoadState.status === "loading" ? "正在载入本地 AMOS 样例" : sampleLoadState.status === "failed" ? "本地样例载入失败" : "等待载入胸腹部 CT 原图"}</strong>
+                    <span>{sampleLoadState.message} · 当前文件：{loadedImage.name} · 类型：{loadedImage.kind} · 未检测到 NIfTI 体数据</span>
+                    <div>
+                      <button onClick={() => void loadLocalAmosSample()} disabled={sampleLoadState.status === "loading"}>
+                        <Database size={16} />{sampleLoadState.status === "loading" ? "载入中" : "载入本地 AMOS 样例"}
+                      </button>
+                      <button onClick={() => fileInputRef.current?.click()}>
+                        <Upload size={16} />手动上传 NIfTI
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <div className="crosshair x" />
+                <div className="crosshair y" />
+              </div>
+              <div className={`viewer-caption registration-${registrationStatus.severity}`}>
+                <span>
+                  <strong>原图</strong>
+                  <em>{loadedImage.name}</em>
+                  <small>{alignmentCaption.sourceDimension}</small>
+                </span>
+                <span className="registration-caption">
+                  <strong>{alignmentCaption.statusTitle}</strong>
+                  <em>{alignmentCaption.statusDetail}</em>
+                </span>
+                <span>
+                  <strong>结果</strong>
+                  <em>{resultImage?.name ?? "内置掩膜预览"}</em>
+                  <small>{alignmentCaption.resultDimension}</small>
+                </span>
+              </div>
+            </div>
+          </section>
+
+          <aside className="inspector">
+            {activeModule === "项目" ? (
+              <>
+                <section className="panel module-card">
+                  <div className="panel-title">
+                    <div>
+                      <h2>项目总览</h2>
+                      <p>{selectedCase.id} · {selectedCase.target}</p>
+                    </div>
+                    <FolderOpen size={24} />
+                  </div>
+                  <div className="module-kpis">
+                    <Metric label="病例阶段" value={selectedCase.phase} />
+                    <Metric label="切片数" value={`${currentTotalSlices}`} />
+                    <Metric label="当前模块" value={activeModule} />
+                  </div>
+                </section>
+                <section className="panel insight-card">
+                  <div className="section-head"><h2><Sparkles size={18} />项目提示</h2></div>
+                  <div className="finding-list">
+                    <div className="finding-row"><CheckCircle2 size={15} /><span>支持本地图片与 .nii/.nii.gz 体数据可视化。</span></div>
+                    <div className="finding-row"><CheckCircle2 size={15} /><span>原图体数据与标签体数据共用同一切片滑块，便于同步对比。</span></div>
+                  </div>
+                </section>
+              </>
+            ) : null}
+
+            {activeModule === "数据" ? (
+              <>
+                <section className="panel file-card">
+                  <div className="section-head">
+                    <h2><Database size={18} />对比文件</h2>
+                    <span className="detail-chip">{compareModeLabel[compareMode]}</span>
+                  </div>
+                  <div className="file-stack">
+                    <div className="file-preview-card">
+                      <div className="file-thumb"><img src={loadedDisplaySrc} alt={`${loadedImage.name} 预览`} /></div>
+                      <div className="file-meta">
+                        <strong>原图 · {loadedImage.name}</strong>
+                        <span>{loadedImage.meta}</span>
+                        <div className="file-tags">
+                          <small>{loadedImage.kind}</small>
+                          <small>{loadedImage.format ?? "DEMO"}</small>
+                          <small>{loadedImage.sizeText ?? "内置资源"}</small>
+                        </div>
+                        <div className="file-card-actions">
+                          <button className="danger-action" onClick={() => requestRemoval("source")} disabled={!hasLocalSource}><Trash2 size={14} />移除本地原图</button>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="file-preview-card">
+                      <div className={resultImage ? "file-thumb" : "file-thumb simulated"}><img src={resultDisplaySrc ?? loadedDisplaySrc} alt={`${resultImage?.name ?? "模拟结果"} 预览`} /></div>
+                      <div className="file-meta">
+                        <strong>结果 · {resultImage?.name ?? "内置掩膜预览"}</strong>
+                        <span>{resultImage?.meta ?? "未上传结果图时，前端使用内置掩膜进行对比演示。"}</span>
+                        <div className="file-tags">
+                          <small>{resultImage?.kind ?? "掩膜"}</small>
+                          <small>{resultImage?.format ?? "SIM"}</small>
+                          <small>{resultImage?.sizeText ?? "前端生成"}</small>
+                        </div>
+                        <div className="file-card-actions">
+                          <button className="danger-action" onClick={() => requestRemoval("result")} disabled={!resultImage}><Trash2 size={14} />移除结果图</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+                <section className="panel">
+                  <div className="section-head"><h2><Upload size={18} />数据操作</h2><span className="detail-chip">{resultImage ? "对比就绪" : "等待结果"}</span></div>
+                  <div className="drop-grid">
+                    <button className={dragTarget === "source" ? "drop-zone active" : "drop-zone"} onClick={() => fileInputRef.current?.click()} onDragEnter={(event) => handleDrag(event, "source")} onDragOver={(event) => handleDrag(event, "source")} onDragLeave={(event) => handleDrag(event, null)} onDrop={(event) => handleDrop(event, "source")}>
+                      <Upload size={18} /><strong>原图导入</strong><span>PNG / JPG / WebP / NIfTI</span>
+                    </button>
+                    <button className={dragTarget === "result" ? "drop-zone active" : "drop-zone"} onClick={() => resultFileInputRef.current?.click()} onDragEnter={(event) => handleDrag(event, "result")} onDragOver={(event) => handleDrag(event, "result")} onDragLeave={(event) => handleDrag(event, null)} onDrop={(event) => handleDrop(event, "result")}>
+                      <FileStack size={18} /><strong>结果图导入</strong><span>掩膜 / 叠加图 / NIfTI 标签</span>
+                    </button>
+                  </div>
+                  <div className="readiness-card"><div><span>实时载入状态</span><strong>{lastImport}</strong></div><BadgeCheck size={19} /></div>
+                  <div className="custom-case-card">
+                    <div>
+                      <span>自定义病例</span>
+                      <strong>{customCasePanelCopy.countLabel}</strong>
+                      <small>{customCasePanelCopy.saveHint}</small>
+                    </div>
+                    <div className="custom-case-actions">
+                      <button onClick={createCustomCaseFromCurrent} disabled={!customCasePanelCopy.canSave}><Plus size={15} />保存当前病例</button>
+                      <button className="danger-action" onClick={() => deleteCustomCase(selectedCase.id)} disabled={!customCasePanelCopy.canDeleteSelected}><Trash2 size={15} />删除当前病例</button>
+                    </div>
+                  </div>
+                  <div className="ready-list">
+                    {readinessChecks.map((item) => (
+                      <div className={item.ready ? "ready-item ready" : "ready-item"} key={item.label}>
+                        <CheckCircle2 size={14} /><span>{item.label}</span><strong>{item.value}</strong>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="action-stack">
+                    <button onClick={() => fileInputRef.current?.click()}><Upload size={16} />上传原图</button>
+                    <button onClick={loadLocalAmosSample}><Database size={16} />载入本地 AMOS 样例</button>
+                    <button onClick={() => resultFileInputRef.current?.click()}><Upload size={16} />上传结果图</button>
+                    <button onClick={() => requestRemoval("result")} disabled={!resultImage}><Trash2 size={16} />清除结果</button>
+                    <button onClick={() => requestRemoval("session")} disabled={!hasImportedFiles}><RotateCcw size={16} />清空本次导入</button>
+                  </div>
+                </section>
+                <section className="panel metric-panel">
+                  <h2><Gauge size={18} />对比状态</h2>
+                  {comparisonStats.map((item) => <Metric key={item.label} label={item.label} value={item.value} />)}
+                </section>
+              </>
+            ) : null}
+
+            {activeModule === "分割" ? (
+              <>
+                <section className="panel">
+                  <div className="section-head"><h2><ScanLine size={18} />分割控制</h2><span className="detail-chip">{runState === "running" ? `${progress}%` : "可操作"}</span></div>
+                  <div className="model-list">
+                    {modelOptions.map((model) => (
+                      <button key={model.id} className={selectedModelId === model.id ? "model-card active" : "model-card"} onClick={() => setSelectedModelId(model.id)}>
+                        <strong>{model.name}</strong><span>{model.scope}</span><small>{model.speed}</small>
+                      </button>
+                    ))}
+                  </div>
+                  <label className="slider-row">质控提示<input type="range" min="50" max="95" value={confidenceThreshold} onChange={(event) => setConfidenceThreshold(Number(event.target.value))} /><strong>{confidenceThreshold}%</strong></label>
+                  <div className="toggle-grid">
+                    {Object.entries(postprocessConfig).map(([key, checked]) => (
+                      <button key={key} className={checked ? "toggle-card on" : "toggle-card"} onClick={() => setPostprocessConfig((config) => ({ ...config, [key]: !config[key as keyof typeof postprocessConfig] }))}>
+                        {checked ? <Eye size={15} /> : <EyeOff size={15} />} {key === "removeIslands" ? "去除孤岛" : key === "smoothBoundary" ? "边界平滑" : "填充空洞"}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="action-stack">
+                    <button onClick={loadLocalAmosSample}><Database size={16} />载入本地 AMOS 样例</button>
+                    <button onClick={() => void startSegmentation()}><Play size={16} />运行分割流程</button>
+                  </div>
+                  <div className={`validation-card ${validationSummary?.status ?? "pending"}`}>
+                    <div>
+                      <span>标准答案验证</span>
+                      <strong>{validationStatusCopy}</strong>
+                      <small>{validationMessage}</small>
+                    </div>
+                    <BadgeCheck size={19} />
+                  </div>
+                </section>
+                <section className="panel">
+                  <div className="section-head"><h2><Layers3 size={18} />器官图层</h2><span className="detail-chip">{visibleOrgans.size}/{organs.length}</span></div>
+                  <div className="organ-list">
+                    {organs.map((organ) => (
+                      <button key={organ.id} className={selectedOrganId === organ.id ? "organ-row active" : "organ-row"} onClick={() => toggleOrgan(organ.id)}>
+                        <i style={{ background: organ.color }} /><span>{organ.name}</span><strong>{organ.score}%</strong>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              </>
+            ) : null}
+
+            {activeModule === "评估" ? (
+              <>
+                <section className="panel metric-panel">
+                  <h2><BarChart3 size={18} />质量评估</h2>
+                  <Metric label="平均 Dice" value={displayedAverageDice} />
+                  <Metric label="最低 Dice" value={formatDiceMetric(validationSummary?.min_dice)} />
+                  <Metric label="标准答案" value={validationStatusCopy} />
+                  <Metric label="推理耗时" value={inferenceDurationCopy} />
+                  <Metric label="结果大小" value={inferenceResultSizeCopy} />
+                  <Metric label="平均 NSD" value="0.887" />
+                  <Metric label="待复核器官" value={`${reviewCount}`} />
+                  <Metric label="配准状态" value={volumeRegistration} />
+                </section>
+                <section className="panel">
+                  <div className="section-head"><h2><ClipboardCheck size={18} />质控标记</h2></div>
+                  <div className="organ-list">
+                    {organs.map((organ) => (
+                      <div className="qc-row" key={organ.id}>
+                        <span>{organ.name}</span>
+                        <button onClick={() => setOrganQuality(organ.id, "accepted")}>通过</button>
+                        <button onClick={() => setOrganQuality(organ.id, "review")}>复核</button>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+                <section className="panel insight-card">
+                  <div className="section-head"><h2><Sparkles size={18} />AI 发现</h2></div>
+                  <div className="finding-list">{aiFindings.map((finding) => <div className="finding-row" key={finding}><CheckCircle2 size={15} /><span>{finding}</span></div>)}</div>
+                </section>
+              </>
+            ) : null}
+
+            {activeModule === "报告" ? (
+              <>
+                <section className="panel metric-panel">
+                  <h2><FileText size={18} />报告状态</h2>
+                  <Metric label="草稿" value={reportState.draftSaved ? "已保存" : "未保存"} />
+                  <Metric label="复核" value={reportState.reviewQueued ? "已入队" : "未入队"} />
+                  <Metric label="导出次数" value={`${reportState.exportCount}`} />
+                  <Metric label="最近导出" value={reportState.lastExport} />
+                </section>
+                <section className="panel">
+                  <div className="section-head"><h2><Download size={18} />报告操作</h2></div>
+                  <div className="action-stack">
+                    <button onClick={() => setShowReport(true)}><FileText size={16} />打开报告预览</button>
+                    <button onClick={saveReportDraft}><ClipboardCheck size={16} />保存报告草稿</button>
+                    <button onClick={handleExport}><Download size={16} />导出 JSON 摘要</button>
+                    <button onClick={queueReportReview}><ClipboardCheck size={16} />加入复核清单</button>
+                  </div>
+                </section>
+              </>
+            ) : null}
+          </aside>
+        </section>
+
+        <footer className="bottom-console">
+          <div className="console-head">
+            <h2><ListChecks size={18} />切片与流程日志</h2>
+            <span><Activity size={14} />{runState === "running" ? "推理运行中" : "在线演示模式"}</span>
+          </div>
+          <div className="footer-slices" aria-label="底部切片时间轴">
+            {footerSlicePreviews.map(({ slice, src }) => (
+              <button className={selectedSlice === slice ? "footer-slice active" : "footer-slice"} key={slice} onClick={() => setSelectedSlice(slice)}>
+                <img src={src} alt="" />
+                <span>{slice}</span>
+              </button>
+            ))}
+          </div>
+          <div className="log-grid">
+            {logs.slice(0, 4).map((log, index) => (
+              <div className="log-line" key={`${log}-${index}`}>
+                <ClipboardCheck size={16} />
+                <span>{String(index + 1).padStart(2, "0")}</span>
+                <p>{log}</p>
+              </div>
+            ))}
+          </div>
+        </footer>
+      </section>
+
+      {pendingRemoval ? (
+        <section className="report-modal" role="dialog" aria-label="确认移除文件">
+          <div className="confirm-card">
+            <h2>{pendingRemoval === "result" ? "移除结果图？" : pendingRemoval === "source" ? "移除本地原图？" : "清空本次导入？"}</h2>
+            <p>该操作只会移除当前浏览器会话中的文件，不会删除你电脑磁盘上的原始文件。</p>
+            <div className="modal-actions">
+              <button onClick={() => setPendingRemoval(null)}>取消</button>
+              <button className="danger-action" onClick={confirmRemoval}>确认移除</button>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {showReport ? (
+        <section className="report-modal" role="dialog" aria-label="分割报告预览">
+          <div className="report-sheet">
+            <header>
+              <div><h2>分割报告预览</h2><p>{selectedCase.id} · {selectedCase.target} · 自动生成</p></div>
+              <button onClick={() => setShowReport(false)} title="关闭报告"><X size={20} /></button>
+            </header>
+            <div className="report-summary">
+              <Metric label="模型" value={selectedModel.name} />
+              <Metric label="平均 Dice" value={displayedAverageDice} />
+              <Metric label="原图" value={loadedImage.kind} />
+              <Metric label="结果" value={resultImage ? resultImage.kind : "模拟掩膜"} />
+              <Metric label="同步切片" value={`${selectedSlice}/${currentTotalSlices}`} />
+              <Metric label="配准" value={volumeRegistration} />
+            </div>
+            <div className="report-body">
+              <h3>关键发现</h3>
+              {aiFindings.map((finding) => <p key={finding}>- {finding}</p>)}
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {toast ? <div className="toast">{toast}</div> : null}
+    </main>
+  );
+}
+
+createRoot(document.getElementById("root")!).render(<App />);
