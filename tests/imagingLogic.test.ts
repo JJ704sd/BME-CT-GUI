@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import {
   clampVoxelCoord,
   clientPointToSlicePoint,
+  getCrosshairPercent,
   getOrientationDisplayAspect,
   getOrientationDimensions,
+  getSliceContentFrame,
+  getSliceRenderKey,
   getSliceIndexForOrientation,
   slicePointToVoxelCoord,
   voxelCoordToSlicePoint
@@ -17,7 +20,7 @@ const coord = { x: 4, y: 8, z: 12 };
 assert.deepEqual(clampVoxelCoord({ x: -1, y: 99, z: 12 }, volume), { x: 0, y: 19, z: 12 });
 
 assert.deepEqual(getOrientationDimensions("axial", volume), { width: 10, height: 20 });
-assert.deepEqual(getOrientationDimensions("sagittal", volume), { width: 30, height: 20 });
+assert.deepEqual(getOrientationDimensions("sagittal", volume), { width: 20, height: 30 });
 assert.deepEqual(getOrientationDimensions("coronal", volume), { width: 10, height: 30 });
 
 const letterboxedRect = { left: 0, top: 0, width: 400, height: 200 };
@@ -36,26 +39,44 @@ assert.deepEqual(
   { column: 99, row: 0 },
   "vertical letterboxing should map only the contained image box"
 );
+assert.deepEqual(getSliceContentFrame(2, 1), { left: 25, top: 0, width: 50, height: 100 });
+assert.deepEqual(getSliceContentFrame(0.5, 1), { left: 0, top: 25, width: 100, height: 50 });
 
 const anisotropicCt = { columns: 512, rows: 512, slices: 80, spacingX: 0.8, spacingY: 0.8, spacingZ: 5 };
 assert.equal(getOrientationDisplayAspect("axial", anisotropicCt), "409.6 / 409.6");
-assert.equal(getOrientationDisplayAspect("sagittal", anisotropicCt), "400 / 409.6");
+assert.equal(getOrientationDisplayAspect("sagittal", anisotropicCt), "409.6 / 400");
 assert.equal(getOrientationDisplayAspect("coronal", anisotropicCt), "409.6 / 400");
-assert.equal(getOrientationDisplayAspect("sagittal", volume), "1.2 / 1");
-assert.equal(getOrientationDisplayAspect("sagittal", { columns: 512, rows: 512, slices: 80, spacingX: 0.8, spacingY: 0.8, spacingZ: 1 }), "0.9 / 1");
+assert.equal(getOrientationDisplayAspect("sagittal", volume), "0.9 / 1");
+assert.equal(getOrientationDisplayAspect("sagittal", { columns: 512, rows: 512, slices: 80, spacingX: 0.8, spacingY: 0.8, spacingZ: 1 }), "1.2 / 1");
 assert.equal(getOrientationDisplayAspect("coronal", { columns: 512, rows: 512, slices: 80, spacingX: 0.8, spacingY: 0.8, spacingZ: 1 }), "1.2 / 1");
 
 assert.equal(getSliceIndexForOrientation("axial", coord), 12);
 assert.equal(getSliceIndexForOrientation("sagittal", coord), 4);
 assert.equal(getSliceIndexForOrientation("coronal", coord), 8);
+assert.equal(getSliceRenderKey("axial", coord, volume), getSliceRenderKey("axial", { ...coord, x: 8, y: 12 }, volume));
+assert.notEqual(getSliceRenderKey("axial", coord, volume), getSliceRenderKey("axial", { ...coord, z: 18 }, volume));
+assert.equal(getSliceRenderKey("sagittal", coord, volume), getSliceRenderKey("sagittal", { ...coord, y: 12, z: 18 }, volume));
+assert.notEqual(getSliceRenderKey("sagittal", coord, volume), getSliceRenderKey("sagittal", { ...coord, x: 8 }, volume));
+assert.equal(getSliceRenderKey("coronal", coord, volume), getSliceRenderKey("coronal", { ...coord, x: 8, z: 18 }, volume));
+assert.notEqual(getSliceRenderKey("coronal", coord, volume), getSliceRenderKey("coronal", { ...coord, y: 12 }, volume));
 
-assert.deepEqual(voxelCoordToSlicePoint("axial", coord), { column: 4, row: 8 });
-assert.deepEqual(voxelCoordToSlicePoint("sagittal", coord), { column: 12, row: 8 });
-assert.deepEqual(voxelCoordToSlicePoint("coronal", coord), { column: 4, row: 12 });
+assert.deepEqual(voxelCoordToSlicePoint("axial", coord, volume), { column: 4, row: 11 });
+assert.deepEqual(voxelCoordToSlicePoint("sagittal", coord, volume), { column: 11, row: 17 });
+assert.deepEqual(voxelCoordToSlicePoint("coronal", coord, volume), { column: 4, row: 17 });
 
-assert.deepEqual(slicePointToVoxelCoord("axial", { column: 3, row: 7 }, coord, volume), { x: 3, y: 7, z: 12 });
-assert.deepEqual(slicePointToVoxelCoord("sagittal", { column: 22, row: 6 }, coord, volume), { x: 4, y: 6, z: 22 });
-assert.deepEqual(slicePointToVoxelCoord("coronal", { column: 6, row: 18 }, coord, volume), { x: 6, y: 8, z: 18 });
+assert.deepEqual(slicePointToVoxelCoord("axial", { column: 3, row: 7 }, coord, volume), { x: 3, y: 12, z: 12 });
+assert.deepEqual(slicePointToVoxelCoord("sagittal", { column: 13, row: 7 }, coord, volume), { x: 4, y: 6, z: 22 });
+assert.deepEqual(slicePointToVoxelCoord("coronal", { column: 6, row: 11 }, coord, volume), { x: 6, y: 8, z: 18 });
+assert.deepEqual(slicePointToVoxelCoord("axial", { column: 0, row: 0 }, coord, volume), { x: 0, y: 19, z: 12 });
+assert.deepEqual(slicePointToVoxelCoord("sagittal", { column: 0, row: 0 }, coord, volume), { x: 4, y: 19, z: 29 });
+assert.deepEqual(slicePointToVoxelCoord("coronal", { column: 0, row: 0 }, coord, volume), { x: 0, y: 8, z: 29 });
+const axialCrosshair = getCrosshairPercent("axial", coord, volume);
+assert.equal(axialCrosshair.x, 45);
+assert.ok(Math.abs(axialCrosshair.y - 57.5) < 1e-9);
+const letterboxedCrosshair = getCrosshairPercent("axial", { x: 0, y: 19, z: 12 }, { columns: 100, rows: 100, slices: 30 }, 2, 1);
+assert.equal(letterboxedCrosshair.left, 25);
+assert.equal(letterboxedCrosshair.width, 50);
+assert.equal(letterboxedCrosshair.x, 25.25);
 
 const lookup = buildLabelLookup([
   { label: 1, id: "liver", nameZh: "肝脏", color: "#4fd1a5" },

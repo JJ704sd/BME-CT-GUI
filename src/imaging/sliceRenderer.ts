@@ -56,12 +56,16 @@ export function getNiftiValue(view: DataView, byteOffset: number, datatypeCode: 
 
 function getSourceIndex(orientation: Orientation, column: number, row: number, fixedSlice: number, volume: NiftiVolumeLike) {
   if (orientation === "sagittal") {
-    return fixedSlice + row * volume.columns + column * volume.columns * volume.rows;
+    const sourceY = volume.rows - 1 - column;
+    const sourceZ = volume.slices - 1 - row;
+    return fixedSlice + sourceY * volume.columns + sourceZ * volume.columns * volume.rows;
   }
   if (orientation === "coronal") {
-    return column + fixedSlice * volume.columns + row * volume.columns * volume.rows;
+    const sourceZ = volume.slices - 1 - row;
+    return column + fixedSlice * volume.columns + sourceZ * volume.columns * volume.rows;
   }
-  return column + row * volume.columns + fixedSlice * volume.columns * volume.rows;
+  const sourceY = volume.rows - 1 - row;
+  return column + sourceY * volume.columns + fixedSlice * volume.columns * volume.rows;
 }
 
 function getDisplayCanvasSize(dimensions: { width: number; height: number }, displayRatio: number) {

@@ -1,5 +1,5 @@
 import type { CSSProperties, PointerEvent, WheelEvent } from "react";
-import { useMemo } from "react";
+import { useDeferredValue, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { OrganLabel } from "../data/organDetails";
 import type { Orientation, VoxelCoord } from "../imaging/voxelMapping";
 import {
@@ -8,6 +8,7 @@ import {
   getOrientationDisplayAspect,
   getOrientationDisplayRatio,
   getOrientationDimensions,
+  getSliceRenderKey,
   getSliceIndexForOrientation,
   slicePointToVoxelCoord
 } from "../imaging/voxelMapping";
@@ -50,15 +51,35 @@ function Panel(props: OrthogonalViewerProps & { orientation: Orientation; title:
   const dimensions = getOrientationDimensions(props.orientation, props.sourceVolume);
   const displayAspect = getOrientationDisplayAspect(props.orientation, props.sourceVolume);
   const displayRatio = getOrientationDisplayRatio(props.orientation, props.sourceVolume);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [stageRatio, setStageRatio] = useState(displayRatio);
+  const deferredCoord = useDeferredValue(props.coord);
+  const sourceSliceKey = getSliceRenderKey(props.orientation, deferredCoord, props.sourceVolume);
+  const maskSliceKey = props.maskVolume ? getSliceRenderKey(props.orientation, deferredCoord, props.maskVolume) : "";
   const sourceSrc = useMemo(
-    () => renderNiftiSliceToDataUrl(props.sourceVolume, props.coord, "intensity", props.orientation),
-    [props.sourceVolume, props.coord, props.orientation]
+    () => renderNiftiSliceToDataUrl(props.sourceVolume, deferredCoord, "intensity", props.orientation),
+    [props.sourceVolume, props.orientation, sourceSliceKey]
   );
   const maskSrc = useMemo(
-    () => props.maskVolume ? renderNiftiSliceToDataUrl(props.maskVolume, props.coord, "mask", props.orientation, props.visibleLabels) : "",
-    [props.maskVolume, props.coord, props.orientation, props.visibleLabels]
+    () => props.maskVolume ? renderNiftiSliceToDataUrl(props.maskVolume, deferredCoord, "mask", props.orientation, props.visibleLabels) : "",
+    [props.maskVolume, props.orientation, props.visibleLabels, maskSliceKey]
   );
-  const crosshair = getCrosshairPercent(props.orientation, props.coord, props.sourceVolume);
+  useLayoutEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const updateStageRatio = () => {
+      const rect = stage.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        setStageRatio(rect.width / rect.height);
+      }
+    };
+    updateStageRatio();
+    const observer = new ResizeObserver(updateStageRatio);
+    observer.observe(stage);
+    return () => observer.disconnect();
+  }, [displayRatio]);
+
+  const crosshair = getCrosshairPercent(props.orientation, props.coord, props.sourceVolume, stageRatio, displayRatio);
   const slice = getSliceIndexForOrientation(props.orientation, props.coord) + 1;
   const sliceTotal = props.orientation === "sagittal" ? props.sourceVolume.columns : props.orientation === "coronal" ? props.sourceVolume.rows : props.sourceVolume.slices;
 
@@ -68,7 +89,8 @@ function Panel(props: OrthogonalViewerProps & { orientation: Orientation; title:
     if (pickOrgan && !event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.setPointerCapture(event.pointerId);
     }
-    const rect = event.currentTarget.getBoundingClientRect();
+    const stage = stageRef.current;
+    const rect = (stage ?? event.currentTarget).getBoundingClientRect();
     const point = clientPointToSlicePoint(event.clientX, event.clientY, rect, dimensions, displayRatio);
     if (!point) return;
     const nextCoord = slicePointToVoxelCoord(props.orientation, point, props.coord, props.sourceVolume);
@@ -96,7 +118,7 @@ function Panel(props: OrthogonalViewerProps & { orientation: Orientation; title:
         style={{ "--slice-aspect": displayAspect, "--slice-pixel-aspect": `${displayRatio} / 1`, "--mask-opacity": props.opacity / 100 } as CSSProperties}
         onPointerDown={(event) => updateCoordFromPointer(event, true)}
         onPointerMove={(event) => {
-          if (event.buttons === 1) updateCoordFromPointer(event, false);
+          if (event.buttons === 1 || event.currentTarget.hasPointerCapture(event.pointerId)) updateCoordFromPointer(event, false);
         }}
         onPointerUp={(event) => {
           if (event.currentTarget.hasPointerCapture(event.pointerId)) {
@@ -110,11 +132,11 @@ function Panel(props: OrthogonalViewerProps & { orientation: Orientation; title:
         }}
         onWheel={handleWheel}
       >
-        <div className="ortho-image-stage">
+        <div className="ortho-image-stage" ref={stageRef}>
           <img className="ortho-source" src={sourceSrc} alt={`${props.sourceName} ${props.title}`} draggable={false} />
           {props.maskVolume && maskSrc ? <img className="ortho-mask" src={maskSrc} alt={`${props.resultName ?? "mask"} ${props.title}`} draggable={false} /> : null}
-          <span className="ortho-crosshair ortho-crosshair-x" style={{ top: `${crosshair.y}%` }} />
-          <span className="ortho-crosshair ortho-crosshair-y" style={{ left: `${crosshair.x}%` }} />
+          <span className="ortho-crosshair ortho-crosshair-x" style={{ left: `${crosshair.left}%`, top: `${crosshair.y}%`, width: `${crosshair.width}%` }} />
+          <span className="ortho-crosshair ortho-crosshair-y" style={{ left: `${crosshair.x}%`, top: `${crosshair.top}%`, height: `${crosshair.height}%` }} />
         </div>
       </div>
     </div>

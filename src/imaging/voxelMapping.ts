@@ -33,7 +33,7 @@ export function clampVoxelCoord(coord: VoxelCoord, volume: VolumeGrid): VoxelCoo
 }
 
 export function getOrientationDimensions(orientation: Orientation, volume: VolumeGrid) {
-  if (orientation === "sagittal") return { width: volume.slices, height: volume.rows };
+  if (orientation === "sagittal") return { width: volume.rows, height: volume.slices };
   if (orientation === "coronal") return { width: volume.columns, height: volume.slices };
   return { width: volume.columns, height: volume.rows };
 }
@@ -56,10 +56,12 @@ export function getOrientationDisplayRatio(orientation: Orientation, volume: Vol
   const spacingY = finitePositive(volume.spacingY, 1);
   const spacingZ = finitePositive(volume.spacingZ, 1);
   const width = orientation === "sagittal"
-    ? volume.slices * spacingZ
+    ? volume.rows * spacingY
     : volume.columns * spacingX;
   const height = orientation === "coronal"
     ? volume.slices * spacingZ
+    : orientation === "sagittal"
+      ? volume.slices * spacingZ
     : volume.rows * spacingY;
   return clampDisplayRatio(width / Math.max(1e-6, height));
 }
@@ -69,10 +71,12 @@ export function getOrientationDisplayAspect(orientation: Orientation, volume: Vo
   const spacingY = finitePositive(volume.spacingY, 1);
   const spacingZ = finitePositive(volume.spacingZ, 1);
   const width = orientation === "sagittal"
-    ? volume.slices * spacingZ
+    ? volume.rows * spacingY
     : volume.columns * spacingX;
   const height = orientation === "coronal"
     ? volume.slices * spacingZ
+    : orientation === "sagittal"
+      ? volume.slices * spacingZ
     : volume.rows * spacingY;
   const physicalRatio = width / Math.max(1e-6, height);
   const displayRatio = getOrientationDisplayRatio(orientation, volume);
@@ -88,10 +92,35 @@ export function getSliceIndexForOrientation(orientation: Orientation, coord: Vox
   return coord.z;
 }
 
-export function voxelCoordToSlicePoint(orientation: Orientation, coord: VoxelCoord): SlicePoint {
-  if (orientation === "sagittal") return { column: coord.z, row: coord.y };
-  if (orientation === "coronal") return { column: coord.x, row: coord.z };
-  return { column: coord.x, row: coord.y };
+export function getSliceRenderKey(orientation: Orientation, coord: VoxelCoord, volume: VolumeGrid) {
+  const safe = clampVoxelCoord(coord, volume);
+  return `${orientation}:${getSliceIndexForOrientation(orientation, safe)}`;
+}
+
+export function getSliceContentFrame(containerRatio: number, imageRatio: number) {
+  const safeContainerRatio = Number.isFinite(containerRatio) && containerRatio > 0 ? containerRatio : 1;
+  const safeImageRatio = Number.isFinite(imageRatio) && imageRatio > 0 ? imageRatio : 1;
+  if (safeImageRatio > safeContainerRatio) {
+    const height = (safeContainerRatio / safeImageRatio) * 100;
+    return { left: 0, top: (100 - height) / 2, width: 100, height };
+  }
+  const width = (safeImageRatio / safeContainerRatio) * 100;
+  return { left: (100 - width) / 2, top: 0, width, height: 100 };
+}
+
+function displayRowFromVoxel(index: number, maxExclusive: number) {
+  return Math.max(0, maxExclusive - 1) - index;
+}
+
+function voxelIndexFromDisplayRow(row: number, maxExclusive: number) {
+  return Math.max(0, maxExclusive - 1) - Math.round(row);
+}
+
+export function voxelCoordToSlicePoint(orientation: Orientation, coord: VoxelCoord, volume: VolumeGrid): SlicePoint {
+  const safe = clampVoxelCoord(coord, volume);
+  if (orientation === "sagittal") return { column: displayRowFromVoxel(safe.y, volume.rows), row: displayRowFromVoxel(safe.z, volume.slices) };
+  if (orientation === "coronal") return { column: safe.x, row: displayRowFromVoxel(safe.z, volume.slices) };
+  return { column: safe.x, row: displayRowFromVoxel(safe.y, volume.rows) };
 }
 
 export function slicePointToVoxelCoord(
@@ -101,10 +130,10 @@ export function slicePointToVoxelCoord(
   volume: VolumeGrid
 ): VoxelCoord {
   const next = orientation === "sagittal"
-    ? { x: current.x, y: point.row, z: point.column }
+    ? { x: current.x, y: voxelIndexFromDisplayRow(point.column, volume.rows), z: voxelIndexFromDisplayRow(point.row, volume.slices) }
     : orientation === "coronal"
-      ? { x: point.column, y: current.y, z: point.row }
-      : { x: point.column, y: point.row, z: current.z };
+      ? { x: point.column, y: current.y, z: voxelIndexFromDisplayRow(point.row, volume.slices) }
+      : { x: point.column, y: voxelIndexFromDisplayRow(point.row, volume.rows), z: current.z };
   return clampVoxelCoord(next, volume);
 }
 
@@ -119,19 +148,13 @@ export function clientPointToSlicePoint(
     ? displayRatio
     : dimensions.width / Math.max(1, dimensions.height);
   const rectRatio = rect.width / Math.max(1, rect.height);
-  const content = imageRatio > rectRatio
-    ? {
-        left: rect.left,
-        top: rect.top + (rect.height - rect.width / imageRatio) / 2,
-        width: rect.width,
-        height: rect.width / imageRatio
-      }
-    : {
-        left: rect.left + (rect.width - rect.height * imageRatio) / 2,
-        top: rect.top,
-        width: rect.height * imageRatio,
-        height: rect.height
-      };
+  const frame = getSliceContentFrame(rectRatio, imageRatio);
+  const content = {
+    left: rect.left + rect.width * (frame.left / 100),
+    top: rect.top + rect.height * (frame.top / 100),
+    width: rect.width * (frame.width / 100),
+    height: rect.height * (frame.height / 100)
+  };
   if (
     clientX < content.left ||
     clientY < content.top ||
@@ -148,11 +171,22 @@ export function clientPointToSlicePoint(
   };
 }
 
-export function getCrosshairPercent(orientation: Orientation, coord: VoxelCoord, volume: VolumeGrid) {
-  const point = voxelCoordToSlicePoint(orientation, coord);
+export function getCrosshairPercent(
+  orientation: Orientation,
+  coord: VoxelCoord,
+  volume: VolumeGrid,
+  containerRatio?: number,
+  displayRatio = getOrientationDisplayRatio(orientation, volume)
+) {
+  const point = voxelCoordToSlicePoint(orientation, coord, volume);
   const dimensions = getOrientationDimensions(orientation, volume);
+  const frame = getSliceContentFrame(containerRatio ?? displayRatio, displayRatio);
   return {
-    x: ((point.column + 0.5) / Math.max(1, dimensions.width)) * 100,
-    y: ((point.row + 0.5) / Math.max(1, dimensions.height)) * 100
+    x: frame.left + ((point.column + 0.5) / Math.max(1, dimensions.width)) * frame.width,
+    y: frame.top + ((point.row + 0.5) / Math.max(1, dimensions.height)) * frame.height,
+    left: frame.left,
+    top: frame.top,
+    width: frame.width,
+    height: frame.height
   };
 }

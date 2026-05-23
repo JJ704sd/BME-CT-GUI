@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { buildCustomCaseId, getAlignmentCaptionCopy, getCustomCasePanelCopy, getDisplayAspectRatio, getRegistrationStatus, getSplitPositionFromClientX, getStableSliceWindowStart, volumesShareDisplayGrid } from "../src/viewerLogic.ts";
+import { buildCustomCaseId, getAlignmentCaptionCopy, getCustomCasePanelCopy, getDisplayAspectRatio, getRegistrationStatus, getSelectedSliceForVoxelCoord, getSplitPositionFromClientX, getStableSliceWindowStart, volumesShareDisplayGrid } from "../src/viewerLogic.ts";
 
 assert.equal(buildCustomCaseId([]), "Custom_Case_001");
 assert.equal(buildCustomCaseId(["Custom_Case_001", "Case_LUNG_112"]), "Custom_Case_002");
@@ -33,6 +33,10 @@ assert.equal(getStableSliceWindowStart(148, 155, 301, 7), 149);
 assert.equal(getStableSliceWindowStart(148, 147, 301, 7), 147);
 assert.equal(getStableSliceWindowStart(500, 301, 301, 7), 295);
 assert.equal(getStableSliceWindowStart(-20, 1, 4, 7), 1);
+
+assert.equal(getSelectedSliceForVoxelCoord({ x: 10, y: 20, z: 72 }, 103), 73);
+assert.equal(getSelectedSliceForVoxelCoord({ x: 10, y: 20, z: -5 }, 103), 1);
+assert.equal(getSelectedSliceForVoxelCoord({ x: 10, y: 20, z: 500 }, 103), 103);
 
 assert.deepEqual(getRegistrationStatus({ dimensions: "640x320" }, null), {
   label: "等待结果图",

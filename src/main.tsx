@@ -45,7 +45,7 @@ import { OrthogonalViewer } from "./components/OrthogonalViewer";
 import { buildLabelLookup, defaultOrganLabels, getOrganDetail } from "./data/organDetails";
 import { createInferenceJob, downloadInferenceResult, fetchModelLabels, getInferenceResultMeta, getInferenceStatusCopy, parseInferenceEvent, type InferenceStatus, type ValidationSummary } from "./inference/inferenceClient";
 import type { VoxelCoord } from "./imaging/voxelMapping";
-import { buildCustomCaseId, getAlignmentCaptionCopy, getCustomCasePanelCopy, getDisplayAspectRatio, getRegistrationStatus, getSplitPositionFromClientX, getStableSliceWindowStart, volumesShareDisplayGrid } from "./viewerLogic";
+import { buildCustomCaseId, getAlignmentCaptionCopy, getCustomCasePanelCopy, getDisplayAspectRatio, getRegistrationStatus, getSelectedSliceForVoxelCoord, getSplitPositionFromClientX, getStableSliceWindowStart, volumesShareDisplayGrid } from "./viewerLogic";
 import "./styles.css";
 
 type ViewMode = "CT" | "Mask" | "3D";
@@ -314,7 +314,8 @@ function renderNiftiSliceToDataUrl(volume: NiftiVolume, sliceIndex: number, mode
 
   for (let y = 0; y < rows; y += 1) {
     for (let x = 0; x < columns; x += 1) {
-      const sourceIndex = x + y * columns + safeSliceIndex * columns * rows;
+      const sourceY = rows - 1 - y;
+      const sourceIndex = x + sourceY * columns + safeSliceIndex * columns * rows;
       const value = getNiftiValue(view, sourceIndex * bytesPerVoxel, datatypeCode, littleEndian) * slope + intercept;
       const displayIndex = x + y * columns;
       values[displayIndex] = value;
@@ -564,7 +565,7 @@ function App() {
   );
   const footerSlicePreviews = useMemo(() => {
     const count = Math.min(FOOTER_SLICE_COUNT, currentTotalSlices);
-    const start = getStableSliceWindowStart(footerSliceStart, selectedSlice, currentTotalSlices, FOOTER_SLICE_COUNT);
+    const start = getStableSliceWindowStart(footerSliceStart, footerSliceStart, currentTotalSlices, FOOTER_SLICE_COUNT);
     return Array.from({ length: count }, (_, index) => {
       const slice = start + index;
       return {
@@ -572,7 +573,7 @@ function App() {
         src: loadedImage.volume ? renderNiftiSliceToDataUrl(loadedImage.volume, slice - 1, "intensity") : loadedDisplaySrc
       };
     });
-  }, [currentTotalSlices, footerSliceStart, loadedDisplaySrc, loadedImage, selectedSlice]);
+  }, [currentTotalSlices, footerSliceStart, loadedImage]);
 
   const readinessChecks = [
     { label: "原图", value: loadedImage.kind === "Demo" ? "演示图" : "本地文件", ready: true },
@@ -653,6 +654,20 @@ function App() {
     autoLoadAttemptedRef.current = true;
     void loadLocalAmosSample();
   }, [loadedImage.volume]);
+
+  function handleVoxelCoordChange(nextCoord: VoxelCoord) {
+    if (!loadedImage.volume) {
+      setVoxelCoord(nextCoord);
+      return;
+    }
+    const clampedCoord = {
+      x: Math.max(0, Math.min(loadedImage.volume.columns - 1, nextCoord.x)),
+      y: Math.max(0, Math.min(loadedImage.volume.rows - 1, nextCoord.y)),
+      z: Math.max(0, Math.min(loadedImage.volume.slices - 1, nextCoord.z))
+    };
+    setVoxelCoord(clampedCoord);
+    setSelectedSlice(getSelectedSliceForVoxelCoord(clampedCoord, loadedImage.volume.slices));
+  }
 
   function updateSplitPositionFromPointer(event: PointerEvent<HTMLDivElement>) {
     if (compareMode !== "split" || measureMode) return;
@@ -1223,7 +1238,7 @@ function App() {
                       labels={modelLabels}
                       sourceName={loadedImage.name}
                       resultName={resultImage?.name}
-                      onCoordChange={setVoxelCoord}
+                      onCoordChange={handleVoxelCoordChange}
                       onOrganPick={(label, coord) => {
                         const organLabel = labelLookup.byLabel.get(label);
                         if (!organLabel) return;

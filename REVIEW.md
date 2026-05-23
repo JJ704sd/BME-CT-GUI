@@ -549,5 +549,193 @@
 
 ---
 
+## 十六、2026-05-23 三正交视图方向修正
+
+### 16.1 本轮已修复
+
+1. **Sagittal 视图横竖轴调换**
+   - 现象：用户反馈横断面、矢状面、冠状面的显示方向不符合原始 CT 浏览预期，并怀疑前端做了翻转。
+   - 排查结论：未发现 CSS 或 canvas 层的镜像翻转；问题集中在三平面体素到屏幕坐标的映射。此前 Sagittal 使用 `z` 作为屏幕横向、`y` 作为屏幕纵向，视觉上会像被旋转，且不符合“按原始体素坐标展开三平面”的浏览习惯。
+   - 修复：Sagittal 现在使用 `y` 作为屏幕横向、`z` 作为屏幕纵向；对应更新 `getOrientationDimensions()`、`getOrientationDisplayRatio()`、`voxelCoordToSlicePoint()`、`slicePointToVoxelCoord()` 和 `sliceRenderer.ts` 中的取样索引。
+   - 约束：没有新增 CSS 镜像、旋转或强制翻转；mask 与原图继续共用同一套体素映射，保证覆盖对比不发生错位。
+
+2. **方向回归测试**
+   - 更新 `tests/imagingLogic.test.ts`，锁定 Sagittal 的尺寸、显示比例、点击反算体素坐标和十字线坐标映射。
+   - 该测试用于防止后续再把 Sagittal 的 `y/z` 轴误换回去。
+
+### 16.2 本轮验证
+
+- `node tests/imagingLogic.test.ts`：先失败后通过，失败点为 Sagittal 旧尺寸 `{ width: 30, height: 20 }` 与新预期 `{ width: 20, height: 30 }` 不一致。
+- `npm test`：正常 Windows 权限下通过。
+- `npm run build`：正常 Windows 权限下通过。
+- 受限 shell 下 Playwright 和 Vite 仍可能出现 `spawn EPERM`，这是子进程启动权限问题，不是本轮代码方向映射失败。
+
+### 16.3 后续验收建议
+
+- 用 `nnunetv2_files/amos_0117_original.nii/amos_0117(3).nii` 导入前端，分别在 Axial、Sagittal、Coronal 视图检查器官上下/左右关系。
+- 同时加载 `amos_0117_prediction_009d4efdc5f6.nii.gz` 或新的在线推理结果，确认 mask 覆盖与原图在三个平面均保持配准。
+- 如后续需要严格遵循 NIfTI affine 的 RAS/LPS 医学方向，应单独增加“按 header orientation 重定向”的显式模式，不能混入当前“原始体素坐标显示”逻辑。
+
+---
+
+## 十七、2026-05-23 三正交视图方向二次修正
+
+### 17.1 根因复核
+
+- 用户复核后确认上一轮仍不符合正向浏览预期。
+- 使用参考文件 `nnunetv2_files/amos_0117_original.nii/amos_0117(3).nii` 检查 header：该样例的 NIfTI 方向为 `LAS`，仿射矩阵中 `x` 为负向、`y` 和 `z` 为正向。
+- 上一轮虽然修正了 Sagittal 的 `y/z` 轴调换，但仍把数组行号直接映射到屏幕从上到下，导致：
+  - Axial 顶部对应后方，床板/背侧显示在上方；
+  - Sagittal / Coronal 顶部对应低层切片，头足方向倒置；
+  - 主图/底部缩略图仍使用 `main.tsx` 内部轴位渲染函数，和三正交渲染链路没有完全统一。
+
+### 17.2 本轮修复
+
+1. **三正交行方向修正**
+   - Axial：屏幕顶部映射到更大的 `y`，使前方/腹侧位于上方。
+   - Sagittal：屏幕顶部映射到更大的 `z`，使头侧/上方位于上方；屏幕左侧映射到更大的 `y`，使前方位于左侧、后方/脊柱位于右侧。
+   - Coronal：屏幕顶部映射到更大的 `z`，使头侧/上方位于上方。
+   - `voxelCoordToSlicePoint()` 现在需要 `volume` 参数，用于正确反算翻转后的屏幕行坐标。
+   - `slicePointToVoxelCoord()` 同步反算，保证鼠标点击、十字线和器官拾取仍对应同一个体素。
+
+2. **渲染取样修正**
+   - `src/imaging/sliceRenderer.ts` 的 Axial / Sagittal / Coronal 取样索引均同步使用修正后的屏幕行方向。
+   - `src/main.tsx` 内部轴位预览/底部缩略图渲染也同步翻转 `y` 行方向，避免主图预览与三正交视图方向不一致。
+   - 原图和 mask 继续共用相同体素映射，不会因为显示方向修正造成覆盖错位。
+
+3. **方向回归测试**
+   - `tests/imagingLogic.test.ts` 新增/更新断言：
+     - Axial 顶部点击映射到 `y=max`；
+     - Sagittal 顶部点击映射到 `z=max`；
+     - Coronal 顶部点击映射到 `z=max`；
+     - 十字线百分比使用修正后的屏幕坐标。
+
+### 17.3 本轮验证
+
+- `node tests/imagingLogic.test.ts`：先失败后通过，失败点为旧 Axial 行方向仍返回 `row=8`，新预期为 `row=11`。
+- `npm test`：通过。
+- `npm run build`：通过。
+
+### 17.4 后续人工验收
+
+- 重新启动或刷新 Vite 前端，避免浏览器缓存继续显示旧 bundle。
+- 导入 `amos_0117(3).nii` 后检查：
+  - Axial：床板/背侧应位于图像下方；
+  - Coronal：肺部/头侧应位于上方，腹部应位于下方；
+  - Sagittal：头侧应位于上方，前腹侧位于左侧，脊柱/背侧位于右侧。
+- 加载预测或标准答案 mask 后，检查三个平面覆盖是否仍贴合原图器官边界。
+
+---
+
+## 十八、2026-05-23 三视图拖动切片闪回修复
+
+### 18.1 根因
+
+- 用户反馈拖动 Sagittal / Coronal 时切片会闪回上一位置，造成卡顿。
+- 根因是 `selectedSlice` 与 `voxelCoord.z` 双向同步存在一帧竞争：
+  - 拖动三正交视图时先更新 `voxelCoord.z`；
+  - 此时 `selectedSlice` 仍是上一切片；
+  - `selectedSlice -> voxelCoord` 的 effect 会把新 `z` 写回旧切片；
+  - 随后 `voxelCoord.z -> selectedSlice` 再把切片号改到新位置，于是界面出现“闪回”。
+
+### 18.2 本轮修复
+
+1. **拖动时原子同步**
+   - 新增 `getSelectedSliceForVoxelCoord()`，将体素 `z` 直接换算为 1-based 切片号并做边界钳制。
+   - `OrthogonalViewer` 的 `onCoordChange` 不再直接传 `setVoxelCoord`，改为 `handleVoxelCoordChange()`。
+   - `handleVoxelCoordChange()` 在同一个 pointer 事件里同时写入 clamped `voxelCoord` 和 `selectedSlice`，避免旧切片 effect 抢先回写。
+
+2. **减少底部缩略图无效重算**
+   - `footerSlicePreviews` 不再因为每次 `selectedSlice` 变化就重渲染 7 张缩略图。
+   - 只有 `footerSliceStart`、总切片数或源图变化时才重算缩略图；当前切片仍通过按钮 active 状态高亮。
+
+### 18.3 本轮验证
+
+- `node tests/viewerLogic.test.ts`：先失败后通过，新增 `getSelectedSliceForVoxelCoord()` 边界测试。
+- `npm test`：通过。
+- `npm run build`：通过。
+
+### 18.4 后续人工验收
+
+- 在 Axial / Sagittal / Coronal 三个视图中按住鼠标拖动，观察十字线和切片号应连续变化，不应跳回上一切片。
+- 快速拖动 Sagittal / Coronal 的上下方向时，轴位切片号应跟随 `z` 连续更新，底部缩略图窗口只在当前切片移出可见范围时移动。
+
+---
+
+## 十九、2026-05-23 三视图十字线跟手性修复
+
+### 19.1 根因
+
+- 用户反馈拖拽 Axial / Sagittal / Coronal 时，坐标线没有跟着鼠标走。
+- 复核后确认有两个叠加原因：
+  - 鼠标坐标换算使用 `.ortho-canvas` 的盒子，而真正承载图片和十字线的是 `.ortho-image-stage`。在缩放、比例钳制或后续布局变化时，两者可能出现细微差异，导致鼠标位置与十字线百分比不完全一致。
+  - 每次鼠标移动都会触发三张 NIfTI 切片同步重算 data URL。大体积 CT 下这会阻塞 React 提交，十字线必须等底图重渲染完成才移动，视觉上表现为“不跟手”或明显滞后。
+
+### 19.2 本轮修复
+
+1. **鼠标坐标使用真实图片舞台盒子**
+   - `OrthogonalViewer` 在 pointer 事件中优先读取 `.ortho-image-stage.getBoundingClientRect()`。
+   - `clientPointToSlicePoint()` 仍保留 letterbox 处理，但输入 rect 改为实际图片/十字线所在区域，减少 CSS 缩放和布局造成的偏差。
+
+2. **十字线与切片底图解耦**
+   - 新增 `getSliceRenderKey()`：底图渲染只依赖该方向的固定切片号。
+   - `OrthogonalViewer` 使用 `useDeferredValue(props.coord)` 渲染 NIfTI 底图；十字线、读数和鼠标交互继续使用即时 `props.coord`。
+   - 结果：拖动时十字线可以先跟随鼠标移动，底图切片随后低优先级刷新，避免大图同步生成阻塞交互。
+
+3. **指针捕获更稳**
+   - `onPointerMove` 现在在鼠标左键按下或当前元素持有 pointer capture 时都会更新坐标，减少拖出图片边界后移动事件丢失的情况。
+
+### 19.3 本轮验证
+
+- `node tests/imagingLogic.test.ts`：先失败后通过，新增 `getSliceRenderKey()` 测试，确保同一平面内移动十字线不会触发该平面底图重渲染。
+- `npm run build`：通过。
+- `npm test`：通过。
+
+### 19.4 后续人工验收
+
+- 刷新 Vite 页面后分别在 Axial / Sagittal / Coronal 内按住鼠标拖动。
+- 预期：十字线应跟随鼠标即时移动；底图切片可以略有延迟刷新，但不应阻塞十字线。
+- 如果仍感觉滞后，下一步应把 NIfTI 切片渲染迁到 canvas/offscreen worker，彻底避免主线程生成 data URL。
+
+---
+
+## 二十、2026-05-23 三视图十字线横向对齐修复
+
+### 20.1 根因
+
+- 用户复核后指出：纵向基本能对齐，但横向仍未对齐。
+- 复查发现上一轮只解决了拖动延迟和一部分实际舞台盒子问题，但仍存在一个横向偏移源：
+  - `clientPointToSlicePoint()` 会按图片真实显示比例计算 content frame，并扣除横向 letterbox 留白；
+  - 十字线绘制仍直接按整个 `.ortho-image-stage` 百分比定位，没有把同一段横向留白加回来；
+  - 因此当容器比例与图像比例不完全一致时，鼠标映射和十字线绘制使用的坐标系不一致，横向偏移会比纵向更明显。
+
+### 20.2 本轮修复
+
+1. **统一 content frame**
+   - 新增 `getSliceContentFrame(containerRatio, imageRatio)`。
+   - `clientPointToSlicePoint()` 和 `getCrosshairPercent()` 现在共用同一个 content frame 计算。
+
+2. **十字线只覆盖真实图片内容区**
+   - `OrthogonalViewer` 使用 `ResizeObserver` 读取 `.ortho-image-stage` 的实际显示比例。
+   - 垂直十字线的 `left` 会加上 content frame 横向偏移。
+   - 水平十字线的 `left/width` 和垂直十字线的 `top/height` 也限制在真实图片内容区内，不再覆盖 letterbox 留白。
+
+3. **保留上一轮跟手性优化**
+   - 底图仍使用 deferred 坐标低优先级刷新。
+   - 十字线继续使用即时坐标，不等待 NIfTI data URL 生成。
+
+### 20.3 本轮验证
+
+- `node tests/imagingLogic.test.ts`：先失败后通过，新增横向 letterbox 场景测试：2:1 容器内的 1:1 图像，十字线 x 必须包含 25% 左侧留白。
+- `npm run build`：通过。
+- `npm test`：通过。
+
+### 20.4 后续人工验收
+
+- 刷新 Vite 页面后，在三视图中横向拖动鼠标。
+- 预期：垂直十字线应与鼠标横坐标一致；如果图片左右有留白，十字线不会跑到留白区，而是在真实 CT 图像内容区内对齐。
+
+---
+
 *文档版本：2026-05-23*
 *更新依据：当前 `src/main.tsx`、`src/components/OrthogonalViewer.tsx`、`src/imaging/voxelMapping.ts`、`src/imaging/sliceRenderer.ts`、`src/data/organDetails.ts`、`src/inference/inferenceClient.ts`、`server/main.py`、`server/requirements.txt`、`tests/*.test.ts` 与本地运行验证结果。*

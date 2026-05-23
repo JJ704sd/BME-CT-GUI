@@ -10,6 +10,12 @@ export type DisplayImageLike = {
   volume?: Partial<DisplayGridVolume>;
 };
 
+export type DisplayVoxelCoord = {
+  x: number;
+  y: number;
+  z: number;
+};
+
 export function volumesShareDisplayGrid(source: DisplayGridVolume, result: DisplayGridVolume) {
   return source.columns === result.columns
     && source.rows === result.rows
@@ -67,6 +73,12 @@ export function getStableSliceWindowStart(
   }
 
   return normalizedStart;
+}
+
+export function getSelectedSliceForVoxelCoord(coord: DisplayVoxelCoord, totalSlices: number) {
+  const safeTotal = Math.max(1, Math.floor(totalSlices));
+  const slice = Math.round(coord.z) + 1;
+  return Math.max(1, Math.min(safeTotal, slice));
 }
 
 export function getRegistrationStatus(source: DisplayImageLike, result?: DisplayImageLike | null) {
