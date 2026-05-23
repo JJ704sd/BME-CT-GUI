@@ -1024,5 +1024,35 @@
 
 ---
 
+## 二十七、2026-05-24 GitHub 仓库提交记录
+
+### 27.1 发布目标
+
+- GitHub 仓库：`https://github.com/JJ704sd/BME-CT-GUI`
+- 发布分支：`main`
+- 最新功能提交：`49def93 feat: refine ct gui reference workflow`
+- 本地工作目录：`D:\BME2026\BME_CT_Seg\segmentation-gui-prototype`
+
+### 27.2 提交边界
+
+- GUI 已作为独立 git 仓库提交，不再依赖父目录 `D:\BME2026\BME_CT_Seg` 的 nnUNet 上游仓库状态。
+- 未提交 `node_modules/`、`dist/`、`.test-output/`、`server/work/`、`nnunetv2_files/`、`screenshots/`。
+- 未提交真实 CT、NIfTI、checkpoint 权重或推理输出；这些仍通过 `.gitignore` 排除。
+- 父目录中已有的大量 `nnunetv2/` 文件、训练数据目录和环境目录没有纳入本次 GUI 仓库提交。
+
+### 27.3 推送过程
+
+- 初次直接推送被远端拒绝，因为 `main` 已存在历史提交。
+- 后续基于 `origin/main` 创建更新分支，套用本地 GUI 最新变更并提交 `49def93`。
+- 使用 fast-forward 方式推送到远端 `main`，没有强推覆盖远端历史。
+- 推送后确认 `origin/main` 已指向 `49def93`，GitHub 页面可访问。
+
+### 27.4 发布前验证
+
+- `npm test`：通过，使用全新 `SEGMENTATION_TEST_TMP`，并在正常权限下运行 Playwright 浏览器布局测试。
+- `npm run build`：通过，TypeScript 与 Vite 生产构建均成功。
+
+---
+
 *文档版本：2026-05-24*
 *更新依据：当前 `src/main.tsx`、`src/components/OrthogonalViewer.tsx`、`src/imaging/voxelMapping.ts`、`src/imaging/sliceRenderer.ts`、`src/data/organDetails.ts`、`src/inference/inferenceClient.ts`、`server/main.py`、`server/requirements.txt`、`tests/*.test.ts` 与本地运行验证结果。*
