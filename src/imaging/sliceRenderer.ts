@@ -1,5 +1,5 @@
 import type { Orientation, VoxelCoord } from "./voxelMapping";
-import { clampVoxelCoord, getOrientationDimensions, getOrientationDisplayRatio, getSliceIndexForOrientation } from "./voxelMapping";
+import { clampVoxelCoord, getOrientationDimensions, getOrientationDisplayRatio, getSliceImageCacheKey, getSliceIndexForOrientation } from "./voxelMapping";
 
 export type NiftiVolumeLike = {
   image: ArrayBuffer;
@@ -30,6 +30,26 @@ const maskPalette = [
   [184, 162, 255],
   [255, 184, 107]
 ];
+const sliceRenderCache = new WeakMap<NiftiVolumeLike, Map<string, string>>();
+const MAX_CACHED_SLICES_PER_VOLUME = 96;
+
+function getVolumeRenderCache(volume: NiftiVolumeLike) {
+  let cache = sliceRenderCache.get(volume);
+  if (!cache) {
+    cache = new Map();
+    sliceRenderCache.set(volume, cache);
+  }
+  return cache;
+}
+
+function rememberRenderedSlice(cache: Map<string, string>, cacheKey: string, dataUrl: string) {
+  cache.set(cacheKey, dataUrl);
+  if (cache.size > MAX_CACHED_SLICES_PER_VOLUME) {
+    const oldest = cache.keys().next().value;
+    if (oldest) cache.delete(oldest);
+  }
+  return dataUrl;
+}
 
 export function getNiftiValue(view: DataView, byteOffset: number, datatypeCode: number, littleEndian: boolean) {
   switch (datatypeCode) {
@@ -102,6 +122,11 @@ export function renderNiftiSliceToDataUrl(
   orientation: Orientation,
   visibleLabels?: Set<number>
 ) {
+  const cacheKey = getSliceImageCacheKey(orientation, coord, volume, mode, visibleLabels);
+  const cache = getVolumeRenderCache(volume);
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
   const dimensions = getOrientationDimensions(orientation, volume);
   const fixedSlice = getSliceIndexForOrientation(orientation, clampVoxelCoord(coord, volume));
   const view = new DataView(volume.image);
@@ -160,7 +185,8 @@ export function renderNiftiSliceToDataUrl(
   context.putImageData(imageData, 0, 0);
   const displaySize = getDisplayCanvasSize(dimensions, getOrientationDisplayRatio(orientation, volume));
   if (displaySize.width === dimensions.width && displaySize.height === dimensions.height) {
-    return canvas.toDataURL("image/png");
+    const dataUrl = canvas.toDataURL("image/png");
+    return rememberRenderedSlice(cache, cacheKey, dataUrl);
   }
   const outputCanvas = document.createElement("canvas");
   outputCanvas.width = displaySize.width;
@@ -169,5 +195,6 @@ export function renderNiftiSliceToDataUrl(
   if (!outputContext) throw new Error("浏览器无法创建 Canvas 渲染上下文。");
   outputContext.imageSmoothingEnabled = mode === "intensity";
   outputContext.drawImage(canvas, 0, 0, outputCanvas.width, outputCanvas.height);
-  return outputCanvas.toDataURL("image/png");
+  const dataUrl = outputCanvas.toDataURL("image/png");
+  return rememberRenderedSlice(cache, cacheKey, dataUrl);
 }

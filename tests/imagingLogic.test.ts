@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   clampVoxelCoord,
   clientPointToSlicePoint,
@@ -6,13 +7,61 @@ import {
   getOrientationDisplayAspect,
   getOrientationDimensions,
   getSliceContentFrame,
+  getSliceImageCacheKey,
   getSliceRenderKey,
   getSliceIndexForOrientation,
   slicePointToVoxelCoord,
   voxelCoordToSlicePoint
 } from "../src/imaging/voxelMapping.ts";
 import { buildLabelLookup, defaultOrganLabels, getOrganDetail } from "../src/data/organDetails.ts";
-import { getInferenceResultMeta, getInferenceStatusCopy, normalizeModelLabels, parseInferenceEvent } from "../src/inference/inferenceClient.ts";
+import { getInferenceResultMeta, getInferenceStatusCopy, getPhaseTimingSummary, getResourceSnapshotCopy, normalizeModelLabels, parseInferenceEvent } from "../src/inference/inferenceClient.ts";
+import { buildOrganLayersFromLabels } from "../src/organLayerLogic.ts";
+import { DEFAULT_REFERENCE_CASES, getReferenceCaseOriginalUrl, normalizeReferenceCases } from "../src/referenceCases.ts";
+
+const mainSource = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
+
+for (const copy of ["载入 AMOS " + "样例", "本地 AMOS " + "样例", "AMOS CT " + "样例"]) {
+  assert.equal(mainSource.includes(copy), false, `UI should not use AMOS-only copy: ${copy}`);
+}
+assert.equal(mainSource.includes("载入参考病例"), true, "UI should expose built-in data as a reference case");
+assert.equal(mainSource.includes("内置参考病例"), true, "UI should distinguish the built-in reference case from arbitrary imported CT cases");
+assert.equal(mainSource.includes("api/samples/amos_0117/original"), false, "UI should load reference cases through sample metadata, not a hard-coded AMOS URL");
+
+assert.deepEqual(normalizeReferenceCases({
+  samples: [
+    {
+      id: "amos_0117",
+      name: "AMOS 0117",
+      dataset: "AMOS22",
+      modality: "CT",
+      role: "built-in-reference",
+      original_url: "/api/samples/amos_0117/original",
+      label_url: "/api/samples/amos_0117/label",
+      original_filename: "amos_0117_original.nii.gz",
+      label_filename: "amos_0117_label.nii.gz",
+      validation_available: true,
+      has_original: true,
+      has_label: true
+    }
+  ]
+}), [
+  {
+    id: "amos_0117",
+    name: "AMOS 0117",
+    dataset: "AMOS22",
+    modality: "CT",
+    role: "built-in-reference",
+    description: "",
+    originalUrl: "/api/samples/amos_0117/original",
+    labelUrl: "/api/samples/amos_0117/label",
+    originalFilename: "amos_0117_original.nii.gz",
+    labelFilename: "amos_0117_label.nii.gz",
+    validationAvailable: true,
+    hasOriginal: true,
+    hasLabel: true
+  }
+]);
+assert.equal(getReferenceCaseOriginalUrl("http://127.0.0.1:8000", DEFAULT_REFERENCE_CASES[0]), "http://127.0.0.1:8000/api/samples/amos_0117/original");
 
 const volume = { columns: 10, rows: 20, slices: 30 };
 const coord = { x: 4, y: 8, z: 12 };
@@ -59,6 +108,10 @@ assert.equal(getSliceRenderKey("sagittal", coord, volume), getSliceRenderKey("sa
 assert.notEqual(getSliceRenderKey("sagittal", coord, volume), getSliceRenderKey("sagittal", { ...coord, x: 8 }, volume));
 assert.equal(getSliceRenderKey("coronal", coord, volume), getSliceRenderKey("coronal", { ...coord, x: 8, z: 18 }, volume));
 assert.notEqual(getSliceRenderKey("coronal", coord, volume), getSliceRenderKey("coronal", { ...coord, y: 12 }, volume));
+assert.equal(getSliceImageCacheKey("sagittal", coord, volume, "intensity"), getSliceImageCacheKey("sagittal", { ...coord, y: 12, z: 18 }, volume, "intensity"));
+assert.notEqual(getSliceImageCacheKey("sagittal", coord, volume, "intensity"), getSliceImageCacheKey("sagittal", { ...coord, x: 8 }, volume, "intensity"));
+assert.equal(getSliceImageCacheKey("axial", coord, volume, "mask", new Set([3, 1])), getSliceImageCacheKey("axial", coord, volume, "mask", new Set([1, 3])));
+assert.notEqual(getSliceImageCacheKey("axial", coord, volume, "mask", new Set([3, 1])), getSliceImageCacheKey("axial", coord, volume, "mask", new Set([1])));
 
 assert.deepEqual(voxelCoordToSlicePoint("axial", coord, volume), { column: 4, row: 11 });
 assert.deepEqual(voxelCoordToSlicePoint("sagittal", coord, volume), { column: 11, row: 17 });
@@ -92,6 +145,23 @@ assert.equal(buildLabelLookup(defaultOrganLabels).byLabel.get(15)?.id, "prostate
 for (const label of defaultOrganLabels) {
   assert.notEqual(getOrganDetail(label.id).segmentationNotes.includes("待完善"), true, `${label.id} should have an organ detail`);
 }
+const previousOrganLayers = [
+  { id: "liver", name: "肝脏", color: "#4fd1a5", score: 96.8, volume: "1421 ml", visible: false, quality: "accepted" as const }
+];
+const syncedOrganLayers = buildOrganLayersFromLabels(defaultOrganLabels, previousOrganLayers);
+assert.equal(syncedOrganLayers.length, 15);
+assert.equal(syncedOrganLayers.find((organ) => organ.id === "liver")?.visible, false);
+assert.equal(syncedOrganLayers.find((organ) => organ.id === "liver")?.quality, "accepted");
+assert.equal(syncedOrganLayers.find((organ) => organ.id === "bladder")?.name, "膀胱");
+assert.equal(syncedOrganLayers.find((organ) => organ.id === "prostate-or-uterus")?.score, null);
+const validationSyncedLayers = buildOrganLayersFromLabels(defaultOrganLabels, previousOrganLayers, [
+  { label: 6, dice: 0.552 },
+  { label: 10, dice: 0.918 }
+]);
+assert.equal(validationSyncedLayers.find((organ) => organ.id === "liver")?.score, 55.2);
+assert.equal(validationSyncedLayers.find((organ) => organ.id === "liver")?.quality, "review");
+assert.equal(validationSyncedLayers.find((organ) => organ.id === "pancreas")?.score, 91.8);
+assert.equal(validationSyncedLayers.find((organ) => organ.id === "pancreas")?.quality, "accepted");
 
 assert.deepEqual(parseInferenceEvent('data: {"type":"progress","progress":45,"stage":"推理中"}\n\n'), {
   type: "progress",
@@ -119,11 +189,52 @@ assert.deepEqual(parseInferenceEvent('data: {"type":"complete","progress":100,"s
     message: "达标"
   }
 });
+assert.deepEqual(parseInferenceEvent('data: {"type":"complete","progress":100,"stage":"完成","resource_latest":{"phase":"completed","timestamp":100.5,"device":"cuda","disk_free_bytes":4294967296,"gpu":{"name":"RTX 4060","memory_used_mib":512,"memory_total_mib":8192}}}\n\n'), {
+  type: "complete",
+  progress: 100,
+  stage: "完成",
+  resource_latest: {
+    phase: "completed",
+    timestamp: 100.5,
+    device: "cuda",
+    disk_free_bytes: 4294967296,
+    gpu: {
+      name: "RTX 4060",
+      memory_used_mib: 512,
+      memory_total_mib: 8192
+    }
+  }
+});
+assert.deepEqual(parseInferenceEvent('data: {"type":"complete","progress":100,"stage":"完成","phase_timings":{"prepare_runtime_model":0.42,"persistent_worker":68.7,"validation":2.1}}\n\n'), {
+  type: "complete",
+  progress: 100,
+  stage: "完成",
+  phase_timings: {
+    prepare_runtime_model: 0.42,
+    persistent_worker: 68.7,
+    validation: 2.1
+  }
+});
 assert.equal(getInferenceStatusCopy({ status: "running", progress: 45, stage: "推理中" }), "推理中 · 45%");
 assert.equal(getInferenceStatusCopy({ status: "succeeded", mode: "real-nnunetv2", duration_seconds: 386.42 }), "真实 nnUNetv2 推理完成 · 6分26秒");
+assert.equal(getInferenceStatusCopy({ status: "succeeded", mode: "cached-real-nnunetv2", duration_seconds: 0.38 }), "缓存推理结果回填完成 · 0秒");
 assert.equal(getInferenceStatusCopy({ status: "succeeded", mode: "debug-label-fallback" }), "调试标签回填完成（非真实推理）");
+assert.equal(getInferenceStatusCopy({ status: "cancelled", jobId: "cancel0001" }), "推理任务已取消");
 assert.equal(getInferenceStatusCopy({ status: "failed", message: "模型配置不完整" }), "模型配置不完整");
+assert.equal(getResourceSnapshotCopy({
+  phase: "completed",
+  timestamp: 100.5,
+  device: "cuda",
+  disk_free_bytes: 4294967296,
+  gpu: { name: "RTX 4060", memory_used_mib: 512, memory_total_mib: 8192 }
+}), "设备 cuda · RTX 4060 显存 512/8192 MiB · 磁盘可用 4.00 GB");
+assert.equal(getPhaseTimingSummary({
+  prepare_runtime_model: 0.42,
+  persistent_worker: 68.7,
+  validation: 2.1
+}), "常驻 worker 68.7秒");
 assert.equal(getInferenceResultMeta("real-nnunetv2", "512x512x100"), "512x512x100 · nnUNetv2 真实推理结果");
+assert.equal(getInferenceResultMeta("cached-real-nnunetv2", "512x512x100"), "512x512x100 · 历史缓存 nnUNetv2 结果");
 assert.equal(getInferenceResultMeta("debug-label-fallback", "512x512x100"), "512x512x100 · 调试标签回填结果（非真实推理）");
 assert.deepEqual(normalizeModelLabels({
   models: [{

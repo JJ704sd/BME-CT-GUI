@@ -2110,6 +2110,41 @@ h1 {
   gap: 8px;
 }
 
+.reference-case-control {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.reference-case-control label {
+  color: #95a7a1;
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.reference-case-control select {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 7px;
+  background: #101716;
+  color: #e3efeb;
+  font-size: 13px;
+  font-weight: 720;
+}
+
+.reference-case-control small {
+  overflow: hidden;
+  color: #a9b6b2;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .action-stack button {
   display: inline-flex;
   align-items: center;

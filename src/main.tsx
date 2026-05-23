@@ -43,10 +43,14 @@ import demoChestCtImage from "./assets/demo-chest-ct.png";
 import demoPancreasCtImage from "./assets/demo-pancreas-ct.png";
 import { OrthogonalViewer } from "./components/OrthogonalViewer";
 import { buildLabelLookup, defaultOrganLabels, getOrganDetail } from "./data/organDetails";
-import { createInferenceJob, downloadInferenceResult, fetchModelLabels, getInferenceResultMeta, getInferenceStatusCopy, parseInferenceEvent, type InferenceStatus, type ValidationSummary } from "./inference/inferenceClient";
+import { cancelInferenceJob, createInferenceJob, downloadInferenceResult, fetchModelLabels, getInferenceResultMeta, getInferenceStatusCopy, getPhaseTimingSummary, getResourceSnapshotCopy, parseInferenceEvent, type InferenceStatus, type PhaseTimings, type ResourceSnapshot, type ValidationSummary } from "./inference/inferenceClient";
 import type { VoxelCoord } from "./imaging/voxelMapping";
+import { buildOrganLayersFromLabels, formatOrganScore, getMeanOrganDice, type OrganLayer as Organ, type OrganLayerQuality as QualityState } from "./organLayerLogic";
+import { DEFAULT_REFERENCE_CASES, getReferenceCaseOriginalUrl, normalizeReferenceCases, type ReferenceCase } from "./referenceCases";
 import { buildCustomCaseId, getAlignmentCaptionCopy, getCustomCasePanelCopy, getDisplayAspectRatio, getRegistrationStatus, getSelectedSliceForVoxelCoord, getSplitPositionFromClientX, getStableSliceWindowStart, volumesShareDisplayGrid } from "./viewerLogic";
 import "./styles.css";
+
+const API_ENDPOINT = "http://127.0.0.1:8000";
 
 type ViewMode = "CT" | "Mask" | "3D";
 type RunState = "idle" | "running" | "complete";
@@ -54,7 +58,6 @@ type ModuleId = "项目" | "数据" | "分割" | "评估" | "报告";
 type CompareMode = "split" | "overlay" | "side" | "difference";
 type UploadRole = "source" | "result";
 type RemovalTarget = "source" | "result" | "session";
-type QualityState = "accepted" | "review";
 type NiftiRenderMode = "intensity" | "mask";
 
 type NiftiVolume = {
@@ -85,16 +88,6 @@ type LoadedImage = {
   volume?: NiftiVolume;
   sliceIndex?: number;
   file?: File;
-};
-
-type Organ = {
-  id: string;
-  name: string;
-  color: string;
-  score: number;
-  volume: string;
-  visible: boolean;
-  quality: QualityState;
 };
 
 type CaseItem = {
@@ -405,7 +398,7 @@ function formatBytes(value: number | undefined) {
 }
 
 function getValidationStatusCopy(validation: ValidationSummary | null) {
-  if (!validation) return "等待样例推理";
+  if (!validation) return "等待标准答案验证";
   if (validation.status === "passed") return "标准答案通过";
   if (validation.status === "review") return "建议人工复核";
   return "无法自动验证";
@@ -460,6 +453,7 @@ function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const resultFileInputRef = useRef<HTMLInputElement>(null);
   const autoLoadAttemptedRef = useRef(false);
+  const activeJobIdRef = useRef<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("Mask");
   const [runState, setRunState] = useState<RunState>("complete");
   const [progress, setProgress] = useState(100);
@@ -499,7 +493,9 @@ function App() {
   const [toast, setToast] = useState("演示病例已加载");
   const [inferenceStatus, setInferenceStatus] = useState<InferenceStatus>({ status: "idle" });
   const [validationSummary, setValidationSummary] = useState<ValidationSummary | null>(null);
-  const [sampleLoadState, setSampleLoadState] = useState<{ status: "idle" | "loading" | "ready" | "failed"; message: string }>({ status: "idle", message: "等待载入本地 AMOS 样例" });
+  const [sampleLoadState, setSampleLoadState] = useState<{ status: "idle" | "loading" | "ready" | "failed"; message: string }>({ status: "idle", message: "等待载入内置参考病例" });
+  const [referenceCases, setReferenceCases] = useState<ReferenceCase[]>(DEFAULT_REFERENCE_CASES);
+  const [selectedReferenceCaseId, setSelectedReferenceCaseId] = useState(DEFAULT_REFERENCE_CASES[0]?.id ?? "");
   const [selectedOrganDetail, setSelectedOrganDetail] = useState<{ id: string; label?: number; coord: VoxelCoord } | null>(null);
   const [dragTarget, setDragTarget] = useState<UploadRole | null>(null);
   const [lastImport, setLastImport] = useState("等待导入本地影像或分割结果图");
@@ -528,17 +524,25 @@ function App() {
   const currentSliceIndex = clampSliceIndex(selectedSlice - 1, currentTotalSlices);
   const selectedOrgan = organs.find((organ) => organ.id === selectedOrganId) ?? organs[0];
   const selectedModel = modelOptions.find((model) => model.id === selectedModelId) ?? modelOptions[0];
+  const selectedReferenceCase = referenceCases.find((item) => item.id === selectedReferenceCaseId) ?? referenceCases[0] ?? DEFAULT_REFERENCE_CASES[0];
+  const selectedReferenceCaseMeta = selectedReferenceCase
+    ? `${selectedReferenceCase.dataset} · ${selectedReferenceCase.validationAvailable ? "有标准答案" : "无标准答案"}`
+    : "未发现参考病例";
+  const canLoadSelectedReferenceCase = Boolean(selectedReferenceCase?.hasOriginal);
   const visibleOrgans = useMemo(() => new Set(organs.filter((organ) => organ.visible).map((organ) => organ.id)), [organs]);
   const labelLookup = useMemo(() => buildLabelLookup(modelLabels), [modelLabels]);
   const visibleLabels = useMemo(() => new Set(modelLabels.filter((label) => visibleOrgans.has(label.id) || !organs.some((organ) => organ.id === label.id)).map((label) => label.label)), [modelLabels, organs, visibleOrgans]);
   const acceptedCount = organs.filter((organ) => organ.quality === "accepted").length;
   const reviewCount = organs.length - acceptedCount;
-  const averageDice = organs.length ? (organs.reduce((sum, organ) => sum + organ.score / 100, 0) / organs.length).toFixed(3) : "0.000";
+  const scoredMeanDice = getMeanOrganDice(organs);
+  const averageDice = scoredMeanDice === null ? "待验证" : scoredMeanDice.toFixed(3);
   const displayedAverageDice = validationSummary?.mean_dice != null ? formatDiceMetric(validationSummary.mean_dice) : averageDice;
   const validationStatusCopy = getValidationStatusCopy(validationSummary);
-  const validationMessage = validationSummary?.message ?? "载入本地 AMOS 样例并运行分割后，将自动用标准答案计算 Dice。";
+  const validationMessage = validationSummary?.message ?? "载入内置参考病例并运行分割后，将自动用标准答案计算 Dice。";
   const inferenceDurationCopy = inferenceStatus.status === "succeeded" ? formatSeconds(inferenceStatus.duration_seconds) : "待记录";
   const inferenceResultSizeCopy = inferenceStatus.status === "succeeded" ? formatBytes(inferenceStatus.result_size_bytes) : "待生成";
+  const inferenceResourceCopy = inferenceStatus.status === "succeeded" ? getResourceSnapshotCopy(inferenceStatus.resource_latest) : "待记录";
+  const inferencePhaseTimingCopy = inferenceStatus.status === "succeeded" ? getPhaseTimingSummary(inferenceStatus.phase_timings) : "待记录";
   const hasLocalSource = loadedImage.kind !== "Demo";
   const hasImportedFiles = hasLocalSource || Boolean(resultImage);
   const customCasePanelCopy = useMemo(
@@ -608,7 +612,7 @@ function App() {
   ];
 
   const aiFindings = [
-    `${selectedOrgan.name} 边界置信度 ${selectedOrgan.score}%`,
+    `${selectedOrgan.name} 质控状态 ${formatOrganScore(selectedOrgan.score)}`,
     `当前切片 ${selectedSlice} 已显示 ${visibleOrgans.size} 个器官`,
     reviewCount > 0 ? `${reviewCount} 个器官建议人工复核` : "所有器官已通过质控",
     measurements.length > 0 ? `已记录 ${measurements.length} 个测量点` : "尚未添加测量点"
@@ -640,19 +644,41 @@ function App() {
   }, [inferenceStatus]);
 
   useEffect(() => {
-    void fetchModelLabels("http://127.0.0.1:8000")
+    void fetchModelLabels(API_ENDPOINT)
       .then((labels) => {
-        if (labels.length) setModelLabels(labels);
+        if (labels.length) {
+          setModelLabels(labels);
+          syncOrganLayers(labels);
+        }
       })
       .catch(() => {
         setModelLabels(defaultOrganLabels);
+        syncOrganLayers(defaultOrganLabels);
+      });
+  }, []);
+
+  useEffect(() => {
+    void fetch(`${API_ENDPOINT}/api/samples`)
+      .then((response) => {
+        if (!response.ok) throw new Error("参考病例列表不可用");
+        return response.json();
+      })
+      .then((payload) => {
+        const nextCases = normalizeReferenceCases(payload);
+        setReferenceCases(nextCases);
+        setSelectedReferenceCaseId((current) => nextCases.some((item) => item.id === current) ? current : nextCases[0]?.id ?? current);
+        setSampleLoadState((current) => current.status === "idle" ? { ...current, message: `可载入 ${nextCases[0]?.name ?? "内置参考病例"}` } : current);
+      })
+      .catch(() => {
+        setReferenceCases(DEFAULT_REFERENCE_CASES);
+        setSelectedReferenceCaseId(DEFAULT_REFERENCE_CASES[0]?.id ?? "");
       });
   }, []);
 
   useEffect(() => {
     if (autoLoadAttemptedRef.current || loadedImage.volume) return;
     autoLoadAttemptedRef.current = true;
-    void loadLocalAmosSample();
+    void loadReferenceCase();
   }, [loadedImage.volume]);
 
   function handleVoxelCoordChange(nextCoord: VoxelCoord) {
@@ -702,12 +728,18 @@ function App() {
     splitDragActiveRef.current = false;
     setIsDraggingSplit(false);
   }
+
+  function syncOrganLayers(labels = modelLabels, validationLabels?: ValidationSummary["labels"]) {
+    setOrgans((items) => buildOrganLayersFromLabels(labels, items, validationLabels));
+    setSelectedOrganId((current) => labels.some((label) => label.id === current) ? current : labels[0]?.id ?? current);
+  }
+
   async function startSegmentation(sourceOverride?: LoadedImage) {
     let sourceImage = sourceOverride ?? loadedImage;
     if (!sourceImage.volume || !sourceImage.file) {
-      const loaded = await loadLocalAmosSample();
+      const loaded = await loadReferenceCase();
       if (!loaded) {
-        setInferenceStatus({ status: "failed", message: "请先导入 .nii/.nii.gz 原图，或确认本地 AMOS 样例服务已启动" });
+        setInferenceStatus({ status: "failed", message: "请先导入 .nii/.nii.gz 原图，或确认本地参考病例服务已启动" });
         return;
       }
       sourceImage = loaded;
@@ -718,20 +750,29 @@ function App() {
     setViewMode("Mask");
     setCompareMode("overlay");
     setValidationSummary(null);
+    activeJobIdRef.current = null;
     setInferenceStatus({ status: "submitting" });
     setLogs([`提交本地 nnUNetv2 任务：${selectedModel.name}`, `质控提示阈值 ${confidenceThreshold}% · 后处理 ${Object.values(postprocessConfig).filter(Boolean).length}/3`, ...baseLogs]);
 
     try {
-      const endpoint = "http://127.0.0.1:8000";
+      const endpoint = API_ENDPOINT;
       const job = await createInferenceJob(endpoint, sourceImage.file!, {
         modelId: selectedModelId,
         confidenceThreshold,
         postprocess: postprocessConfig
       });
-      setInferenceStatus({ status: "running", jobId: job.job_id, progress: 1, stage: job.mode === "debug-label-fallback" ? "使用本地标签调试回退" : "后端真实推理已启动" });
+      activeJobIdRef.current = job.job_id;
+      setInferenceStatus({
+        status: "running",
+        jobId: job.job_id,
+        progress: 1,
+        stage: job.cached_result ? "命中历史缓存，正在回填结果" : job.mode === "debug-label-fallback" ? "使用本地标签调试回退" : "后端真实推理已启动"
+      });
 
       let durationSeconds: number | undefined;
       let resultSizeBytes: number | undefined;
+      let resourceLatest: ResourceSnapshot | undefined;
+      let phaseTimings: PhaseTimings | undefined;
       await new Promise<void>((resolve, reject) => {
         const events = new EventSource(`${endpoint}/api/segment/jobs/${job.job_id}/events`);
         events.onmessage = (event) => {
@@ -749,10 +790,19 @@ function App() {
               const validation = parsed.validation;
               if (validation) {
                 setValidationSummary(validation);
+                syncOrganLayers(modelLabels, validation.labels);
                 setLogs((items) => [`标准答案验证：${formatDiceMetric(validation.mean_dice)} · ${validation.message ?? "已生成验证摘要"}`, ...items].slice(0, 8));
               }
               durationSeconds = parsed.duration_seconds;
               resultSizeBytes = parsed.result_size_bytes;
+              resourceLatest = parsed.resource_latest;
+              phaseTimings = parsed.phase_timings;
+              if (resourceLatest) {
+                setLogs((items) => [`资源记录：${getResourceSnapshotCopy(resourceLatest)}`, ...items].slice(0, 8));
+              }
+              if (phaseTimings) {
+                setLogs((items) => [`耗时瓶颈：${getPhaseTimingSummary(phaseTimings)}`, ...items].slice(0, 8));
+              }
               events.close();
               resolve();
             }
@@ -783,15 +833,40 @@ function App() {
       });
       setProgress(100);
       setRunState("complete");
-      setInferenceStatus({ status: "succeeded", jobId: job.job_id, mode: job.mode, duration_seconds: durationSeconds, result_size_bytes: resultSizeBytes });
-      setLastImport(`${job.mode === "debug-label-fallback" ? "调试结果" : "真实推理结果"}就绪：${job.job_id}`);
+      setInferenceStatus({ status: "succeeded", jobId: job.job_id, mode: job.mode, duration_seconds: durationSeconds, result_size_bytes: resultSizeBytes, resource_latest: resourceLatest, phase_timings: phaseTimings });
+      activeJobIdRef.current = null;
+      setLastImport(`${job.cached_result ? "缓存推理结果" : job.mode === "debug-label-fallback" ? "调试结果" : "真实推理结果"}就绪：${job.job_id}`);
       setLogs((items) => [`分割结果已加载到三正交视图 · ${formatSeconds(durationSeconds)} · ${formatBytes(resultSizeBytes)}`, ...items].slice(0, 8));
     } catch (error) {
       const message = error instanceof Error ? error.message : "推理失败";
       setRunState("idle");
       setProgress(0);
-      setInferenceStatus({ status: "failed", message });
-      setLogs((items) => [`推理失败：${message}`, ...items].slice(0, 8));
+      if (message.includes("取消")) {
+        setInferenceStatus({ status: "cancelled", jobId: activeJobIdRef.current ?? undefined });
+      } else {
+        setInferenceStatus({ status: "failed", message, jobId: activeJobIdRef.current ?? undefined });
+      }
+      activeJobIdRef.current = null;
+      setLogs((items) => [`${message.includes("取消") ? "推理已取消" : "推理失败"}：${message}`, ...items].slice(0, 8));
+    }
+  }
+
+  async function cancelSegmentation() {
+    const jobId = activeJobIdRef.current;
+    if (!jobId) {
+      setToast("任务正在提交，本地 job 创建后可取消");
+      return;
+    }
+    try {
+      await cancelInferenceJob("http://127.0.0.1:8000", jobId);
+      setRunState("idle");
+      setProgress(0);
+      setInferenceStatus({ status: "cancelled", jobId });
+      setLogs((items) => [`已请求取消推理任务：${jobId}`, ...items].slice(0, 8));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "取消推理任务失败";
+      setInferenceStatus({ status: "failed", message, jobId });
+      setLogs((items) => [`取消失败：${message}`, ...items].slice(0, 8));
     }
   }
 
@@ -829,7 +904,7 @@ function App() {
 
   function createCustomCaseFromCurrent() {
     if (!hasLocalSource) {
-      setToast("请先上传原图，再新建自定义病例");
+      setToast("请先导入 CT 原图，再新建自定义病例");
       return;
     }
     const id = buildCustomCaseId(allCases.map((caseItem) => caseItem.id));
@@ -949,14 +1024,16 @@ function App() {
       setValidationSummary(null);
       if (image.volume) setSelectedSlice((image.sliceIndex ?? Math.floor(image.volume.slices / 2)) + 1);
       if (image.volume) setVoxelCoord({ x: Math.floor(image.volume.columns / 2), y: Math.floor(image.volume.rows / 2), z: image.sliceIndex ?? Math.floor(image.volume.slices / 2) });
+      if (image.volume) syncOrganLayers(modelLabels);
       setLogs((items) => [`原图已载入：${file.name}`, ...items].slice(0, 8));
-      setToast("原图已载入，可继续上传结果图对比");
+      setToast("原图已载入，可继续导入分割结果对比");
       setLastImport(`原图就绪：${file.name}`);
       return;
     }
     setResultImage(image);
     setValidationSummary(null);
     if (!loadedImage.volume && image.volume) setSelectedSlice((image.sliceIndex ?? Math.floor(image.volume.slices / 2)) + 1);
+    if (image.volume) syncOrganLayers(modelLabels);
     setViewMode("CT");
     setCompareMode("split");
     const mismatch = loadedImage.volume && image.volume
@@ -967,29 +1044,32 @@ function App() {
     setLastImport(mismatch ? `结果图需复核：${file.name}` : `结果图就绪：${file.name}`);
   }
 
-  async function loadLocalAmosSample(): Promise<LoadedImage | null> {
+  async function loadReferenceCase(referenceCase = selectedReferenceCase): Promise<LoadedImage | null> {
     try {
-      setSampleLoadState({ status: "loading", message: "正在从本地后端读取 AMOS CT 样例..." });
-      setToast("正在载入本地 AMOS 样例原图");
-      const response = await fetch("http://127.0.0.1:8000/api/samples/amos_0117/original");
-      if (!response.ok) throw new Error("无法从本地后端读取 AMOS 样例，请确认 server 已启动");
+      if (!referenceCase) throw new Error("未找到可载入的参考病例");
+      setSelectedReferenceCaseId(referenceCase.id);
+      setSampleLoadState({ status: "loading", message: `正在从本地后端读取 ${referenceCase.name}...` });
+      setToast(`正在载入参考病例：${referenceCase.name}`);
+      const response = await fetch(getReferenceCaseOriginalUrl(API_ENDPOINT, referenceCase));
+      if (!response.ok) throw new Error(`无法从本地后端读取 ${referenceCase.name}，请确认 server 已启动`);
       const buffer = await response.arrayBuffer();
-      const file = new File([buffer], "amos_0117_original.nii.gz", { type: "application/octet-stream" });
+      const file = new File([buffer], referenceCase.originalFilename, { type: "application/octet-stream" });
       const image = await loadVisualizationFile(file);
       setLoadedImage(image);
       setValidationSummary(null);
       if (image.volume) {
         setSelectedSlice((image.sliceIndex ?? Math.floor(image.volume.slices / 2)) + 1);
         setVoxelCoord({ x: Math.floor(image.volume.columns / 2), y: Math.floor(image.volume.rows / 2), z: image.sliceIndex ?? Math.floor(image.volume.slices / 2) });
+        syncOrganLayers(modelLabels);
       }
-      setLogs((items) => [`本地 AMOS 样例已载入：${file.name}`, ...items].slice(0, 8));
-      setToast("本地 AMOS 样例已载入");
-      setSampleLoadState({ status: "ready", message: `已载入 ${file.name}` });
+      setLogs((items) => [`内置参考病例已载入：${referenceCase.name} / ${file.name}`, ...items].slice(0, 8));
+      setToast(`参考病例已载入：${referenceCase.name}`);
+      setSampleLoadState({ status: "ready", message: `${referenceCase.name} 已载入 · ${referenceCase.dataset} · ${referenceCase.validationAvailable ? "有标准答案" : "无标准答案"}` });
       setLastImport(`原图就绪：${file.name}`);
       setActiveModule("分割");
       return image;
     } catch (error) {
-      const message = error instanceof Error ? error.message : "本地样例载入失败";
+      const message = error instanceof Error ? error.message : "内置参考病例载入失败";
       setToast(message);
       setSampleLoadState({ status: "failed", message });
       return null;
@@ -1142,12 +1222,12 @@ function App() {
             ) : null}
           </div>
           <div className="top-actions">
-            <button className="ghost-button" onClick={() => fileInputRef.current?.click()}><Upload size={17} />上传原图</button>
-            <button className="ghost-button" onClick={() => resultFileInputRef.current?.click()}><Upload size={17} />上传结果图</button>
-            <button className="ghost-button" onClick={() => void loadLocalAmosSample()}><Database size={17} />载入 AMOS 样例</button>
-            <button className="primary-button" onClick={() => void startSegmentation()} disabled={runState === "running"}>
+            <button className="ghost-button" onClick={() => fileInputRef.current?.click()}><Upload size={17} />导入 CT 原图</button>
+            <button className="ghost-button" onClick={() => resultFileInputRef.current?.click()}><Upload size={17} />导入分割结果</button>
+            <button className="ghost-button" onClick={() => void loadReferenceCase()}><Database size={17} />载入参考病例</button>
+            <button className="primary-button" onClick={() => runState === "running" ? void cancelSegmentation() : void startSegmentation()} disabled={inferenceStatus.status === "submitting"}>
               {runState === "running" ? <Pause size={17} /> : <Play size={17} />}
-              {runState === "running" ? "推理中" : "运行分割"}
+              {inferenceStatus.status === "submitting" ? "提交中" : runState === "running" ? "取消推理" : "运行分割"}
             </button>
             <button className="ghost-button" onClick={handleExport}><Download size={17} />导出报告</button>
           </div>
@@ -1258,14 +1338,14 @@ function App() {
                 ) : (
                   <div className="sample-load-panel">
                     <Database size={34} />
-                    <strong>{sampleLoadState.status === "loading" ? "正在载入本地 AMOS 样例" : sampleLoadState.status === "failed" ? "本地样例载入失败" : "等待载入胸腹部 CT 原图"}</strong>
+                    <strong>{sampleLoadState.status === "loading" ? "正在载入内置参考病例" : sampleLoadState.status === "failed" ? "内置参考病例载入失败" : "等待载入胸腹部 CT 原图"}</strong>
                     <span>{sampleLoadState.message} · 当前文件：{loadedImage.name} · 类型：{loadedImage.kind} · 未检测到 NIfTI 体数据</span>
                     <div>
-                      <button onClick={() => void loadLocalAmosSample()} disabled={sampleLoadState.status === "loading"}>
-                        <Database size={16} />{sampleLoadState.status === "loading" ? "载入中" : "载入本地 AMOS 样例"}
+                      <button onClick={() => void loadReferenceCase()} disabled={sampleLoadState.status === "loading"}>
+                        <Database size={16} />{sampleLoadState.status === "loading" ? "载入中" : "载入参考病例"}
                       </button>
                       <button onClick={() => fileInputRef.current?.click()}>
-                        <Upload size={16} />手动上传 NIfTI
+                        <Upload size={16} />导入 NIfTI
                       </button>
                     </div>
                   </div>
@@ -1346,7 +1426,7 @@ function App() {
                       <div className={resultImage ? "file-thumb" : "file-thumb simulated"}><img src={resultDisplaySrc ?? loadedDisplaySrc} alt={`${resultImage?.name ?? "模拟结果"} 预览`} /></div>
                       <div className="file-meta">
                         <strong>结果 · {resultImage?.name ?? "内置掩膜预览"}</strong>
-                        <span>{resultImage?.meta ?? "未上传结果图时，前端使用内置掩膜进行对比演示。"}</span>
+                        <span>{resultImage?.meta ?? "未导入分割结果时，前端使用内置掩膜进行对比演示。"}</span>
                         <div className="file-tags">
                           <small>{resultImage?.kind ?? "掩膜"}</small>
                           <small>{resultImage?.format ?? "SIM"}</small>
@@ -1389,9 +1469,16 @@ function App() {
                     ))}
                   </div>
                   <div className="action-stack">
-                    <button onClick={() => fileInputRef.current?.click()}><Upload size={16} />上传原图</button>
-                    <button onClick={loadLocalAmosSample}><Database size={16} />载入本地 AMOS 样例</button>
-                    <button onClick={() => resultFileInputRef.current?.click()}><Upload size={16} />上传结果图</button>
+                    <div className="reference-case-control">
+                      <label htmlFor="reference-case-data">参考病例</label>
+                      <select id="reference-case-data" value={selectedReferenceCaseId} onChange={(event) => setSelectedReferenceCaseId(event.target.value)}>
+                        {referenceCases.map((item) => <option key={item.id} value={item.id} disabled={!item.hasOriginal}>{item.name}{item.hasOriginal ? "" : "（原图缺失）"}</option>)}
+                      </select>
+                      <small>{selectedReferenceCaseMeta}</small>
+                    </div>
+                    <button onClick={() => fileInputRef.current?.click()}><Upload size={16} />导入 CT 原图</button>
+                    <button onClick={() => void loadReferenceCase()} disabled={!canLoadSelectedReferenceCase}><Database size={16} />载入参考病例</button>
+                    <button onClick={() => resultFileInputRef.current?.click()}><Upload size={16} />导入分割结果</button>
                     <button onClick={() => requestRemoval("result")} disabled={!resultImage}><Trash2 size={16} />清除结果</button>
                     <button onClick={() => requestRemoval("session")} disabled={!hasImportedFiles}><RotateCcw size={16} />清空本次导入</button>
                   </div>
@@ -1423,8 +1510,17 @@ function App() {
                     ))}
                   </div>
                   <div className="action-stack">
-                    <button onClick={loadLocalAmosSample}><Database size={16} />载入本地 AMOS 样例</button>
-                    <button onClick={() => void startSegmentation()}><Play size={16} />运行分割流程</button>
+                    <div className="reference-case-control">
+                      <label htmlFor="reference-case-segmentation">参考病例</label>
+                      <select id="reference-case-segmentation" value={selectedReferenceCaseId} onChange={(event) => setSelectedReferenceCaseId(event.target.value)}>
+                        {referenceCases.map((item) => <option key={item.id} value={item.id} disabled={!item.hasOriginal}>{item.name}{item.hasOriginal ? "" : "（原图缺失）"}</option>)}
+                      </select>
+                      <small>{selectedReferenceCaseMeta}</small>
+                    </div>
+                    <button onClick={() => void loadReferenceCase()} disabled={!canLoadSelectedReferenceCase}><Database size={16} />载入参考病例</button>
+                    <button onClick={() => runState === "running" ? void cancelSegmentation() : void startSegmentation()} disabled={inferenceStatus.status === "submitting"}>
+                      {runState === "running" ? <Pause size={16} /> : <Play size={16} />}{inferenceStatus.status === "submitting" ? "提交中" : runState === "running" ? "取消推理" : "运行分割流程"}
+                    </button>
                   </div>
                   <div className={`validation-card ${validationSummary?.status ?? "pending"}`}>
                     <div>
@@ -1440,7 +1536,7 @@ function App() {
                   <div className="organ-list">
                     {organs.map((organ) => (
                       <button key={organ.id} className={selectedOrganId === organ.id ? "organ-row active" : "organ-row"} onClick={() => toggleOrgan(organ.id)}>
-                        <i style={{ background: organ.color }} /><span>{organ.name}</span><strong>{organ.score}%</strong>
+                        <i style={{ background: organ.color }} /><span>{organ.name}</span><strong>{formatOrganScore(organ.score)}</strong>
                       </button>
                     ))}
                   </div>
@@ -1456,7 +1552,9 @@ function App() {
                   <Metric label="最低 Dice" value={formatDiceMetric(validationSummary?.min_dice)} />
                   <Metric label="标准答案" value={validationStatusCopy} />
                   <Metric label="推理耗时" value={inferenceDurationCopy} />
+                  <Metric label="瓶颈阶段" value={inferencePhaseTimingCopy} />
                   <Metric label="结果大小" value={inferenceResultSizeCopy} />
+                  <Metric label="资源快照" value={inferenceResourceCopy} />
                   <Metric label="平均 NSD" value="0.887" />
                   <Metric label="待复核器官" value={`${reviewCount}`} />
                   <Metric label="配准状态" value={volumeRegistration} />

@@ -22,18 +22,39 @@ export type ValidationSummary = {
   }[];
 };
 
+export type ResourceSnapshot = {
+  phase?: string;
+  timestamp?: number;
+  device?: string;
+  server_pid?: number;
+  process_pid?: number;
+  disk_total_bytes?: number;
+  disk_used_bytes?: number;
+  disk_free_bytes?: number;
+  server_process_memory_bytes?: number;
+  gpu?: {
+    name?: string;
+    memory_used_mib?: number;
+    memory_total_mib?: number;
+    utilization_gpu_percent?: number;
+  };
+};
+
+export type PhaseTimings = Record<string, number>;
+
 export type InferenceEvent =
   | { type: "progress"; progress: number; stage: string }
-  | { type: "complete"; progress: number; stage: string; duration_seconds?: number; result_size_bytes?: number; validation?: ValidationSummary }
-  | { type: "error"; message: string; log_tail?: string };
+  | { type: "complete"; progress: number; stage: string; duration_seconds?: number; result_size_bytes?: number; validation?: ValidationSummary; resource_latest?: ResourceSnapshot; phase_timings?: PhaseTimings }
+  | { type: "error"; message: string; log_tail?: string; resource_latest?: ResourceSnapshot };
 
-export type InferenceJobMode = "real-nnunetv2" | "debug-label-fallback" | "unavailable";
+export type InferenceJobMode = "real-nnunetv2" | "cached-real-nnunetv2" | "debug-label-fallback" | "unavailable";
 
 export type InferenceStatus =
   | { status: "idle" }
   | { status: "submitting" }
   | { status: "running"; progress: number; stage: string; jobId?: string }
-  | { status: "succeeded"; jobId?: string; mode?: InferenceJobMode; duration_seconds?: number; result_size_bytes?: number }
+  | { status: "succeeded"; jobId?: string; mode?: InferenceJobMode; duration_seconds?: number; result_size_bytes?: number; resource_latest?: ResourceSnapshot; phase_timings?: PhaseTimings }
+  | { status: "cancelled"; jobId?: string }
   | { status: "failed"; message: string; jobId?: string };
 
 function formatDuration(seconds: number | undefined) {
@@ -86,6 +107,45 @@ function normalizeValidation(payload: unknown): ValidationSummary | undefined {
   return summary;
 }
 
+function normalizeResourceSnapshot(payload: unknown): ResourceSnapshot | undefined {
+  if (!payload || typeof payload !== "object") return undefined;
+  const raw = payload as Record<string, unknown>;
+  const snapshot: ResourceSnapshot = {};
+  for (const key of ["phase", "device"] as const) {
+    if (raw[key] !== undefined) snapshot[key] = String(raw[key]);
+  }
+  for (const key of [
+    "timestamp",
+    "server_pid",
+    "process_pid",
+    "disk_total_bytes",
+    "disk_used_bytes",
+    "disk_free_bytes",
+    "server_process_memory_bytes"
+  ] as const) {
+    if (Number.isFinite(Number(raw[key]))) snapshot[key] = Number(raw[key]);
+  }
+  if (raw.gpu && typeof raw.gpu === "object") {
+    const gpuRaw = raw.gpu as Record<string, unknown>;
+    const gpu: NonNullable<ResourceSnapshot["gpu"]> = {};
+    if (gpuRaw.name !== undefined) gpu.name = String(gpuRaw.name);
+    for (const key of ["memory_used_mib", "memory_total_mib", "utilization_gpu_percent"] as const) {
+      if (Number.isFinite(Number(gpuRaw[key]))) gpu[key] = Number(gpuRaw[key]);
+    }
+    if (Object.keys(gpu).length) snapshot.gpu = gpu;
+  }
+  return Object.keys(snapshot).length ? snapshot : undefined;
+}
+
+function normalizePhaseTimings(payload: unknown): PhaseTimings | undefined {
+  if (!payload || typeof payload !== "object") return undefined;
+  const timings: PhaseTimings = {};
+  for (const [key, value] of Object.entries(payload as Record<string, unknown>)) {
+    if (Number.isFinite(Number(value))) timings[key] = Number(value);
+  }
+  return Object.keys(timings).length ? timings : undefined;
+}
+
 export function parseInferenceEvent(raw: string): InferenceEvent {
   const line = raw.split(/\r?\n/).find((item) => item.startsWith("data:"));
   if (!line) throw new Error("无效的推理事件");
@@ -93,6 +153,8 @@ export function parseInferenceEvent(raw: string): InferenceEvent {
   if (parsed.type === "error") {
     const event: InferenceEvent = { type: "error", message: String(parsed.message ?? "推理失败") };
     if (parsed.log_tail !== undefined) event.log_tail = String(parsed.log_tail);
+    const resource = normalizeResourceSnapshot(parsed.resource_latest);
+    if (resource) event.resource_latest = resource;
     return event;
   }
   const event: InferenceEvent = {
@@ -105,23 +167,75 @@ export function parseInferenceEvent(raw: string): InferenceEvent {
     if (Number.isFinite(Number(parsed.result_size_bytes))) event.result_size_bytes = Number(parsed.result_size_bytes);
     const validation = normalizeValidation(parsed.validation);
     if (validation) event.validation = validation;
+    const resource = normalizeResourceSnapshot(parsed.resource_latest);
+    if (resource) event.resource_latest = resource;
+    const phaseTimings = normalizePhaseTimings(parsed.phase_timings);
+    if (phaseTimings) event.phase_timings = phaseTimings;
   }
   return event;
+}
+
+function formatBytes(value: number | undefined) {
+  if (!Number.isFinite(value)) return "";
+  const bytes = Math.max(0, Number(value));
+  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${bytes} B`;
+}
+
+export function getResourceSnapshotCopy(snapshot?: ResourceSnapshot | null) {
+  if (!snapshot) return "待记录";
+  const parts: string[] = [];
+  if (snapshot.device) parts.push(`设备 ${snapshot.device}`);
+  if (snapshot.gpu?.name && typeof snapshot.gpu.memory_used_mib === "number" && typeof snapshot.gpu.memory_total_mib === "number") {
+    parts.push(`${snapshot.gpu.name} 显存 ${snapshot.gpu.memory_used_mib}/${snapshot.gpu.memory_total_mib} MiB`);
+  } else if (snapshot.gpu?.name) {
+    parts.push(snapshot.gpu.name);
+  }
+  const memory = formatBytes(snapshot.server_process_memory_bytes);
+  if (memory) parts.push(`服务内存 ${memory}`);
+  const diskFree = formatBytes(snapshot.disk_free_bytes);
+  if (diskFree) parts.push(`磁盘可用 ${diskFree}`);
+  return parts.length ? parts.join(" · ") : "已记录";
+}
+
+export function getPhaseTimingSummary(timings?: PhaseTimings | null) {
+  if (!timings || !Object.keys(timings).length) return "待记录";
+  const labels: Record<string, string> = {
+    prepare_runtime_model: "模型准备",
+    build_predict_command: "命令生成",
+    nnunet_process: "nnUNetv2 子进程",
+    persistent_worker: "常驻 worker",
+    collect_result: "结果整理",
+    validation: "标准答案验证"
+  };
+  const [phase, seconds] = Object.entries(timings).sort((left, right) => right[1] - left[1])[0];
+  const duration = seconds < 120
+    ? `${seconds.toFixed(1)}秒`
+    : `${Math.floor(seconds / 60)}分${(seconds % 60).toFixed(1)}秒`;
+  return `${labels[phase] ?? phase} ${duration}`;
 }
 
 export function getInferenceStatusCopy(status: InferenceStatus) {
   if (status.status === "submitting") return "正在提交任务";
   if (status.status === "running") return `${status.stage} · ${status.progress}%`;
   if (status.status === "succeeded" && status.mode === "debug-label-fallback") return "调试标签回填完成（非真实推理）";
+  if (status.status === "succeeded" && status.mode === "cached-real-nnunetv2") {
+    const duration = formatDuration(status.duration_seconds);
+    return duration ? `缓存推理结果回填完成 · ${duration}` : "缓存推理结果回填完成";
+  }
   if (status.status === "succeeded") {
     const duration = formatDuration(status.duration_seconds);
     return duration ? `真实 nnUNetv2 推理完成 · ${duration}` : "真实 nnUNetv2 推理完成";
   }
+  if (status.status === "cancelled") return "推理任务已取消";
   if (status.status === "failed") return status.message;
   return "等待推理";
 }
 
 export function getInferenceResultMeta(mode: InferenceJobMode | undefined, dimensions: string) {
+  if (mode === "cached-real-nnunetv2") return `${dimensions} · 历史缓存 nnUNetv2 结果`;
   if (mode === "debug-label-fallback") return `${dimensions} · 调试标签回填结果（非真实推理）`;
   if (mode === "unavailable") return `${dimensions} · 模型不可用，未生成真实结果`;
   return `${dimensions} · nnUNetv2 真实推理结果`;
@@ -182,6 +296,8 @@ export async function createInferenceJob(
       status?: string;
       missing?: string[];
     };
+    cached_result?: boolean;
+    cache_source_job_id?: string;
   };
 }
 
@@ -192,4 +308,17 @@ export async function downloadInferenceResult(endpoint: string, jobId: string) {
     throw new Error(text || "推理结果下载失败");
   }
   return await response.arrayBuffer();
+}
+
+export async function cancelInferenceJob(endpoint: string, jobId: string) {
+  const response = await fetch(`${endpoint}/api/segment/jobs/${jobId}/cancel`, { method: "POST" });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || "取消推理任务失败");
+  }
+  return await response.json() as {
+    job_id: string;
+    status: "pending" | "running" | "cancelling" | "cancelled" | "succeeded" | "failed";
+    cancel_requested?: boolean;
+  };
 }

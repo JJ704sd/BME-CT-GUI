@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .test-output/
+screenshots/
 
 server/work/
 server/__pycache__/

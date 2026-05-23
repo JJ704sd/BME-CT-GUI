@@ -5,6 +5,7 @@ import os
 import hashlib
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -29,6 +30,7 @@ DEBUG_LABEL = NNUNET_FILES / "amos_0117(2).nii.gz"
 DEBUG_ORIGINAL = NNUNET_FILES / "amos_0117(3).nii.gz"
 FALLBACK_LABEL = NNUNET_FILES / "amos_0117_label.nii" / "amos_0117(2).nii"
 PROJECT_CHECKPOINT = NNUNET_FILES / "checkpoint_best.pth"
+REFERENCE_CASES_JSON = Path(os.environ.get("SEGMENTATION_REFERENCE_CASES_JSON", ROOT / "reference_cases.json"))
 
 FLARE_MODEL_DIR = NNUNET_RESULTS / "Dataset001_FLARE" / "nnUNetTrainer__nnUNetPlans__2d"
 FLARE_DATASET_JSON = FLARE_MODEL_DIR / "dataset.json"
@@ -38,6 +40,7 @@ RUNTIME_MODEL_DIR = WORK_DIR / "runtime_model" / "nnUNetTrainer__nnUNetPlans__2d
 RUNTIME_CHECKPOINT = RUNTIME_MODEL_DIR / "fold_0" / "checkpoint_best.pth"
 NNUNET_PREDICT_COMMAND = PROJECT_ROOT / "nnunet_env" / "Scripts" / "nnUNetv2_predict_from_modelfolder.exe"
 NNUNET_PYTHON_COMMAND = PROJECT_ROOT / "nnunet_env" / "Scripts" / "python.exe"
+PERSISTENT_WORKER_SCRIPT = ROOT / "server" / "persistent_nnunet_worker.py"
 NNUNET_PREDICT_ENTRYPOINT = (
   "import sys; "
   "from nnunetv2.inference.predict_from_raw_data import predict_entry_point_modelfolder; "
@@ -46,6 +49,88 @@ NNUNET_PREDICT_ENTRYPOINT = (
 )
 VALIDATION_MEAN_DICE_THRESHOLD = 0.85
 VALIDATION_MIN_DICE_THRESHOLD = 0.70
+
+
+def resolve_reference_path(value: Any, base_dir: Path) -> Path | None:
+  if not isinstance(value, str) or not value.strip():
+    return None
+  path = Path(value)
+  return path if path.is_absolute() else base_dir / path
+
+
+def default_reference_case_specs() -> list[dict[str, Any]]:
+  source_label = DEBUG_LABEL if DEBUG_LABEL.exists() else FALLBACK_LABEL
+  return [
+    {
+      "id": "amos_0117",
+      "name": "AMOS 0117",
+      "dataset": "AMOS22",
+      "modality": "CT",
+      "role": "built-in-reference",
+      "description": "内置参考病例，用于演示、回归和标准答案 Dice 验证。",
+      "original": str(DEBUG_ORIGINAL),
+      "label": str(source_label),
+      "original_filename": "amos_0117_original.nii.gz",
+      "label_filename": "amos_0117_label.nii.gz",
+    }
+  ]
+
+
+def load_reference_case_specs() -> tuple[list[dict[str, Any]], Path]:
+  if REFERENCE_CASES_JSON.exists():
+    data = json.loads(REFERENCE_CASES_JSON.read_text(encoding="utf-8"))
+    if isinstance(data, dict) and isinstance(data.get("samples"), list):
+      return data["samples"], REFERENCE_CASES_JSON.parent
+    if isinstance(data, list):
+      return data, REFERENCE_CASES_JSON.parent
+  return default_reference_case_specs(), ROOT
+
+
+def reference_case_records() -> list[dict[str, Any]]:
+  specs, base_dir = load_reference_case_specs()
+  records: list[dict[str, Any]] = []
+  for spec in specs:
+    if not isinstance(spec, dict):
+      continue
+    sample_id = spec.get("id")
+    if not isinstance(sample_id, str) or not sample_id.strip():
+      continue
+    original_path = resolve_reference_path(spec.get("original"), base_dir)
+    label_path = resolve_reference_path(spec.get("label"), base_dir)
+    has_original = bool(original_path and original_path.exists())
+    has_label = bool(label_path and label_path.exists())
+    records.append({
+      "id": sample_id,
+      "name": spec.get("name") if isinstance(spec.get("name"), str) else sample_id,
+      "dataset": spec.get("dataset") if isinstance(spec.get("dataset"), str) else "unknown",
+      "modality": spec.get("modality") if isinstance(spec.get("modality"), str) else "CT",
+      "role": spec.get("role") if isinstance(spec.get("role"), str) else "built-in-reference",
+      "description": spec.get("description") if isinstance(spec.get("description"), str) else "",
+      "original": str(original_path) if original_path else "",
+      "label": str(label_path) if label_path else "",
+      "original_url": f"/api/samples/{sample_id}/original",
+      "label_url": f"/api/samples/{sample_id}/label",
+      "original_filename": spec.get("original_filename") if isinstance(spec.get("original_filename"), str) else f"{sample_id}_original.nii.gz",
+      "label_filename": spec.get("label_filename") if isinstance(spec.get("label_filename"), str) else f"{sample_id}_label.nii.gz",
+      "validation_reference": str(label_path) if label_path else "",
+      "validation_available": has_original and has_label,
+      "has_original": has_original,
+      "has_label": has_label,
+      "_original_path": original_path,
+      "_label_path": label_path,
+    })
+  return records
+
+
+def find_reference_case(sample_id: str) -> dict[str, Any] | None:
+  for record in reference_case_records():
+    if record["id"] == sample_id:
+      return record
+  return None
+
+
+def public_reference_case(record: dict[str, Any]) -> dict[str, Any]:
+  return {key: value for key, value in record.items() if not key.startswith("_")}
 
 
 @dataclass
@@ -60,13 +145,34 @@ class Job:
   validation: dict[str, Any] | None = None
   started_at: float | None = None
   completed_at: float | None = None
+  input_sha256: str | None = None
+  checkpoint_sha256: str | None = None
+  cache_key: str | None = None
+  cached_result: bool = False
+  cache_source_job_id: str | None = None
+  phase_started_at: dict[str, float] = field(default_factory=dict, repr=False)
+  phase_timings: dict[str, float] = field(default_factory=dict)
   log_tail: str | None = None
   process_log_path: Path | None = None
+  resource_snapshots: list[dict[str, Any]] = field(default_factory=list)
+  resource_log_path: Path | None = None
+  cancel_requested: bool = False
+  process: subprocess.Popen[str] | None = field(default=None, repr=False, compare=False)
   events: list[dict[str, Any]] = field(default_factory=list)
 
 
 jobs: dict[str, Job] = {}
 jobs_lock = threading.Lock()
+persistent_worker_lock = threading.Lock()
+persistent_worker_process: subprocess.Popen[str] | None = None
+persistent_worker_key: tuple[str, str, str, int, int] | None = None
+persistent_worker_log_handle: Any | None = None
+
+
+class JobCancelled(RuntimeError):
+  def __init__(self, process: subprocess.CompletedProcess[str]):
+    super().__init__("推理任务已取消。")
+    self.process = process
 
 app = FastAPI(title="Segmentation GUI nnUNetv2 Bridge")
 app.add_middleware(
@@ -268,6 +374,122 @@ def write_validation_summary(output_dir: Path, validation: dict[str, Any]) -> Pa
   return summary_path
 
 
+def get_current_process_memory_bytes() -> int | None:
+  try:
+    if os.name == "nt":
+      import ctypes
+
+      class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
+        _fields_ = [
+          ("cb", ctypes.c_ulong),
+          ("PageFaultCount", ctypes.c_ulong),
+          ("PeakWorkingSetSize", ctypes.c_size_t),
+          ("WorkingSetSize", ctypes.c_size_t),
+          ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+          ("QuotaPagedPoolUsage", ctypes.c_size_t),
+          ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+          ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+          ("PagefileUsage", ctypes.c_size_t),
+          ("PeakPagefileUsage", ctypes.c_size_t),
+        ]
+
+      counters = PROCESS_MEMORY_COUNTERS()
+      counters.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS)
+      handle = ctypes.windll.kernel32.GetCurrentProcess()
+      ok = ctypes.windll.psapi.GetProcessMemoryInfo(
+        handle,
+        ctypes.byref(counters),
+        ctypes.sizeof(counters),
+      )
+      return int(counters.WorkingSetSize) if ok else None
+
+    import resource
+
+    # Linux reports KiB, macOS reports bytes. The app is developed on Windows,
+    # but this keeps summaries useful when the backend is run elsewhere.
+    usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return int(usage if sys.platform == "darwin" else usage * 1024)
+  except Exception:
+    return None
+
+
+def read_gpu_snapshot() -> dict[str, Any] | None:
+  command = os.environ.get("SEGMENTATION_NVIDIA_SMI", "nvidia-smi")
+  try:
+    result = subprocess.run(
+      [
+        command,
+        "--query-gpu=name,memory.used,memory.total,utilization.gpu",
+        "--format=csv,noheader,nounits",
+      ],
+      capture_output=True,
+      text=True,
+      encoding="utf-8",
+      errors="replace",
+      timeout=2,
+    )
+  except Exception:
+    return None
+  if result.returncode != 0 or not result.stdout.strip():
+    return None
+  parts = [part.strip() for part in result.stdout.strip().splitlines()[0].split(",")]
+  if len(parts) < 4:
+    return None
+  gpu: dict[str, Any] = {"name": parts[0]}
+  if parts[1].replace(".", "", 1).isdigit():
+    gpu["memory_used_mib"] = int(float(parts[1]))
+  if parts[2].replace(".", "", 1).isdigit():
+    gpu["memory_total_mib"] = int(float(parts[2]))
+  if parts[3].replace(".", "", 1).isdigit():
+    gpu["utilization_gpu_percent"] = int(float(parts[3]))
+  return gpu
+
+
+def collect_runtime_resource_snapshot(phase: str, process_pid: int | None = None) -> dict[str, Any]:
+  snapshot: dict[str, Any] = {
+    "phase": phase,
+    "timestamp": round(time.time(), 3),
+    "device": os.environ.get("SEGMENTATION_DEVICE", "cpu"),
+    "server_pid": os.getpid(),
+  }
+  if process_pid is not None:
+    snapshot["process_pid"] = process_pid
+  try:
+    usage = shutil.disk_usage(WORK_DIR)
+    snapshot["disk_total_bytes"] = usage.total
+    snapshot["disk_used_bytes"] = usage.used
+    snapshot["disk_free_bytes"] = usage.free
+  except Exception:
+    pass
+  memory_bytes = get_current_process_memory_bytes()
+  if memory_bytes is not None:
+    snapshot["server_process_memory_bytes"] = memory_bytes
+  gpu = read_gpu_snapshot()
+  if gpu:
+    snapshot["gpu"] = gpu
+  return snapshot
+
+
+def record_job_resource_snapshot(job: Job, phase: str) -> dict[str, Any]:
+  process_pid = job.process.pid if job.process is not None else None
+  snapshot = collect_runtime_resource_snapshot(phase, process_pid)
+  with jobs_lock:
+    job.resource_snapshots.append(snapshot)
+  return snapshot
+
+
+def write_resource_snapshots(output_dir: Path, snapshots: list[dict[str, Any]]) -> Path | None:
+  if not snapshots:
+    return None
+  output_dir.mkdir(parents=True, exist_ok=True)
+  resource_path = output_dir / "resource_snapshots.json"
+  resource_path.write_text(
+    json.dumps(snapshots, ensure_ascii=False, indent=2) + "\n",
+    encoding="utf-8",
+  )
+  return resource_path
+
+
 def get_job_duration_seconds(job: Job) -> float | None:
   if job.started_at is None:
     return None
@@ -281,7 +503,19 @@ def get_result_size_bytes(job: Job) -> int | None:
   return job.result_path.stat().st_size
 
 
+def start_job_phase(job: Job, phase: str) -> None:
+  job.phase_started_at[phase] = time.perf_counter()
+
+
+def finish_job_phase(job: Job, phase: str) -> None:
+  started_at = job.phase_started_at.pop(phase, None)
+  if started_at is None:
+    return
+  job.phase_timings[phase] = round(max(0.0, time.perf_counter() - started_at), 3)
+
+
 def build_job_summary(job: Job) -> dict[str, Any]:
+  resource_latest = job.resource_snapshots[-1] if job.resource_snapshots else None
   return {
     "job_id": job.id,
     "status": job.status,
@@ -292,17 +526,30 @@ def build_job_summary(job: Job) -> dict[str, Any]:
     "started_at": job.started_at,
     "completed_at": job.completed_at,
     "duration_seconds": get_job_duration_seconds(job),
+    "input_sha256": job.input_sha256,
+    "checkpoint_sha256": job.checkpoint_sha256,
+    "cache_key": job.cache_key,
+    "cached_result": job.cached_result,
+    "cache_source_job_id": job.cache_source_job_id,
+    "phase_timings": job.phase_timings,
     "result_ready": job.status == "succeeded" and job.result_path is not None and job.result_path.exists(),
     "result_path": str(job.result_path) if job.result_path else None,
     "result_size_bytes": get_result_size_bytes(job),
     "log_tail": job.log_tail,
     "process_log_path": str(job.process_log_path) if job.process_log_path else None,
+    "resource_snapshots": job.resource_snapshots,
+    "resource_latest": resource_latest,
+    "resource_log_path": str(job.resource_log_path) if job.resource_log_path else None,
+    "cancel_requested": job.cancel_requested,
     "validation": job.validation,
   }
 
 
 def write_job_summary(output_dir: Path, job: Job) -> Path:
   output_dir.mkdir(parents=True, exist_ok=True)
+  resource_log_path = write_resource_snapshots(output_dir, job.resource_snapshots)
+  if resource_log_path is not None:
+    job.resource_log_path = resource_log_path
   summary_path = output_dir / "job_summary.json"
   summary_path.write_text(
     json.dumps(build_job_summary(job), ensure_ascii=False, indent=2) + "\n",
@@ -326,6 +573,66 @@ def write_process_log(output_dir: Path, process: subprocess.CompletedProcess[str
   ])
   log_path.write_text(log_text, encoding="utf-8")
   return log_path, get_process_tail(process)
+
+
+def run_process_with_cancel(job: Job, command: list[str]) -> subprocess.CompletedProcess[str]:
+  process = subprocess.Popen(
+    command,
+    cwd=str(PROJECT_ROOT),
+    env=get_predict_environment(),
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+    text=True,
+    encoding="utf-8",
+    errors="replace",
+  )
+  with jobs_lock:
+    job.process = process
+  record_job_resource_snapshot(job, "process_started")
+  try:
+    while True:
+      try:
+        stdout, stderr = process.communicate(timeout=0.5)
+        completed = subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+        if job.cancel_requested:
+          raise JobCancelled(completed)
+        return completed
+      except subprocess.TimeoutExpired:
+        if job.cancel_requested:
+          if process.poll() is None:
+            process.terminate()
+          try:
+            stdout, stderr = process.communicate(timeout=5)
+          except subprocess.TimeoutExpired:
+            process.kill()
+            stdout, stderr = process.communicate()
+          raise JobCancelled(subprocess.CompletedProcess(
+            command,
+            process.returncode if process.returncode is not None else -1,
+            stdout,
+            stderr,
+          ))
+  finally:
+    with jobs_lock:
+      if job.process is process:
+        job.process = None
+
+
+def request_job_cancel(job_id: str) -> Job | None:
+  with jobs_lock:
+    job = jobs.get(job_id)
+    if not job:
+      return None
+    if job.status in {"succeeded", "failed", "cancelled"}:
+      return job
+    job.cancel_requested = True
+    job.status = "cancelling"
+    job.stage = "正在取消本地 nnUNetv2 任务"
+    process = job.process
+  if process and process.poll() is None:
+    process.terminate()
+  push_event(job, {"type": "progress", "progress": job.progress, "stage": "正在取消本地 nnUNetv2 任务"})
+  return job
 
 
 def get_persisted_job_output_dir(job_id: str) -> Path | None:
@@ -358,6 +665,12 @@ def read_persisted_job_summary(job_id: str) -> dict[str, Any] | None:
     validation_path = output_dir / "validation_summary.json"
     if validation_path.exists():
       validation = json.loads(validation_path.read_text(encoding="utf-8"))
+    resource_log_path = output_dir / "resource_snapshots.json"
+    resource_snapshots = []
+    if resource_log_path.exists():
+      parsed_snapshots = json.loads(resource_log_path.read_text(encoding="utf-8"))
+      if isinstance(parsed_snapshots, list):
+        resource_snapshots = parsed_snapshots
     input_candidates = sorted((WORK_DIR / job_id / "input").glob(f"{job_id}_0000.nii*"))
     started_at = input_candidates[0].stat().st_mtime if input_candidates else None
     completed_at = result_path.stat().st_mtime
@@ -373,11 +686,19 @@ def read_persisted_job_summary(job_id: str) -> dict[str, Any] | None:
       "completed_at": completed_at,
       "duration_seconds": duration_seconds,
       "duration_source": "file_timestamps" if duration_seconds is not None else "unavailable",
+      "input_sha256": None,
+      "checkpoint_sha256": None,
+      "cache_key": None,
+      "cached_result": False,
+      "cache_source_job_id": None,
       "result_ready": True,
       "result_path": str(result_path),
       "result_size_bytes": result_path.stat().st_size,
       "log_tail": log_tail,
       "process_log_path": str(process_log_path) if process_log_path.exists() else None,
+      "resource_snapshots": resource_snapshots,
+      "resource_latest": resource_snapshots[-1] if resource_snapshots else None,
+      "resource_log_path": str(resource_log_path) if resource_log_path.exists() else None,
       "validation": validation,
     }
   summary = json.loads(summary_path.read_text(encoding="utf-8"))
@@ -393,6 +714,16 @@ def read_persisted_job_summary(job_id: str) -> dict[str, Any] | None:
     validation_path = output_dir / "validation_summary.json"
     if validation_path.exists():
       summary["validation"] = json.loads(validation_path.read_text(encoding="utf-8"))
+
+  resource_log_path = output_dir / "resource_snapshots.json"
+  if summary.get("resource_snapshots") is None and resource_log_path.exists():
+    parsed_snapshots = json.loads(resource_log_path.read_text(encoding="utf-8"))
+    if isinstance(parsed_snapshots, list):
+      summary["resource_snapshots"] = parsed_snapshots
+  if summary.get("resource_latest") is None and isinstance(summary.get("resource_snapshots"), list) and summary["resource_snapshots"]:
+    summary["resource_latest"] = summary["resource_snapshots"][-1]
+  if summary.get("resource_log_path") is None and resource_log_path.exists():
+    summary["resource_log_path"] = str(resource_log_path)
 
   return summary
 
@@ -416,13 +747,32 @@ def file_sha256(path: Path) -> str:
 def same_file_content(left: Path, right: Path) -> bool:
   if not left.exists() or not right.exists():
     return False
+  try:
+    if os.path.samefile(left, right):
+      return True
+  except OSError:
+    pass
   if left.stat().st_size != right.stat().st_size:
     return False
-  return file_sha256(left) == file_sha256(right)
+  left_stat = left.stat()
+  right_stat = right.stat()
+  if left_stat.st_mtime_ns == right_stat.st_mtime_ns:
+    return True
+  return stable_file_sha256(left) == stable_file_sha256(right)
 
 
 def get_checkpoint_source() -> Path:
   return PROJECT_CHECKPOINT if PROJECT_CHECKPOINT.exists() else FLARE_CHECKPOINT
+
+
+@lru_cache(maxsize=16)
+def file_sha256_cached(path: str, size: int, mtime_ns: int) -> str:
+  return file_sha256(Path(path))
+
+
+def stable_file_sha256(path: Path) -> str:
+  stat = path.stat()
+  return file_sha256_cached(str(path), stat.st_size, stat.st_mtime_ns)
 
 
 @lru_cache(maxsize=4)
@@ -529,12 +879,33 @@ def get_model_state() -> dict[str, Any]:
     "checkpoint_configuration": checkpoint_args.get("configuration") if checkpoint_args else None,
     "labels_source": "checkpoint" if checkpoint_args and checkpoint_args.get("dataset_json") else "dataset.json" if FLARE_DATASET_JSON.exists() else "fallback",
     "confidence_threshold_effective": False,
+    "persistent_worker_enabled": persistent_worker_enabled(),
+    "persistent_worker_running": persistent_worker_process is not None and persistent_worker_process.poll() is None,
+    "predict_workers": {
+      "preprocess": get_predict_worker_counts()[0],
+      "export": get_predict_worker_counts()[1],
+    },
   }
 
 
 def get_predict_device() -> str:
   device = os.environ.get("SEGMENTATION_DEVICE", "cpu").strip().lower()
   return device if device in {"cpu", "cuda", "mps"} else "cpu"
+
+
+def get_env_int(name: str, default: int, minimum: int = 1, maximum: int = 8) -> int:
+  try:
+    value = int(os.environ.get(name, str(default)).strip())
+  except (TypeError, ValueError):
+    value = default
+  return max(minimum, min(maximum, value))
+
+
+def get_predict_worker_counts() -> tuple[int, int]:
+  return (
+    get_env_int("SEGMENTATION_PREPROCESS_WORKERS", 2),
+    get_env_int("SEGMENTATION_EXPORT_WORKERS", 2),
+  )
 
 
 def get_predict_environment() -> dict[str, str]:
@@ -547,6 +918,7 @@ def get_predict_environment() -> dict[str, str]:
 
 def build_predict_command(input_dir: Path, output_dir: Path, device: str | None = None, model_dir: Path | None = None) -> list[str]:
   model_root = model_dir or FLARE_MODEL_DIR
+  preprocess_workers, export_workers = get_predict_worker_counts()
   return [
     str(NNUNET_PYTHON_COMMAND),
     "-c",
@@ -556,11 +928,258 @@ def build_predict_command(input_dir: Path, output_dir: Path, device: str | None 
     "-m", str(model_root),
     "-f", "0",
     "-chk", "checkpoint_best.pth",
-    "-npp", "1",
-    "-nps", "1",
+    "-npp", str(preprocess_workers),
+    "-nps", str(export_workers),
     "-device", device or get_predict_device(),
     "--disable_progress_bar",
   ]
+
+
+def persistent_worker_enabled() -> bool:
+  return os.environ.get("SEGMENTATION_PERSISTENT_WORKER", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def get_persistent_worker_key(model_dir: Path) -> tuple[str, str, str, int, int]:
+  preprocess_workers, export_workers = get_predict_worker_counts()
+  return (str(model_dir), get_predict_device(), "checkpoint_best.pth", preprocess_workers, export_workers)
+
+
+def close_persistent_worker_locked() -> None:
+  global persistent_worker_process, persistent_worker_key, persistent_worker_log_handle
+  process = persistent_worker_process
+  if process is not None and process.poll() is None:
+    process.terminate()
+    try:
+      process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+      process.kill()
+      process.wait(timeout=5)
+  if persistent_worker_log_handle is not None:
+    try:
+      persistent_worker_log_handle.close()
+    except OSError:
+      pass
+  persistent_worker_process = None
+  persistent_worker_key = None
+  persistent_worker_log_handle = None
+
+
+def read_persistent_worker_event(process: subprocess.Popen[str]) -> dict[str, Any]:
+  if process.stdout is None:
+    raise RuntimeError("常驻 nnUNetv2 worker 未打开 stdout。")
+  line = process.stdout.readline()
+  if not line:
+    raise RuntimeError("常驻 nnUNetv2 worker 已退出。")
+  try:
+    event = json.loads(line)
+  except json.JSONDecodeError as exc:
+    raise RuntimeError(f"常驻 nnUNetv2 worker 返回了无效 JSON：{line[:200]}") from exc
+  if not isinstance(event, dict):
+    raise RuntimeError("常驻 nnUNetv2 worker 返回了无效事件。")
+  return event
+
+
+def send_persistent_worker_request(process: subprocess.Popen[str], payload: dict[str, Any]) -> None:
+  if process.stdin is None:
+    raise RuntimeError("常驻 nnUNetv2 worker 未打开 stdin。")
+  process.stdin.write(json.dumps(payload, ensure_ascii=False) + "\n")
+  process.stdin.flush()
+
+
+def ensure_persistent_worker(model_dir: Path) -> subprocess.Popen[str]:
+  global persistent_worker_process, persistent_worker_key, persistent_worker_log_handle
+  key = get_persistent_worker_key(model_dir)
+  if persistent_worker_process is not None and persistent_worker_process.poll() is None and persistent_worker_key == key:
+    return persistent_worker_process
+
+  close_persistent_worker_locked()
+  WORK_DIR.mkdir(parents=True, exist_ok=True)
+  log_path = WORK_DIR / "persistent_worker.log"
+  persistent_worker_log_handle = log_path.open("a", encoding="utf-8")
+  persistent_worker_process = subprocess.Popen(
+    [str(NNUNET_PYTHON_COMMAND), str(PERSISTENT_WORKER_SCRIPT)],
+    cwd=str(PROJECT_ROOT),
+    env=get_predict_environment(),
+    stdin=subprocess.PIPE,
+    stdout=subprocess.PIPE,
+    stderr=persistent_worker_log_handle,
+    text=True,
+    encoding="utf-8",
+    errors="replace",
+  )
+  persistent_worker_key = key
+  preprocess_workers, export_workers = get_predict_worker_counts()
+  send_persistent_worker_request(persistent_worker_process, {
+    "type": "init",
+    "model_dir": str(model_dir),
+    "device": get_predict_device(),
+    "checkpoint": "checkpoint_best.pth",
+    "preprocess_workers": preprocess_workers,
+    "export_workers": export_workers,
+  })
+  event = read_persistent_worker_event(persistent_worker_process)
+  if event.get("type") != "ready":
+    close_persistent_worker_locked()
+    raise RuntimeError(str(event.get("message") or event))
+  return persistent_worker_process
+
+
+def run_persistent_worker_prediction(job: Job, input_dir: Path, output_dir: Path, model_dir: Path) -> subprocess.CompletedProcess[str]:
+  with persistent_worker_lock:
+    try:
+      process = ensure_persistent_worker(model_dir)
+      with jobs_lock:
+        job.process = process
+      preprocess_workers, export_workers = get_predict_worker_counts()
+      send_persistent_worker_request(process, {
+        "type": "predict",
+        "input_dir": str(input_dir),
+        "output_dir": str(output_dir),
+        "preprocess_workers": preprocess_workers,
+        "export_workers": export_workers,
+      })
+      event = read_persistent_worker_event(process)
+      if event.get("type") == "complete":
+        return subprocess.CompletedProcess(
+          args=["persistent-nnunetv2-worker", str(PERSISTENT_WORKER_SCRIPT)],
+          returncode=0,
+          stdout=str(event.get("message") or "persistent worker prediction complete"),
+          stderr="",
+        )
+      if job.cancel_requested:
+        raise JobCancelled(subprocess.CompletedProcess(
+          args=["persistent-nnunetv2-worker", str(PERSISTENT_WORKER_SCRIPT)],
+          returncode=-1,
+          stdout="",
+          stderr="推理任务已取消",
+        ))
+      return subprocess.CompletedProcess(
+        args=["persistent-nnunetv2-worker", str(PERSISTENT_WORKER_SCRIPT)],
+        returncode=1,
+        stdout="",
+        stderr=str(event.get("message") or event),
+      )
+    except RuntimeError as exc:
+      if job.cancel_requested:
+        raise JobCancelled(subprocess.CompletedProcess(
+          args=["persistent-nnunetv2-worker", str(PERSISTENT_WORKER_SCRIPT)],
+          returncode=-1,
+          stdout="",
+          stderr="推理任务已取消",
+        )) from exc
+      raise
+    finally:
+      with jobs_lock:
+        if job.process is persistent_worker_process:
+          job.process = None
+      if persistent_worker_process is None or persistent_worker_process.poll() is not None:
+        close_persistent_worker_locked()
+
+
+def get_checkpoint_sha256() -> str | None:
+  checkpoint_source = get_checkpoint_source()
+  if not checkpoint_source.exists():
+    return None
+  return stable_file_sha256(checkpoint_source)
+
+
+def build_prediction_cache_key(input_sha256: str, model_state: dict[str, Any] | None = None) -> str:
+  state = model_state or get_model_state()
+  payload = {
+    "input_sha256": input_sha256,
+    "checkpoint_sha256": get_checkpoint_sha256(),
+    "checkpoint_dataset_name": state.get("checkpoint_dataset_name"),
+    "checkpoint_configuration": state.get("checkpoint_configuration"),
+    "labels_source": state.get("labels_source"),
+  }
+  encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+  return hashlib.sha256(encoded).hexdigest()
+
+
+def find_cached_prediction(cache_key: str, input_path: Path, current_job_id: str) -> dict[str, Any] | None:
+  if WORK_DIR.exists():
+    for job_dir in WORK_DIR.iterdir():
+      if not job_dir.is_dir() or job_dir.name in {current_job_id, "runtime_model"}:
+        continue
+      summary = read_persisted_job_summary(job_dir.name)
+      if not summary or summary.get("cache_key") != cache_key or not summary.get("result_ready"):
+        continue
+      result_path = Path(str(summary.get("result_path")))
+      if result_path.exists():
+        return {
+          "job_id": job_dir.name,
+          "result_path": result_path,
+          "validation": summary.get("validation"),
+          "legacy": False,
+        }
+
+  legacy_job_id = "009d4efdc5f6"
+  legacy_result = WORK_DIR / legacy_job_id / "output" / f"{legacy_job_id}.nii.gz"
+  if is_debug_original_upload(input_path) and legacy_result.exists():
+    validation = None
+    validation_path = legacy_result.parent / "validation_summary.json"
+    if validation_path.exists():
+      validation = json.loads(validation_path.read_text(encoding="utf-8"))
+    return {
+      "job_id": legacy_job_id,
+      "result_path": legacy_result,
+      "validation": validation,
+      "legacy": True,
+    }
+  return None
+
+
+def copy_cached_result(cache: dict[str, Any], output_dir: Path, job_id: str) -> Path:
+  source_path = Path(str(cache["result_path"]))
+  suffix = ".nii.gz" if source_path.name.lower().endswith(".nii.gz") else ".nii"
+  target_path = output_dir / f"{job_id}{suffix}"
+  output_dir.mkdir(parents=True, exist_ok=True)
+  try:
+    os.link(source_path, target_path)
+  except OSError:
+    shutil.copy2(source_path, target_path)
+  return target_path
+
+
+def complete_cached_job(job: Job, input_path: Path, cache: dict[str, Any]) -> None:
+  start_job_phase(job, "cache_hit")
+  output_dir = input_path.parent.parent / "output"
+  result_path = copy_cached_result(cache, output_dir, job.id)
+  validation = cache.get("validation")
+  if validation is None and is_debug_original_upload(input_path):
+    validation = validate_against_debug_label(result_path)
+  if validation is not None:
+    write_validation_summary(output_dir, validation)
+  finish_job_phase(job, "cache_hit")
+  with jobs_lock:
+    job.mode = "cached-real-nnunetv2"
+    job.status = "succeeded"
+    job.progress = 100
+    job.stage = "命中历史 nnUNetv2 缓存结果"
+    job.cached_result = True
+    job.cache_source_job_id = str(cache.get("job_id"))
+    job.result_path = result_path
+    job.validation = validation
+    job.started_at = time.time()
+    job.completed_at = job.started_at
+  record_job_resource_snapshot(job, "cache_hit")
+  with jobs_lock:
+    write_job_summary(output_dir, job)
+  complete_event: dict[str, Any] = {
+    "type": "complete",
+    "progress": 100,
+    "stage": "命中历史 nnUNetv2 缓存结果",
+    "duration_seconds": get_job_duration_seconds(job),
+    "result_size_bytes": get_result_size_bytes(job),
+    "phase_timings": job.phase_timings,
+    "cached_result": True,
+    "cache_source_job_id": job.cache_source_job_id,
+  }
+  if validation is not None:
+    complete_event["validation"] = validation
+  if job.resource_snapshots:
+    complete_event["resource_latest"] = job.resource_snapshots[-1]
+  push_event(job, complete_event)
 
 
 def push_event(job: Job, event: dict[str, Any]) -> None:
@@ -616,6 +1235,7 @@ def run_real_job(job_id: str, input_path: Path) -> None:
     job = jobs[job_id]
     job.status = "running"
     job.started_at = time.time()
+  record_job_resource_snapshot(job, "started")
   input_dir = input_path.parent
   output_dir = input_path.parent.parent / "output"
   output_dir.mkdir(parents=True, exist_ok=True)
@@ -623,19 +1243,23 @@ def run_real_job(job_id: str, input_path: Path) -> None:
 
   try:
     push_event(job, {"type": "progress", "progress": 8, "stage": "任务已提交到本地 nnUNetv2"})
+    start_job_phase(job, "prepare_runtime_model")
     model_dir = prepare_runtime_model_dir()
+    finish_job_phase(job, "prepare_runtime_model")
     push_event(job, {"type": "progress", "progress": 14, "stage": "已准备项目指定训练权重"})
-    command = build_predict_command(input_dir, output_dir, model_dir=model_dir)
-    push_event(job, {"type": "progress", "progress": 20, "stage": "nnUNetv2 命令运行中"})
-    process = subprocess.run(
-      command,
-      cwd=str(PROJECT_ROOT),
-      env=get_predict_environment(),
-      capture_output=True,
-      text=True,
-      encoding="utf-8",
-      errors="replace",
-    )
+    if persistent_worker_enabled():
+      push_event(job, {"type": "progress", "progress": 20, "stage": "常驻 nnUNetv2 worker 推理中"})
+      start_job_phase(job, "persistent_worker")
+      process = run_persistent_worker_prediction(job, input_dir, output_dir, model_dir)
+      finish_job_phase(job, "persistent_worker")
+    else:
+      start_job_phase(job, "build_predict_command")
+      command = build_predict_command(input_dir, output_dir, model_dir=model_dir)
+      finish_job_phase(job, "build_predict_command")
+      push_event(job, {"type": "progress", "progress": 20, "stage": "nnUNetv2 命令运行中"})
+      start_job_phase(job, "nnunet_process")
+      process = run_process_with_cancel(job, command)
+      finish_job_phase(job, "nnunet_process")
     process_log_path, log_tail = write_process_log(output_dir, process)
     with jobs_lock:
       job.process_log_path = process_log_path
@@ -644,16 +1268,21 @@ def run_real_job(job_id: str, input_path: Path) -> None:
       raise RuntimeError(f"nnUNetv2 推理失败（退出码 {process.returncode}）：{get_process_tail(process)}")
 
     push_event(job, {"type": "progress", "progress": 90, "stage": "整理 nnUNetv2 输出"})
+    start_job_phase(job, "collect_result")
     candidates = sorted(output_dir.glob(f"{case_name}*.nii*"))
     if not candidates:
       raise RuntimeError("nnUNetv2 命令已结束，但未找到输出 NIfTI 结果。")
     result_path = candidates[0]
+    finish_job_phase(job, "collect_result")
     validation = None
     if is_debug_original_upload(input_path):
       push_event(job, {"type": "progress", "progress": 96, "stage": "使用 AMOS 标准答案验证推理结果"})
+      start_job_phase(job, "validation")
       validation = validate_against_debug_label(result_path)
       write_validation_summary(output_dir, validation)
+      finish_job_phase(job, "validation")
 
+    record_job_resource_snapshot(job, "completed")
     with jobs_lock:
       job.result_path = result_path
       job.validation = validation
@@ -666,11 +1295,29 @@ def run_real_job(job_id: str, input_path: Path) -> None:
       "stage": "真实 nnUNetv2 推理结果已生成",
       "duration_seconds": get_job_duration_seconds(job),
       "result_size_bytes": get_result_size_bytes(job),
+      "phase_timings": job.phase_timings,
     }
     if validation is not None:
       complete_event["validation"] = validation
+    if job.resource_snapshots:
+      complete_event["resource_latest"] = job.resource_snapshots[-1]
     push_event(job, complete_event)
+  except JobCancelled as exc:
+    process_log_path, log_tail = write_process_log(output_dir, exc.process)
+    record_job_resource_snapshot(job, "cancelled")
+    with jobs_lock:
+      job.process_log_path = process_log_path
+      job.log_tail = log_tail
+      job.status = "cancelled"
+      job.error = "推理任务已取消"
+      job.completed_at = time.time()
+      write_job_summary(output_dir, job)
+    cancel_event: dict[str, Any] = {"type": "error", "message": "推理任务已取消", "log_tail": log_tail}
+    if job.resource_snapshots:
+      cancel_event["resource_latest"] = job.resource_snapshots[-1]
+    push_event(job, cancel_event)
   except Exception as exc:
+    record_job_resource_snapshot(job, "failed")
     with jobs_lock:
       job.status = "failed"
       job.error = str(exc)
@@ -679,6 +1326,8 @@ def run_real_job(job_id: str, input_path: Path) -> None:
     error_event: dict[str, Any] = {"type": "error", "message": str(exc)}
     if job.log_tail:
       error_event["log_tail"] = job.log_tail
+    if job.resource_snapshots:
+      error_event["resource_latest"] = job.resource_snapshots[-1]
     push_event(job, error_event)
 
 
@@ -720,31 +1369,26 @@ def models() -> dict[str, Any]:
 @app.get("/api/samples")
 def samples() -> dict[str, Any]:
   return {
-    "samples": [
-      {
-        "id": "amos_0117",
-        "original": str(DEBUG_ORIGINAL),
-        "label": str(DEBUG_LABEL if DEBUG_LABEL.exists() else FALLBACK_LABEL),
-        "validation_reference": str(DEBUG_LABEL if DEBUG_LABEL.exists() else FALLBACK_LABEL),
-        "validation_available": DEBUG_ORIGINAL.exists() and (DEBUG_LABEL.exists() or FALLBACK_LABEL.exists()),
-      }
-    ]
+    "samples": [public_reference_case(record) for record in reference_case_records()]
   }
 
 
 @app.get("/api/samples/{sample_id}/original")
 def sample_original(sample_id: str) -> FileResponse:
-  if sample_id != "amos_0117" or not DEBUG_ORIGINAL.exists():
-    raise HTTPException(status_code=404, detail="样例原图不存在")
-  return FileResponse(DEBUG_ORIGINAL, media_type="application/octet-stream", filename="amos_0117_original.nii.gz")
+  record = find_reference_case(sample_id)
+  original_path = record.get("_original_path") if record else None
+  if not isinstance(original_path, Path) or not original_path.exists():
+    raise HTTPException(status_code=404, detail="参考病例原图不存在")
+  return FileResponse(original_path, media_type="application/octet-stream", filename=record["original_filename"])
 
 
 @app.get("/api/samples/{sample_id}/label")
 def sample_label(sample_id: str) -> FileResponse:
-  source_label = DEBUG_LABEL if DEBUG_LABEL.exists() else FALLBACK_LABEL
-  if sample_id != "amos_0117" or not source_label.exists():
-    raise HTTPException(status_code=404, detail="样例标签不存在")
-  return FileResponse(source_label, media_type="application/octet-stream", filename="amos_0117_label.nii.gz")
+  record = find_reference_case(sample_id)
+  label_path = record.get("_label_path") if record else None
+  if not isinstance(label_path, Path) or not label_path.exists():
+    raise HTTPException(status_code=404, detail="参考病例标签不存在")
+  return FileResponse(label_path, media_type="application/octet-stream", filename=record["label_filename"])
 
 
 @app.post("/api/segment/jobs")
@@ -771,9 +1415,31 @@ async def create_job(
   input_path = input_dir / f"{job_id}_0000{suffix}"
   with input_path.open("wb") as target:
     shutil.copyfileobj(file.file, target)
-  job = Job(id=job_id, mode=model_state["mode"])
+  input_sha = file_sha256(input_path)
+  cache_key = build_prediction_cache_key(input_sha, model_state)
+  job = Job(
+    id=job_id,
+    mode=model_state["mode"],
+    input_sha256=input_sha,
+    checkpoint_sha256=get_checkpoint_sha256(),
+    cache_key=cache_key,
+  )
   with jobs_lock:
     jobs[job_id] = job
+  cache = find_cached_prediction(cache_key, input_path, job_id)
+  if cache is not None:
+    complete_cached_job(job, input_path, cache)
+    return {
+      "job_id": job_id,
+      "model_id": model_id,
+      "confidence_threshold": confidence_threshold,
+      "confidence_threshold_effective": False,
+      "postprocess": postprocess,
+      "mode": job.mode,
+      "model_status": model_state,
+      "cached_result": True,
+      "cache_source_job_id": job.cache_source_job_id,
+    }
   thread = threading.Thread(target=run_real_job, args=(job_id, input_path), daemon=True)
   thread.start()
   return {
@@ -784,6 +1450,7 @@ async def create_job(
     "postprocess": postprocess,
     "mode": job.mode,
     "model_status": model_state,
+    "cached_result": False,
   }
 
 
@@ -795,6 +1462,14 @@ def get_job(job_id: str) -> dict[str, Any]:
     if persisted is None:
       raise HTTPException(status_code=404, detail="任务不存在")
     return persisted
+  return build_job_summary(job)
+
+
+@app.post("/api/segment/jobs/{job_id}/cancel")
+def cancel_job(job_id: str) -> dict[str, Any]:
+  job = request_job_cancel(job_id)
+  if job is None:
+    raise HTTPException(status_code=404, detail="任务不存在")
   return build_job_summary(job)
 
 
@@ -810,7 +1485,7 @@ def job_events(job_id: str) -> StreamingResponse:
       with jobs_lock:
         events = job.events[cursor:]
         cursor = len(job.events)
-        done = job.status in {"succeeded", "failed"}
+        done = job.status in {"succeeded", "failed", "cancelled"}
       for event in events:
         yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
       if done and cursor >= len(job.events):

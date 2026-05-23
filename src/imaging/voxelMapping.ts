@@ -97,6 +97,24 @@ export function getSliceRenderKey(orientation: Orientation, coord: VoxelCoord, v
   return `${orientation}:${getSliceIndexForOrientation(orientation, safe)}`;
 }
 
+export function getSliceImageCacheKey(
+  orientation: Orientation,
+  coord: VoxelCoord,
+  volume: VolumeGrid,
+  mode: "intensity" | "mask",
+  visibleLabels?: Set<number>
+) {
+  const labels = visibleLabels
+    ? Array.from(visibleLabels).filter((label) => Number.isFinite(label)).sort((left, right) => left - right).join(",")
+    : "all";
+  return [
+    getSliceRenderKey(orientation, coord, volume),
+    mode,
+    getOrientationDisplayRatio(orientation, volume),
+    labels
+  ].join(":");
+}
+
 export function getSliceContentFrame(containerRatio: number, imageRatio: number) {
   const safeContainerRatio = Number.isFinite(containerRatio) && containerRatio > 0 ? containerRatio : 1;
   const safeImageRatio = Number.isFinite(imageRatio) && imageRatio > 0 ? imageRatio : 1;

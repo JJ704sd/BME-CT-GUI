@@ -33,10 +33,10 @@
 | 资源 | 说明 |
 |---|---|
 | `checkpoint_best.pth` | 模型权重文件 |
-| `amos_0117(3).nii.gz` | 原始 CT 样例 |
-| `amos_0117(2).nii.gz` | 标签样例 |
-| `amos_0117_original.nii/` | 目录型解压样例，不是直接可读的单一文件 |
-| `amos_0117_label.nii/` | 目录型解压样例，不是直接可读的单一文件 |
+| `amos_0117(3).nii.gz` | AMOS 0117 参考病例原始 CT |
+| `amos_0117(2).nii.gz` | AMOS 0117 参考病例标准答案 |
+| `amos_0117_original.nii/` | 目录型解压参考病例，不是直接可读的单一文件 |
+| `amos_0117_label.nii/` | 目录型解压标准答案，不是直接可读的单一文件 |
 
 这些资源可用于演示和调试，但不能自动等同于完整、可验证的 nnUNetv2 生产结果目录。
 
@@ -78,7 +78,7 @@
 - `/api/segment/jobs/{job_id}/events`
 - `/api/segment/jobs/{job_id}/result`
 
-作业创建现在会先检查本地 nnUNetv2 资源完整性。资源齐备时，后端调用 `nnUNetv2_predict_from_modelfolder.exe` 并返回输出目录中的真实结果；资源缺失时，接口返回 503，不再复制样例标签冒充分割结果。
+作业创建现在会先检查本地 nnUNetv2 资源完整性。资源齐备时，后端调用 `nnUNetv2_predict_from_modelfolder.exe` 并返回输出目录中的真实结果；资源缺失时，接口返回 503，不再复制参考标签冒充分割结果。
 
 ### 2.4 测试与构建
 
@@ -180,7 +180,7 @@
 职责：
 
 - 健康检查。
-- 模型/样例信息。
+- 模型/参考病例信息。
 - 任务创建、事件流、结果下载。
 
 评价：
@@ -220,7 +220,7 @@
 
 ## 七、验收标准
 
-1. 上传一个完整 `.nii` 或 `.nii.gz` 后，后端能创建任务并返回真实结果，而不是样例复制件。
+1. 上传一个完整 `.nii` 或 `.nii.gz` 后，后端能创建任务并返回真实结果，而不是参考标签复制件。
 2. 三正交视图在桌面上同时可读，Sagittal / Coronal 不会瘦到看不见。
 3. 三正交视图在移动端不挤压成不可用缩略图。
 4. 点击 mask 非背景体素后，能显示正确器官说明。
@@ -244,7 +244,7 @@
 
 ### 9.1 已推进
 
-- 后端作业创建已改为检查真实 nnUNetv2 model folder：`dataset.json`、`plans.json`、`fold_0/checkpoint_best.pth` 与 `nnUNetv2_predict_from_modelfolder.exe` 缺一则返回 503，不再把样例标签复制件伪装成真实推理结果。
+- 后端作业创建已改为检查真实 nnUNetv2 model folder：`dataset.json`、`plans.json`、`fold_0/checkpoint_best.pth` 与 `nnUNetv2_predict_from_modelfolder.exe` 缺一则返回 503，不再把参考标签复制件伪装成真实推理结果。
 - 后端真实推理路径已接入 `D:\BME2026\BME_CT_Seg\nnunet_env\Scripts\nnUNetv2_predict_from_modelfolder.exe`，并设置 `nnUNet_raw`、`nnUNet_preprocessed`、`nnUNet_results` 环境变量。默认设备为 CPU，可通过 `SEGMENTATION_DEVICE=cuda` 改为 GPU。
 - `/api/health` 和 `/api/models` 现在返回 `model_status`、`mode`、`missing` 与 `confidence_threshold_effective`，前端可以明确展示模型是否可用。
 - 前端推理文案已区分“真实 nnUNetv2 推理结果”和“调试标签回填结果（非真实推理）”，置信度控件降级为“质控提示”，不再暗示会筛选概率输出。
@@ -274,7 +274,7 @@
 1. **本地 CT / NIfTI 浏览**
    - 支持载入 `.nii` / `.nii.gz` 体数据，也保留 PNG / JPG / WebP 演示图导入。
    - 支持窗宽窗位、切片切换、缩放、透明度调节、split / overlay / side / difference 对比模式。
-   - 支持载入本地 AMOS 样例原图和样例标签，便于无外部数据时演示。
+   - 支持载入内置参考病例（当前为 AMOS 0117）原图和标准答案，便于无外部数据时演示、回归和 Dice 验证。
 
 2. **三正交联动查看**
    - Axial、Sagittal、Coronal 三个视图共用同一体素坐标。
@@ -309,7 +309,7 @@
 | 器官 label 可点击并展示说明 | 约 90% | 13 类 label 表与器官说明已补齐，后端 `dataset.json` 与前端 canonical id 已对齐；后续需要用最终训练集 label 集合确认是否还会新增或改名。 |
 | 连接本地 nnUNetv2 后端并回填结果 | 约 70% | API 形状、模型资源探测、真实命令调用、job state、SSE 和结果下载已完成；尚未完成真实大体积 CT 的端到端耗时验证、GPU/CPU 资源评估和失败恢复策略。 |
 
-结论：三个主要目标的“工作型 GUI 骨架”已经到位，可以用于本地演示、样例浏览、三正交检查和后端推理任务发起；距离稳定交付还差真实推理压力验证、置信度语义落地和更完整的异常处理。
+结论：三个主要目标的“工作型 GUI 骨架”已经到位，可以用于本地演示、参考病例浏览、三正交检查和后端推理任务发起；距离稳定交付还差真实推理压力验证、置信度语义落地和更完整的异常处理。
 
 ### 10.3 后续迭代优先级
 
@@ -341,7 +341,7 @@
 
 ### 11.1 本轮已完成
 
-1. **AMOS 样例标准答案验证链路**
+1. **内置参考病例标准答案验证链路**
    - 后端新增标准答案 Dice 计算能力：当上传内容与 `nnunetv2_files/amos_0117(3).nii.gz` 一致时，真实 nnUNetv2 推理完成后会自动读取输出结果，并与 `nnunetv2_files/amos_0117(2).nii.gz` 计算 per-label Dice、平均 Dice、最低 Dice 和前景 Dice。
    - `/api/segment/jobs/{job_id}` 会返回 `validation` 字段；SSE `complete` 事件也会携带验证摘要，前端可在“分割”和“评估”模块显示标准答案验证状态。
    - 当前验收阈值为：平均 Dice `>= 0.85` 且最低 label Dice `>= 0.70` 记为 `passed`；未达阈值为 `review`，不阻断结果下载，但提示人工复核。
@@ -363,7 +363,7 @@
 
 5. **前端标准答案验证展示**
    - “分割控制”面板新增“标准答案验证”状态卡。
-   - “评估”面板优先展示真实验证得到的平均 Dice、最低 Dice 和标准答案状态；未运行样例推理时继续显示待验证。
+   - “评估”面板优先展示真实验证得到的平均 Dice、最低 Dice 和标准答案状态；未运行参考病例推理时继续显示待验证。
 
 ### 11.2 三大目标当前判断
 
@@ -371,9 +371,9 @@
 |---|---:|---|
 | CT 可浏览、三正交可联动 | 约 93% | 点击映射已避开留白区，桌面正交布局已扩大侧向视图；仍需用更多真实 CT 和真机屏幕做人工视觉验收。 |
 | 器官 label 可点击并展示说明 | 约 90% | 本轮未改 label 体系；13 类器官说明和后端 label 对齐仍保持可用。 |
-| 连接本地 nnUNetv2 后端并回填结果 | 约 80% | 已新增样例标准答案 Dice 验证链路；仍需完成一次真实长耗时端到端推理记录，包括耗时、设备、内存和失败恢复。 |
+| 连接本地 nnUNetv2 后端并回填结果 | 约 80% | 已新增内置参考病例标准答案 Dice 验证链路；仍需完成一次真实长耗时端到端推理记录，包括耗时、设备、内存和失败恢复。 |
 
-### 11.3 真实 AMOS 样例推理验收记录
+### 11.3 AMOS 0117 参考病例真实推理验收记录
 
 - 输入原图：`nnunetv2_files/amos_0117(3).nii.gz`
 - 标准答案：`nnunetv2_files/amos_0117(2).nii.gz`
@@ -390,7 +390,7 @@
   - 当前状态：`review`，不是 `passed`。
   - 最低 Dice 标签：胃 `0.555985`，其次为食管 `0.793725`、左肾上腺 `0.815983`。
 
-结论：真实 CUDA 推理链路已经跑通，结果可以自动回填并下载；但样例标准答案验收没有完全达标，因为最低 label Dice 未达到 `0.70`。后续界面和文档应继续显示“建议人工复核”，不能把该样例表述为模型效果已完全理想。
+结论：真实 CUDA 推理链路已经跑通，结果可以自动回填并下载；但参考病例标准答案验收没有完全达标，因为最低 label Dice 未达到 `0.70`。后续界面和文档应继续显示“建议人工复核”，不能把该参考病例表述为模型效果已完全理想。
 
 ### 11.4 后续验收清单
 
@@ -399,13 +399,13 @@
 1. `npm test` 必须通过，覆盖 viewer/imaging/layout/backend/browser 布局回归。
 2. `npm run build` 必须通过，确认 TypeScript 与 Vite 生产构建可用。
 3. `GET http://127.0.0.1:8000/api/health` 应返回 `status: ok`、`mode: real-nnunetv2`、`model_config_detected: true`、`missing: []`。
-4. 使用内置 AMOS 样例真实推理完成后，job state 或 SSE complete 事件应包含 `validation` 摘要。
+4. 使用 AMOS 0117 内置参考病例真实推理完成后，job state 或 SSE complete 事件应包含 `validation` 摘要。
 
 **人工验收**
 
-1. 打开 `http://127.0.0.1:5173`，载入本地 AMOS 样例，确认 Axial/Sagittal/Coronal 同时清晰可读。
+1. 打开 `http://127.0.0.1:5173`，载入内置参考病例，确认 Axial/Sagittal/Coronal 同时清晰可读。
 2. 在三正交图像内容区点击和拖动，十字线应平稳移动；点击图像外留白区不应跳到边缘切片。
-3. 运行分割流程后，结果 NIfTI 应自动回填到三正交视图；若输入是 AMOS 样例，前端应显示标准答案验证状态。
+3. 运行分割流程后，结果 NIfTI 应自动回填到三正交视图；若输入是 AMOS 0117 参考病例，前端应显示标准答案验证状态。
 4. 点击 mask 中非背景 label，应打开正确器官说明；点击背景不应弹出器官说明。
 5. 若验证结果为 `review` 或 `unavailable`，不能在文档或 UI 中表述为“模型效果已达标”，必须保留人工复核提示。
 
@@ -525,7 +525,7 @@
 
 1. **补充 GitHub 首页 README**
    - 新增/更新 `README.md`，说明当前项目定位、主要功能、本地运行方式、API 概览、三大目标进度和参考 CT 推理结果。
-   - README 明确记录 AMOS 样例结果：`mean_dice=0.891327`、`foreground_dice=0.971222`、`min_dice=0.555985`，当前结论为 `review`，不能表述为完全通过验收。
+   - README 明确记录 AMOS 0117 参考病例结果：`mean_dice=0.891327`、`foreground_dice=0.971222`、`min_dice=0.555985`，当前结论为 `review`，不能表述为完全通过验收。
 
 2. **发布范围收口**
    - `.gitignore` 已排除 `node_modules/`、`dist/`、`.test-output/`、`server/work/`、`nnunetv2_files/`、`*.nii`、`*.nii.gz`、`*.pth`、`*.pt`。
@@ -583,7 +583,7 @@
 ### 17.1 根因复核
 
 - 用户复核后确认上一轮仍不符合正向浏览预期。
-- 使用参考文件 `nnunetv2_files/amos_0117_original.nii/amos_0117(3).nii` 检查 header：该样例的 NIfTI 方向为 `LAS`，仿射矩阵中 `x` 为负向、`y` 和 `z` 为正向。
+- 使用参考文件 `nnunetv2_files/amos_0117_original.nii/amos_0117(3).nii` 检查 header：该参考病例的 NIfTI 方向为 `LAS`，仿射矩阵中 `x` 为负向、`y` 和 `z` 为正向。
 - 上一轮虽然修正了 Sagittal 的 `y/z` 轴调换，但仍把数组行号直接映射到屏幕从上到下，导致：
   - Axial 顶部对应后方，床板/背侧显示在上方；
   - Sagittal / Coronal 顶部对应低层切片，头足方向倒置；
@@ -737,5 +737,292 @@
 
 ---
 
-*文档版本：2026-05-23*
+## 二十一、2026-05-23 三大目标收口补强
+
+### 21.1 本轮已完成
+
+1. **三正交浏览交互减阻**
+   - `sliceRenderer.ts` 增加按体数据对象分组的切片 data URL 缓存，缓存键由方向、固定切片、渲染模式、显示比例和可见 label 集合组成。
+   - 同一平面内拖动十字线时不会反复生成相同底图；回到已看过的切片时也可复用缓存，降低大体积 CT 下主线程渲染压力。
+
+2. **器官 label 图层与后端真源同步**
+   - 新增 `src/organLayerLogic.ts`，从 `/api/models` 返回的 label 表生成完整器官图层。
+   - 图层现在覆盖 AMOS 15 类 label，保留用户已有显隐和质控状态，并在标准答案 Dice 返回后用真实 per-label Dice 回填图层评分。
+   - 未验证的 label 显示为“待验”，不再用演示分数伪装成真实置信度。
+
+3. **本地 nnUNetv2 长任务取消**
+   - 后端 `Job` 增加 `cancel_requested` 与子进程句柄，新增 `POST /api/segment/jobs/{job_id}/cancel`。
+   - 取消请求会终止正在运行的 nnUNetv2 子进程，写入 process log 和 job summary，并通过 SSE 返回取消状态。
+   - 前端运行按钮在推理中切换为“取消推理”，取消后恢复可重试状态。
+
+### 21.2 本轮验证
+
+- `python tests/backendState.test.py`：通过，新增覆盖运行中 job 取消、进程 terminate、取消状态和事件记录。
+- `node tests/imagingLogic.test.ts`：通过，新增覆盖 15 类 label 图层同步、保留显隐/质控状态、切片缓存键稳定性。
+- `npx tsc --noEmit`：通过。
+
+### 21.3 三大目标当前进度
+
+| 三大目标 | 当前达成度 | 当前判断 |
+|---|---:|---|
+| CT 可浏览、三正交可联动 | 约 96% | 交互映射、横向对齐、切片闪回和重复渲染问题已有回归保护；剩余主要是真实设备和更多病例的人工视觉验收。 |
+| 器官 label 可点击并展示说明 | 约 95% | 图层已由后端 label 真源生成并覆盖 AMOS 15 类，说明内容完整；剩余依赖最终训练集 label 集合是否继续变更。 |
+| 连接本地 nnUNetv2 后端并回填结果 | 约 92% | 已具备真实推理、结果回填、历史回读、失败日志、验证摘要和长任务取消；剩余重点是多病例压力验证、资源监控和更系统的运行日志归档。 |
+
+---
+
+## 二十二、2026-05-23 真实质控与资源审计补强
+
+### 22.1 本轮已完成
+
+1. **per-label Dice 覆盖旧质控状态**
+   - `buildOrganLayersFromLabels()` 现在在收到标准答案 per-label Dice 后，以真实 Dice 重新判定器官图层 `accepted/review`。
+   - 这修复了一个隐患：如果某器官之前被人工标为“通过”，后续真实验证 Dice 偏低时，旧状态不应继续覆盖新结果。
+   - 同步时继续保留用户显隐设置，并开始尊重后端 label 表里的 `visible` 默认值。
+
+2. **nnUNetv2 作业资源快照归档**
+   - 后端 `Job` 增加 `resource_snapshots` 与 `resource_log_path`。
+   - 真实推理会在 `started`、`process_started`、`completed/failed/cancelled` 等关键阶段记录资源快照。
+   - 快照包含推理设备、服务进程 PID、工作目录磁盘容量、服务进程内存；若本机存在 `nvidia-smi`，还会记录 GPU 名称、显存占用和利用率。
+   - `job_summary.json` 会包含 `resource_latest` 和 `resource_snapshots`，同时输出独立的 `resource_snapshots.json`，服务重启后也可随历史 job summary 回读。
+
+3. **前端资源摘要回填**
+   - SSE `complete/error` 事件支持解析 `resource_latest`。
+   - “评估”面板新增“资源快照”指标，流程日志会记录如设备、GPU 显存和磁盘可用空间，便于真实长任务验收时复盘。
+
+### 22.2 本轮验证
+
+- `node tests/imagingLogic.test.ts`：先失败后通过，覆盖真实 Dice 覆盖旧质控状态、资源快照 SSE 解析和前端资源摘要文案。
+- `python tests/backendState.test.py`：先失败后通过，覆盖 `resource_snapshots.json` 写入、`resource_latest` 和 `resource_log_path` 进入 job summary。
+- `npm test`：通过。
+- `npm run build`：通过。
+
+### 22.3 三大目标当前进度
+
+| 三大目标 | 当前达成度 | 当前判断 |
+|---|---:|---|
+| CT 可浏览、三正交可联动 | 约 96% | 本轮未改变核心映射，现有三视图、布局、浏览器回归继续通过；剩余仍是真机屏幕和更多真实 CT 的人工验收。 |
+| 器官 label 可点击并展示说明 | 约 96% | label 图层继续由后端真源生成，且真实 per-label Dice 已能覆盖旧人工状态；剩余取决于最终训练集 label 是否继续变更。 |
+| 连接本地 nnUNetv2 后端并回填结果 | 约 94% | 在真实推理、回填、历史回读、失败日志、验证摘要和取消基础上，补齐了关键阶段资源快照和归档；剩余重点是多病例压力验证与更细粒度的资源曲线。 |
+
+---
+
+## 二十三、2026-05-24 无新增病例条件下的推理加速与收口
+
+### 23.1 边界判断
+
+- 当前没有更多真实 CT 病例，因此不能继续提高或宣称“模型泛化验收进度”。三大目标仍可推进，但推进点应限于工程能力：缓存、可追溯、交互稳定性、真实运行记录和失败恢复。
+- `AMOS 0117` 仍可作为固定回归病例使用，用于验证前端回填、label 点击、标准答案 Dice、缓存命中和端到端服务状态。
+- 对“在线推理太慢”的处理不能伪装成模型本身变快：首次未缓存真实 nnUNetv2 推理仍取决于模型、GPU、体数据大小和 nnUNetv2 预处理/导出成本；重复同一输入时可以通过历史结果缓存把等待时间降到秒级。
+
+### 23.2 本轮已完成
+
+1. **同输入历史推理缓存**
+   - 后端在创建 job 时计算上传 NIfTI 的 `input_sha256`，并基于输入哈希、checkpoint 哈希、模型配置和 label 来源生成 `cache_key`。
+   - 若已有成功 job 的 `cache_key` 相同，后端不再启动 nnUNetv2 子进程，而是硬链接或复制历史 NIfTI 结果到新 job 输出目录，并立即通过 SSE 返回 `complete`。
+   - 缓存命中 job 会写入 `cached_result=true`、`cache_source_job_id`、`cache_key`、`input_sha256` 和 `checkpoint_sha256`，结果仍可通过 `/api/segment/jobs/{job_id}/result` 下载并回填到前端。
+   - 对文档中已有的 `009d4efdc5f6` AMOS 0117 参考病例历史真实结果，若当前上传内容与内置参考病例原图一致，也可作为 legacy 缓存源，避免每次演示都重新跑 5-6 分钟。
+
+2. **nnUNetv2 worker 参数可配置**
+   - `build_predict_command()` 不再固定 `-npp 1 -nps 1`。
+   - 新增环境变量：
+     - `SEGMENTATION_PREPROCESS_WORKERS`：默认 `2`，范围 `1..8`。
+     - `SEGMENTATION_EXPORT_WORKERS`：默认 `2`，范围 `1..8`。
+   - `/api/health` 的 `model_status.predict_workers` 会展示当前 worker 配置，便于记录不同设置下的耗时差异。
+
+3. **前端缓存状态透明展示**
+   - 前端新增 `cached-real-nnunetv2` 模式文案。
+   - 缓存命中时状态显示为“缓存推理结果回填完成”，结果元信息显示“历史缓存 nnUNetv2 结果”，避免误导为重新执行了一次完整真实推理。
+
+### 23.3 本轮验证
+
+- `python tests/backendState.test.py`：先失败后通过，覆盖 worker 默认值/边界钳制、命令行 `-npp/-nps` 配置、缓存命中时不启动真实推理线程、缓存结果可下载。
+- `node tests/imagingLogic.test.ts`：先失败后通过，覆盖缓存推理结果状态文案和结果元信息。
+- `npm test`：通过。
+- `npm run build`：通过。
+- 已重启本地后端并确认 `/api/health` 返回 `predict_workers={"preprocess":2,"export":2}`。
+- 使用内置参考病例原图创建在线推理 job `97fa9cefeb41`，命中历史真实结果 `009d4efdc5f6`，创建请求耗时约 `640 ms`，返回 `mode=cached-real-nnunetv2`、`cached_result=true`，结果下载接口返回 `200`，大小 `141460 bytes`。
+
+### 23.4 三大目标当前进度
+
+| 三大目标 | 当前达成度 | 当前判断 |
+|---|---:|---|
+| CT 可浏览、三正交可联动 | 约 96% | 没有新 CT 时无法做更广病例视觉验收；现阶段可继续通过缓存命中后的快速回填反复验收三视图交互、label 点击和报告状态。 |
+| 器官 label 可点击并展示说明 | 约 96% | label 真源、15 类说明和 per-label Dice 回填已闭环；后续进度主要取决于最终训练集 label 是否变化，以及真实病例中 label 是否完整出现。 |
+| 连接本地 nnUNetv2 后端并回填结果 | 约 96% | 新增同输入缓存和 worker 配置后，重复在线演示可避免分钟级等待；首次未缓存真实推理仍需记录实际耗时和资源曲线，不能用缓存耗时替代真实推理性能指标。 |
+
+### 23.5 后续可继续推进但需要明确前提
+
+- 若目标是“首次推理也显著快于 5-6 分钟”，下一步需要真实计时分解：模型加载、预处理、GPU 推理、导出和前端下载分别耗时多少。
+- 若瓶颈在模型加载或 nnUNetv2 框架启动，应规划常驻推理进程或 Python worker 池；这比当前 FastAPI 每个 job 启动一个子进程复杂，但能减少重复启动成本。
+- 若瓶颈在模型本身，应考虑轻量配置、裁剪 ROI、低分辨率预览或 TensorRT/ONNX 等单独优化路线；这些会改变精度和验收口径，不能和当前标准答案 Dice 混用。
+
+---
+
+## 二十四、2026-05-24 参考病例定位修正
+
+### 24.1 产品定位
+
+- GUI 的主定位是通用 CT 分割工作站原型，不是 AMOS 专用浏览器。
+- 主流程应表述为：导入 CT 原图、导入或运行分割结果、三正交检查、查看器官说明、保存病例或导出报告。
+- AMOS 0117 当前只作为内置参考病例，用于无外部数据时演示、固定回归、标准答案 Dice 验证和推理链路冒烟测试。
+- 后续导入其他真实 CT 或其他数据集病例时，应沿用同一套“导入 CT 原图 / 导入分割结果 / 运行分割”的通用入口，而不是为每个数据集单独塑造一个主流程。
+
+### 24.2 术语约定
+
+| 术语 | 在本项目中的含义 | 当前状态 |
+|---|---|---|
+| 导入 CT 原图 | 用户从本机选择任意 `.nii` / `.nii.gz` CT 体数据进入工作台 | 主流程入口，不能绑定到 AMOS |
+| 导入分割结果 | 用户从本机选择已有 mask / prediction NIfTI，用于叠加、对比和人工复核 | 主流程入口，适用于 AMOS、FLARE 或其他来源 |
+| 载入参考病例 | 一键载入项目随附的固定参考病例，降低演示和回归测试门槛 | 当前内置资源为 AMOS 0117 |
+| 内置参考病例 | 后端 `/api/samples/...` 暴露的固定病例资源 | 当前只有 `amos_0117`，后续可扩展更多 sample id |
+| 标准答案验证 | 当输入与某个带标准答案的参考病例匹配时，自动计算 Dice | 当前只对 AMOS 0117 闭环 |
+
+结论：按钮“载入参考病例”的意思不是“只能载入 AMOS”，而是“从后端内置参考病例库载入一个可验证病例”。当前库里只有 AMOS 0117，因此 endpoint 和文件名仍包含 `amos_0117`；后续增加 AMOS 其他病例、FLARE 用例或自定义教学病例时，应扩展参考病例清单，而不是改变 GUI 的主流程定位。
+
+### 24.3 本轮已完成
+
+- 前端按钮从旧的 AMOS-only 入口文案调整为“导入 CT 原图 / 导入分割结果 / 载入参考病例”。
+- 自动载入、空状态、toast、日志和错误提示统一改为“内置参考病例 / 参考病例服务”，避免暗示系统只能处理 AMOS。
+- `loadLocalAmosSample()` 重命名为 `loadReferenceCase()`；后端 endpoint 仍保留 `/api/samples/amos_0117/...`，因为当前内置资源只有 AMOS 0117。
+- README 已明确：AMOS 0117 是内置参考病例，主流程支持任意 `.nii` / `.nii.gz` CT 与分割结果导入。
+
+### 24.4 对三大目标的影响
+
+| 三大目标 | 当前判断 |
+|---|---|
+| CT 可浏览、三正交可联动 | 仍可继续推进交互稳定性、回归测试和真实设备验收；没有更多真实 CT 时不能扩大病例覆盖结论。 |
+| 器官 label 可点击并展示说明 | 可继续完善 label 真源、说明文案和质控状态；最终 label 集合是否变化仍依赖训练集和更多病例。 |
+| 连接本地 nnUNetv2 后端并回填结果 | 可继续推进常驻 worker、耗时分解、缓存透明展示和失败恢复；首次真实推理性能仍必须用未缓存 job 记录。 |
+
+### 24.5 后续导入用例规划
+
+- 短期：继续支持用户手动导入任意 `.nii` / `.nii.gz` 原图和分割结果，不要求这些病例预先登记为内置样本。
+- 中期：将 `/api/samples` 从单一 AMOS 0117 状态扩展为参考病例列表，返回 `id`、名称、数据集来源、是否有标准答案、原图大小和可用状态。
+- 中期：前端“载入参考病例”应从单按钮升级为菜单或弹窗，允许选择 AMOS 0117、AMOS 其他病例、FLARE 用例或项目自定义病例。
+- 长期：每个参考病例都应有独立元数据和验证口径；只有带标准答案的参考病例才能自动计算 Dice，普通外部 CT 只能显示推理结果、资源耗时和人工复核状态。
+
+### 24.6 本轮验证
+
+- 新增 `tests/imagingLogic.test.ts` 文案回归断言：禁止 UI 重新使用 AMOS-only 载入文案，并要求保留“载入参考病例”和“内置参考病例”。
+- `node tests/imagingLogic.test.ts`：先失败后通过，覆盖旧 AMOS-only 文案回归与新参考病例文案。
+- `npm test`：通过。受限权限下浏览器测试会遇到 `spawn EPERM`，已在正常权限和全新 `SEGMENTATION_TEST_TMP` 下完成。
+- `npm run build`：通过。受限权限下 Vite 会遇到 `spawn EPERM`，已在正常权限下完成生产构建。
+
+---
+
+## 二十五、2026-05-24 三大目标继续完善：参考病例清单化
+
+### 25.1 本轮目标
+
+本轮不新增真实 CT 病例，也不扩大模型泛化结论。推进重点是把上一节确定的“参考病例”定位落实到接口和前端状态中，让后续导入 AMOS 其他病例、FLARE 用例或自定义病例时有清晰扩展点。
+
+### 25.2 本轮已完成
+
+1. **后端 `/api/samples` 元数据补强**
+   - `/api/samples` 继续返回数组，但每个 sample 现在包含 `id`、`name`、`dataset`、`modality`、`role`、`description`、`original_url`、`label_url`、文件名、`has_original`、`has_label` 和 `validation_available`。
+   - 当前唯一内置参考病例仍为 `amos_0117`，但接口形状已经从“单个 AMOS 文件状态”推进为“参考病例清单”。
+   - `/api/samples/{sample_id}/original` 和 `/api/samples/{sample_id}/label` 的 404 文案改为“参考病例原图/标签不存在”，不再使用样例语义。
+
+2. **前端参考病例解析与选择**
+   - 新增 `src/referenceCases.ts`，集中定义 `ReferenceCase`、默认 AMOS 0117 参考病例、`normalizeReferenceCases()` 和 `getReferenceCaseOriginalUrl()`。
+   - `src/main.tsx` 不再硬编码 `/api/samples/amos_0117/original`，而是先读取 `/api/samples`，再按当前选中的参考病例 URL 载入。
+   - “数据”和“分割”侧栏新增参考病例选择控件；当前只有 AMOS 0117 一个选项，但 UI 结构已经支持多参考病例列表。
+
+3. **回归测试补强**
+   - `tests/backendState.test.py` 新增 `/api/samples` 元数据断言，防止后续把接口退回到只有路径的状态。
+   - `tests/imagingLogic.test.ts` 新增参考病例解析测试，并断言 `main.tsx` 不再硬编码 AMOS 原图 URL。
+
+### 25.3 三大目标当前进展
+
+| 三大目标 | 当前达成度 | 本轮推进 |
+|---|---:|---|
+| CT 可浏览、三正交可联动 | 约 96% | 浏览能力本身未改变；病例入口从单固定按钮推进为可扩展参考病例清单，便于后续加入更多真实 CT 做视觉验收。 |
+| 器官 label 可点击并展示说明 | 约 96% | label 说明未改动；参考病例元数据增加 `validation_available`，为后续区分“可自动 Dice 验证”和“只能人工复核”的病例打基础。 |
+| 连接本地 nnUNetv2 后端并回填结果 | 约 97% | 推理链路不再依赖前端硬编码 AMOS URL；后续新增参考病例时，可沿用同一载入和推理回填流程。 |
+
+### 25.4 后续建议
+
+- 下一步可把 `/api/samples` 的静态 AMOS 0117 描述抽成后端配置列表，允许一次登记多个参考病例。
+- 当前仍缺更多真实 CT，不能把三大目标进度解释为模型泛化能力提升；新增病例后应分别记录三正交显示、label 点击、推理耗时、资源快照和标准答案状态。
+- 若要继续加速首次推理，应使用 `phase_timings` 先找出模型加载、预处理、GPU 推理和导出的占比，再决定是否优化常驻 worker、ROI 裁剪或导出流程。
+
+### 25.5 本轮验证
+
+- `node tests/imagingLogic.test.ts`：先失败后通过，覆盖参考病例解析和 AMOS URL 去硬编码。
+- `python tests/backendState.test.py`：先失败后通过，覆盖 `/api/samples` 参考病例元数据。
+- `npm test`：通过，使用全新 `SEGMENTATION_TEST_TMP` 并在正常权限下运行浏览器布局测试。
+- `npm run build`：通过，Vite 生产构建输出 `dist/`。
+
+---
+
+## 二十六、2026-05-24 三大目标继续完善：参考病例注册表可配置
+
+### 26.1 本轮目标
+
+在没有新增真实 CT 文件的前提下，继续推进“可导入 AMOS 用例，也可导入其他用例”的工程能力。重点不是增加模型验收结论，而是让后端和前端具备多参考病例扩展机制。
+
+### 26.2 本轮已完成
+
+1. **参考病例注册表**
+   - 后端新增 `SEGMENTATION_REFERENCE_CASES_JSON` 支持。
+   - 若该环境变量指向一个 JSON 文件，后端会从其中读取 `samples` 列表；若未配置或文件不存在，则回退到默认 AMOS 0117。
+   - 配置项支持 `id`、`name`、`dataset`、`modality`、`role`、`description`、`original`、`label`、`original_filename`、`label_filename`。
+   - `original` 和 `label` 支持绝对路径，也支持相对配置文件所在目录的相对路径。
+
+2. **动态参考病例下载**
+   - `/api/samples/{sample_id}/original` 和 `/api/samples/{sample_id}/label` 不再只识别 `amos_0117`。
+   - 只要该 `sample_id` 已登记并且文件存在，就能通过同一 API 下载原图或标签。
+   - 标签缺失时仍可登记病例，但 `has_label=false`、`validation_available=false`，不会伪装成可自动 Dice 验证。
+
+3. **前端缺失病例保护**
+   - 参考病例下拉列表会保留已登记但原图缺失的病例，并显示“原图缺失”。
+   - 当前选中的参考病例没有原图时，“载入参考病例”按钮会禁用，避免点击后才失败。
+
+### 26.3 三大目标当前进展
+
+| 三大目标 | 当前达成度 | 本轮推进 |
+|---|---:|---|
+| CT 可浏览、三正交可联动 | 约 97% | 参考病例入口已支持多病例注册和缺失状态展示；新增真实 CT 后可直接纳入浏览验收。 |
+| 器官 label 可点击并展示说明 | 约 96% | 本轮未改变 label 语义；但通过 `validation_available` 区分有无标准答案，为不同数据集病例的复核路径打基础。 |
+| 连接本地 nnUNetv2 后端并回填结果 | 约 97% | 后端样本下载 API 已从 AMOS 单例扩展为动态 sample id；后续新增病例可沿用同一推理与回填链路。 |
+
+### 26.4 配置示例
+
+`SEGMENTATION_REFERENCE_CASES_JSON` 指向的 JSON 可使用如下结构：
+
+```json
+{
+  "samples": [
+    {
+      "id": "amos_0117",
+      "name": "AMOS 0117",
+      "dataset": "AMOS22",
+      "modality": "CT",
+      "original": "amos_0117(3).nii.gz",
+      "label": "amos_0117(2).nii.gz",
+      "description": "带标准答案的 AMOS 参考病例"
+    },
+    {
+      "id": "flare_demo",
+      "name": "FLARE Demo",
+      "dataset": "FLARE",
+      "modality": "CT",
+      "original": "flare_demo.nii.gz",
+      "description": "仅用于浏览和推理回填的参考病例"
+    }
+  ]
+}
+```
+
+### 26.5 本轮验证
+
+- `python tests/backendState.test.py`：先失败后通过，覆盖配置文件读取、相对路径解析、动态 sample id 下载和缺失 label 的 404。
+- `node tests/imagingLogic.test.ts`：通过，确认前端参考病例解析和去硬编码逻辑仍稳定。
+- `npm test`：通过，使用全新 `SEGMENTATION_TEST_TMP` 并在正常权限下运行 Playwright。
+- `npm run build`：通过，TypeScript 与 Vite 生产构建均成功。
+
+---
+
+*文档版本：2026-05-24*
 *更新依据：当前 `src/main.tsx`、`src/components/OrthogonalViewer.tsx`、`src/imaging/voxelMapping.ts`、`src/imaging/sliceRenderer.ts`、`src/data/organDetails.ts`、`src/inference/inferenceClient.ts`、`server/main.py`、`server/requirements.txt`、`tests/*.test.ts` 与本地运行验证结果。*
