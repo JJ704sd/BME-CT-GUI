@@ -1054,5 +1054,335 @@
 
 ---
 
+## 二十八、2026-05-24 三大目标验收包与运行态复核
+
+### 28.1 本轮目标
+
+在已有三大目标接近收口的基础上，本轮不再继续堆叠新界面功能，而是补齐可复现验收材料：让“CT 可浏览、三正交可联动”“器官 label 可点击并展示说明”“连接本地 nnUNetv2 后端并回填结果”都有明确的人工验收记录表、自动化文档守卫和运行态证据。
+
+### 28.2 本轮已完成
+
+1. **新增三大目标验收文档**
+   - 新增 `ACCEPTANCE.md`，将三大目标拆成验收对象、人工验收记录字段、通过标准、执行步骤和当前边界。
+   - 文档明确区分真实未缓存推理、`cached-real-nnunetv2` 缓存回填和没有标准答案病例的人工复核流程。
+   - 文档保留当前限制：本仓库不提交真实 CT、NIfTI、checkpoint 权重或推理输出；当前本地可直接运行态验收的真实 NIfTI 主要是 AMOS 0117。
+
+2. **新增参考病例注册表示例**
+   - 新增 `reference_cases.example.json`，包含当前可用的 `amos_0117` 和一个非 AMOS 的 `flare_demo` 注册示例。
+   - `flare_demo` 目前只是外部病例接入示例，指向 `external_cases/flare_demo.nii.gz`，不能视为已经完成 FLARE 模型效果验证。
+   - 示例延续 `SEGMENTATION_REFERENCE_CASES_JSON` 机制，后续放入真实文件后可沿用同一 `/api/samples`、载入、推理和回填流程。
+
+3. **新增文档守卫测试**
+   - 新增 `tests/acceptanceDocs.test.ts`，检查 `ACCEPTANCE.md` 和 `reference_cases.example.json` 是否存在，并覆盖三大目标关键词、未缓存真实推理、`cached-real-nnunetv2`、`validation_available` 和非 AMOS 示例。
+   - `package.json` 的 `npm test` 已纳入该文档测试，避免后续删除验收包或把参考病例配置退回 AMOS 单例而不被发现。
+
+4. **修复后端测试隔离问题**
+   - `tests/backendState.test.py` 的 `make_test_output_dir()` 现在会在创建命名测试目录前清理旧目录。
+   - 根因是 `.test-output/cached-jobs` 中旧 job summary 会被缓存查找抢先命中，导致缓存复用测试在非全新目录下偶发失败。
+   - 使用全新 `SEGMENTATION_TEST_TMP` 复核后确认该问题属于历史测试输出污染，不是业务缓存逻辑退化。
+
+### 28.3 未缓存真实推理复核
+
+本轮在隔离工作目录中执行了一次 AMOS 0117 未缓存真实推理，避免命中既有 `server/work` 历史缓存：
+
+```text
+D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\.test-output\acceptance-real-20260524-194750
+```
+
+运行结果：
+
+| 项目 | 结果 |
+|---|---|
+| job id | `32dfe3117b40` |
+| mode | `real-nnunetv2` |
+| cached_result | `false` |
+| device | `cuda` |
+| GPU | NVIDIA GeForce RTX 4060 Laptop GPU, 8188 MiB |
+| duration_seconds | `359.425` |
+| phase_timings | `nnunet_process=356.767`，`validation=2.481` |
+| result_status | `200` |
+| result_bytes | `141470` |
+| validation status | `review` |
+| mean_dice | `0.891305` |
+| foreground_dice | `0.97122` |
+| min_dice | `0.55591` |
+
+结论：真实 nnUNetv2 推理链路、CUDA 执行、结果生成和结果下载均通过；但 AMOS 0117 的胃 label Dice 为 `0.55591`，低于最小 label Dice 阈值 `0.70`，因此质控状态仍应保持 `review`，不能写成完全自动通过。
+
+### 28.4 缓存回填复核
+
+在同一隔离工作目录中再次提交同一输入，确认历史结果缓存回填路径：
+
+| 项目 | 结果 |
+|---|---|
+| job id | `c8cecb040657` |
+| mode | `cached-real-nnunetv2` |
+| cached_result | `true` |
+| cache_source_job_id | `32dfe3117b40` |
+| elapsed_seconds | `2.674` |
+| result_status | `200` |
+| result_bytes | `141470` |
+
+结论：缓存回填路径能复用同输入、同 checkpoint、同配置的真实推理结果，并返回可下载 NIfTI；但该耗时只能用于演示和重复验收，不能替代首次未缓存推理性能指标。
+
+### 28.5 三大目标当前进展
+
+| 三大目标 | 当前达成度 | 本轮推进 |
+|---|---:|---|
+| CT 可浏览、三正交可联动 | 约 97% | 已补验收记录模板和参考病例注册表示例；仍缺更多非 AMOS 真实 CT 的人工截图/真机验收。 |
+| 器官 label 可点击并展示说明 | 约 97% | 验收包明确 label 来源、点击记录、背景行为和 `validation_available` 边界；AMOS 0117 per-label Dice 已重新记录。 |
+| 连接本地 nnUNetv2 后端并回填结果 | 约 98% | 未缓存 CUDA 推理和同输入缓存回填均已复核，结果下载成功；首次推理耗时约 6 分钟，后续性能优化仍应围绕 `nnunet_process` 展开。 |
+
+### 28.6 本轮验证
+
+- `node tests/acceptanceDocs.test.ts`：先失败后通过，确认验收文档和参考病例示例存在并包含关键约束。
+- `python tests/backendState.test.py`：先在历史 `.test-output` 下暴露缓存测试污染问题，修复测试目录隔离后通过。
+- `npm test`：通过，包含 viewer、imaging、acceptance docs、layout、backend state 和 Playwright 浏览器布局测试。
+- `npm run build`：通过，TypeScript 与 Vite 生产构建均成功。
+- 未缓存真实推理：通过，`job_id=32dfe3117b40`，`real-nnunetv2`，`cached_result=false`，结果下载 `200`。
+- 同输入缓存回填：通过，`job_id=c8cecb040657`，`cached-real-nnunetv2`，`cache_source_job_id=32dfe3117b40`。
+
+### 28.7 后续建议
+
+- 新增真实非 AMOS CT 后，优先登记到 `reference_cases.example.json` 同结构配置，再补充 `ACCEPTANCE.md` 的人工验收记录。
+- 若目标是缩短首次推理耗时，应优先分析 `nnunet_process=356.767` 秒内部构成，再决定是否推进常驻 worker、ROI 裁剪或导出流程优化。
+- AMOS 0117 的 `review` 状态应继续保留，除非重新训练或调整阈值后胃 label Dice 达到验收要求。
+
+---
+
+## 二十九、2026-05-24 新权重在线推理复核与加速判断
+
+### 29.1 权重确认
+
+用户确认新的训练权重已更新到：
+
+```text
+D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\checkpoint_best.pth
+```
+
+本轮复核到的权重元信息：
+
+| 项目 | 结果 |
+|---|---|
+| 文件大小 | `1136119762 bytes` |
+| 修改时间 | `2026-05-24 18:04:22` |
+| checkpoint_sha256 | `45021cef5f37868f8e76f4c372b5d911eef259db6d38943779ba25318c37e6c7` |
+
+后端当前以该文件作为 `checkpoint_source`。由于 `checkpoint_sha256` 已纳入 `cache_key`，新权重不会复用旧权重 `3254d5f...` 生成的缓存结果。
+
+### 29.2 当前采用的在线加速方式
+
+当前没有做降分辨率、ROI 裁剪、ONNX/TensorRT 或模型结构层面的加速。本轮尝试的是后端运行方式层面的加速：
+
+1. **常驻 nnUNet predictor worker**
+   - 通过 `SEGMENTATION_PERSISTENT_WORKER=1` 启用。
+   - 目标是复用已启动的 Python / nnUNet / predictor / checkpoint 初始化状态，减少每个在线 job 的重复启动和模型加载成本。
+   - 该方式理论上对“同一后端进程内连续处理多个未缓存病例”更有意义；单次冷启动仍包含 worker 初始化成本。
+
+2. **checkpoint-aware 缓存回填**
+   - 后端缓存 key 包含输入 hash、checkpoint hash、dataset/configuration 和 label 来源。
+   - 同一权重、同一输入、同一配置重复提交时，可直接回填 `cached-real-nnunetv2` 结果。
+   - 这是当前已明确验证能显著缩短重复在线演示耗时的路径。
+
+### 29.3 新权重未缓存真实推理记录
+
+本轮使用新权重在隔离目录中重新执行 AMOS 0117 在线推理：
+
+```text
+D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\.test-output\acceptance-new-weight-20260524-201714
+```
+
+运行结果：
+
+| 项目 | 结果 |
+|---|---|
+| job id | `27216eb73220` |
+| mode | `real-nnunetv2` |
+| cached_result | `false` |
+| device | `cuda` |
+| GPU | NVIDIA GeForce RTX 4060 Laptop GPU, 8188 MiB |
+| duration_seconds | `1124.327` |
+| phase_timings | `persistent_worker=1121.592`，`validation=2.527` |
+| result_ready | `true` |
+| result_size_bytes | `141569` |
+| checkpoint_sha256 | `45021cef5f37868f8e76f4c372b5d911eef259db6d38943779ba25318c37e6c7` |
+| validation status | `passed` |
+| mean_dice | `0.924791` |
+| foreground_dice | `0.980316` |
+| min_dice | `0.846551` |
+
+结论：新权重的 AMOS 0117 标准答案验证已经通过阈值，尤其是旧权重最低 Dice 来自胃 label 的问题明显改善，`min_dice` 从 `0.55591` 提升到 `0.846551`。但本次冷启动常驻 worker 的首次未缓存推理耗时约 `18.7` 分钟，不能写成“首次推理加速成功”。
+
+### 29.4 新权重缓存回填记录
+
+在同一隔离工作目录中再次提交同一 AMOS 0117 输入：
+
+| 项目 | 结果 |
+|---|---|
+| job id | `f200f16f47be` |
+| mode | `cached-real-nnunetv2` |
+| cached_result | `true` |
+| cache_source_job_id | `27216eb73220` |
+| elapsed_seconds | `3.532` |
+| result_status | `200` |
+| result_bytes | `141569` |
+
+结论：新权重下缓存回填可用，且重复请求耗时约 `3.5` 秒。这适合在线演示、重复复核和报告回填，但不能替代首次未缓存推理性能指标。
+
+### 29.5 下一步性能判断
+
+- 如果目标是“重复演示快”，当前 checkpoint-aware 缓存已经满足主要需求。
+- 如果目标是“同一后端进程连续处理多个新病例更快”，下一步应做 warm-worker 对照：保持同一 persistent worker 存活，使用第二个未缓存输入或显式禁用缓存后再跑一次，比较第二次 `persistent_worker` 阶段耗时。
+- 如果目标是“单个新病例首次推理显著快于 5-6 分钟”，常驻 worker 冷启动不是充分方案，后续需要拆解 nnUNet 内部耗时，并评估 ROI 裁剪、低分辨率预览、模型配置轻量化或导出链路优化。
+- 本轮持久化 summary 中 `log_tail` 对常驻 worker 中文消息存在编码错读，但 `job_summary.json`、`validation_summary.json` 和结果 NIfTI 均已生成；后续可单独修正 worker 日志输出为 ASCII 或显式 UTF-8。
+
+---
+
+## 三十、2026-05-24 新权重分割指标 Summary
+
+### 30.1 指标工具
+
+新增可复用脚本：
+
+```text
+tools/segmentation_metrics_summary.py
+```
+
+该工具输入预测 NIfTI、参考标签 NIfTI、checkpoint 和 `dataset.json`，输出 JSON 与 Markdown 两份 summary。记录指标包括：
+
+- Dice：per-label、mean、min、foreground。
+- IoU：per-label、mean、min、foreground。
+- Pixel Accuracy / Voxel Accuracy：3D NIfTI 体素逐点 exact-match accuracy。
+- Hausdorff Distance：使用 NIfTI spacing 的对称 surface Hausdorff Distance，单位为 mm。
+- checkpoint 元信息：路径、文件大小、修改时间和 SHA256。
+
+同时新增项目级登记文档：
+
+```text
+SEGMENTATION_METRICS_SUMMARY.md
+```
+
+该文档保存后续训练权重可复用的命令模板、最新指标摘要和详细输出路径。
+
+### 30.2 本轮新权重指标记录
+
+本轮使用用户确认的新权重：
+
+```text
+D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\checkpoint_best.pth
+```
+
+预测结果来自新权重未缓存真实推理 job：
+
+```text
+D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\.test-output\acceptance-new-weight-20260524-201714\work\27216eb73220\output\27216eb73220.nii.gz
+```
+
+指标输出：
+
+| 项目 | 路径 |
+|---|---|
+| JSON | `.test-output\segmentation-metrics-new-weight-20260524-2215\new-weight-amos0117-segmentation-metrics.json` |
+| Markdown | `.test-output\segmentation-metrics-new-weight-20260524-2215\new-weight-amos0117-segmentation-metrics.md` |
+| 项目登记 | `SEGMENTATION_METRICS_SUMMARY.md` |
+| 标签源 | `.test-output\acceptance-new-weight-20260524-201714\work\27216eb73220\output\validation_summary.json` |
+
+聚合指标：
+
+| 指标 | 值 |
+|---|---:|
+| mean Dice | `0.924791` |
+| min Dice | `0.846551` |
+| foreground Dice | `0.980316` |
+| mean IoU | `0.865105` |
+| min IoU | `0.733930` |
+| foreground IoU | `0.961392` |
+| Pixel/Voxel Accuracy | `0.998578` |
+| mean Hausdorff Distance | `7.716048 mm` |
+| max Hausdorff Distance | `16.562684 mm` |
+
+标签说明：checkpoint 定义 15 个前景标签；AMOS 0117 本例的参考标签和预测结果实际只出现 label `1..13`，label `14=膀胱` 与 `15=前列腺/子宫` 的 `prediction_voxels=0`、`reference_voxels=0`，Dice/IoU/Hausdorff 记录为 `N/A`，不参与 mean/min 聚合。
+
+结论：新权重在 AMOS 0117 参考病例上的重叠类指标和边界距离均已持久化记录。该结论只覆盖带标准答案的 AMOS 0117，不应外推到没有标准标签的外部 CT。后续生成指标时必须使用与 checkpoint 一致的标签源，避免外部旧 `dataset.json` 导致 13 类漏记或 label 名称错位。
+
+### 30.3 验证记录
+
+- `python tests/segmentationMetrics.test.py`：先失败后通过，覆盖 Dice、IoU、Pixel/Voxel Accuracy、Hausdorff Distance 和 JSON/Markdown 写入。
+- `node tests/acceptanceDocs.test.ts`：先失败后通过，覆盖 `SEGMENTATION_METRICS_SUMMARY.md` 存在及关键指标字段。
+
+---
+
+## 三十一、2026-05-24 无缓存 Warm Worker 超时复盘
+
+### 31.1 实验事实
+
+本轮实验目录：
+
+```text
+D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\.test-output\perf-no-cache-persistent-20260524-212332
+```
+
+实验设置：
+
+| 项目 | 值 |
+|---|---|
+| device | `cuda` |
+| preprocess_workers | `2` |
+| export_workers | `2` |
+| cache_policy | `disabled via patch(server.find_cached_prediction, return_value=None)` |
+| worker_policy | `SEGMENTATION_PERSISTENT_WORKER=1` |
+| timeout_seconds | `1800` |
+
+结果：
+
+| 项目 | cold | warm |
+|---|---|---|
+| label | `cold_persistent_no_cache` | `warm_persistent_no_cache` |
+| job_id | `c7ef1da0195e` | `685426290aa4` |
+| cached_result | `false` | `false` |
+| summary status | `succeeded` | `timeout` |
+| recorded duration | `1528.792s` | timeout state at `1800.785s` |
+| actual output | `c7ef1da0195e.nii.gz` | `685426290aa4.nii.gz` generated after timeout |
+| output bytes | `141558` | `141558` |
+| output SHA256 | `5473EAFB22FA21B896F8511BE9E02FFD49D678DEE4B82E63681FDD99DA57D9C0` | `5473EAFB22FA21B896F8511BE9E02FFD49D678DEE4B82E63681FDD99DA57D9C0` |
+
+warm 的实际落盘时间：输入写入 `2026-05-24 21:49:08`，NIfTI 写入 `2026-05-24 22:57:33`，约 `4104.567s` / `68.409min`。因此这轮对照不能证明常驻 worker 对无缓存推理有加速，反而显示第二次推理明显更慢。
+
+warm 输出补充指标：
+
+| 项目 | 值 |
+|---|---|
+| metrics JSON | `.test-output\segmentation-metrics-warm-timeout-20260524-2257\warm-timeout-amos0117-segmentation-metrics.json` |
+| mean Dice | `0.924782` |
+| min Dice | `0.84654` |
+| mean IoU | `0.865092` |
+| Pixel/Voxel Accuracy | `0.998578` |
+| mean Hausdorff Distance | `7.716048 mm` |
+| max Hausdorff Distance | `16.562684 mm` |
+
+### 31.2 推理过久的原因排查
+
+已证实事实：
+
+- 这不是 nnUNetv2 训练，而是使用 `checkpoint_best.pth` 做在线推理。
+- warm job 长时间停留在 persistent worker 日志的 `Predicting 685426290aa4` / `perform_everything_on_device: True`；直到最后才进入 `sending off prediction to background worker for resampling and export` 和 `done with 685426290aa4`。
+- 预测阶段 GPU 长时间接近 `100%`，显存约 `7.5-7.9 GiB / 8.0 GiB`，说明主要瓶颈在 full-volume sliding-window 推理计算，而不是结果文件路径、Dice 计算或下载。
+- cold 与 warm 的输出 NIfTI hash 完全一致，说明 warm 最终生成了同样的分割结果，但没有速度收益。
+- perf 脚本在 `1800s` timeout 后仍要等待 `persistent_worker_lock` 才能写 summary；而后台推理线程在 `run_persistent_worker_prediction()` 中持锁等待 worker 输出 complete，导致 summary 直到 worker 自然返回后才落盘。
+
+可能原因：
+
+- 当前模型是 3D full-res 推理，AMOS 0117 体数据为 `768 x 768 x 103`，需要大量 sliding-window patch 计算；常驻 worker 只能省初始化，不能省主体计算。
+- `use_mirroring=True` 和 `perform_everything_on_device=True` 会增加显存和计算压力；在 RTX 4060 Laptop 8GB 上接近显存上限，第二次推理可能受 PyTorch/CUDA allocator 碎片、缓存状态或 nnUNet predictor 内部状态影响。
+- persistent worker 复用 predictor 后第二次推理比第一次慢，说明当前复用方式不可靠；后续应优先验证“每次新进程但不缓存”的 baseline，再决定是否保留 persistent worker。
+
+### 31.3 收尾结论
+
+- `cached-real-nnunetv2` 仍是目前已证实有效的重复演示加速路径。
+- `SEGMENTATION_PERSISTENT_WORKER=1` 在本轮无缓存 cold/warm 对照中未证明加速，warm 超时且实际耗时约 `68.4min`。
+- 后续如果继续做无缓存加速，应先修复 worker timeout/cancel 和 summary 落盘机制，再评估关闭 mirroring、降低 tile/ROI、低分辨率预览、轻量模型或 ONNX/TensorRT。
+
+---
+
 *文档版本：2026-05-24*
-*更新依据：当前 `src/main.tsx`、`src/components/OrthogonalViewer.tsx`、`src/imaging/voxelMapping.ts`、`src/imaging/sliceRenderer.ts`、`src/data/organDetails.ts`、`src/inference/inferenceClient.ts`、`server/main.py`、`server/requirements.txt`、`tests/*.test.ts` 与本地运行验证结果。*
+*更新依据：当前 `src/main.tsx`、`src/components/OrthogonalViewer.tsx`、`src/imaging/voxelMapping.ts`、`src/imaging/sliceRenderer.ts`、`src/data/organDetails.ts`、`src/inference/inferenceClient.ts`、`server/main.py`、`server/requirements.txt`、`ACCEPTANCE.md`、`SEGMENTATION_METRICS_SUMMARY.md`、`reference_cases.example.json`、`tests/*.test.ts` 与本地运行验证结果。*
