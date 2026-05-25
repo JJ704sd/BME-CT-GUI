@@ -532,6 +532,7 @@ def build_job_summary(job: Job) -> dict[str, Any]:
     "cache_key": job.cache_key,
     "cached_result": job.cached_result,
     "cache_source_job_id": job.cache_source_job_id,
+    "inference_profile": job.inference_options.get("profile") if isinstance(job.inference_options, dict) else None,
     "inference_options": job.inference_options,
     "phase_timings": job.phase_timings,
     "result_ready": job.status == "succeeded" and job.result_path is not None and job.result_path.exists(),
@@ -706,6 +707,8 @@ def read_persisted_job_summary(job_id: str) -> dict[str, Any] | None:
   summary = json.loads(summary_path.read_text(encoding="utf-8"))
   if not isinstance(summary, dict):
     return None
+  if summary.get("inference_profile") is None and isinstance(summary.get("inference_options"), dict):
+    summary["inference_profile"] = summary["inference_options"].get("profile")
 
   result_path = Path(str(summary.get("result_path"))) if summary.get("result_path") else None
   result_ready = bool(summary.get("status") == "succeeded" and result_path and result_path.exists())
@@ -925,10 +928,15 @@ def get_env_bool(name: str, default: bool) -> bool:
   return default
 
 
-def get_inference_options() -> dict[str, Any]:
-  profile = os.environ.get("SEGMENTATION_INFERENCE_PROFILE", "quality").strip().lower()
+def normalize_inference_profile(profile: str | None = None) -> str:
+  profile = (profile or os.environ.get("SEGMENTATION_INFERENCE_PROFILE", "quality")).strip().lower()
   if profile not in {"quality", "fast"}:
     profile = "quality"
+  return profile
+
+
+def get_inference_options(profile: str | None = None) -> dict[str, Any]:
+  profile = normalize_inference_profile(profile)
   fast_profile = profile == "fast"
   return {
     "profile": profile,
@@ -1257,6 +1265,7 @@ def complete_cached_job(job: Job, input_path: Path, cache: dict[str, Any]) -> No
     "phase_timings": job.phase_timings,
     "cached_result": True,
     "cache_source_job_id": job.cache_source_job_id,
+    "inference_options": job.inference_options,
   }
   if validation is not None:
     complete_event["validation"] = validation
@@ -1379,6 +1388,7 @@ def run_real_job(job_id: str, input_path: Path) -> None:
       "duration_seconds": get_job_duration_seconds(job),
       "result_size_bytes": get_result_size_bytes(job),
       "phase_timings": job.phase_timings,
+      "inference_options": job.inference_options,
     }
     if validation is not None:
       complete_event["validation"] = validation
@@ -1480,6 +1490,7 @@ async def create_job(
   model_id: str = Form("abdomen"),
   confidence_threshold: str = Form("72"),
   postprocess: str = Form("{}"),
+  inference_profile: str | None = Form(None),
 ) -> dict[str, Any]:
   if not file.filename or not file.filename.lower().endswith((".nii", ".nii.gz")):
     raise HTTPException(status_code=400, detail="请上传 .nii 或 .nii.gz 格式的 CT 原图。")
@@ -1490,6 +1501,8 @@ async def create_job(
       "missing": model_state["missing"],
       "model_status": model_state,
     })
+  inference_options = get_inference_options(inference_profile)
+  model_state = {**model_state, "inference_options": inference_options}
   job_id = uuid.uuid4().hex[:12]
   job_dir = WORK_DIR / job_id
   input_dir = job_dir / "input"
@@ -1506,7 +1519,7 @@ async def create_job(
     input_sha256=input_sha,
     checkpoint_sha256=get_checkpoint_sha256(),
     cache_key=cache_key,
-    inference_options=model_state.get("inference_options") or get_inference_options(),
+    inference_options=inference_options,
   )
   with jobs_lock:
     jobs[job_id] = job
@@ -1523,6 +1536,7 @@ async def create_job(
       "model_status": model_state,
       "cached_result": True,
       "cache_source_job_id": job.cache_source_job_id,
+      "inference_profile": job.inference_options.get("profile"),
       "inference_options": job.inference_options,
     }
   thread = threading.Thread(target=run_real_job, args=(job_id, input_path), daemon=True)
@@ -1536,6 +1550,7 @@ async def create_job(
     "mode": job.mode,
     "model_status": model_state,
     "cached_result": False,
+    "inference_profile": job.inference_options.get("profile"),
     "inference_options": job.inference_options,
   }
 

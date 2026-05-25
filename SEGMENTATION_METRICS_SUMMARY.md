@@ -119,6 +119,7 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\amos_0117(2).nii
 - `quality` 应作为默认/正式报告依据。
 - `fast` 可作为快速预览或演示模式，但必须标注“需复核”。
 - label `14/15` 的小体积假阳性只在本轮 fast profile 中出现；如要过滤，应作为独立 `postprocess` 实验记录，不能混同模型原始输出。
+- 2026-05-25 后续实现已把 `quality/fast` 做成每次 job 的显式产品选择。`inference_options` 会随创建响应、job state、SSE complete 事件和 `job_summary.json` 保存；本节指标仍只代表上表两次原始模型输出，没有新增后处理分数。
 
 Checkpoint metadata：
 

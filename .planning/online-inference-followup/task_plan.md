@@ -13,11 +13,11 @@
 - [x] Record fast vs quality no-cache baseline in `REVIEW.md`.
 - [x] Record benchmark metrics in `SEGMENTATION_METRICS_SUMMARY.md`.
 - [x] Push baseline documentation to `origin/codex/update-ct-gui-prototype`.
-- [ ] Add user-visible inference mode selection.
-- [ ] Carry selected inference profile through the API/job state/result summary.
-- [ ] Show a clear "needs review" warning for fast preview results.
-- [ ] Re-run focused verification after UI/backend profile plumbing.
-- [ ] Update `README.md`, `REVIEW.md`, and `SEGMENTATION_METRICS_SUMMARY.md` after implementation.
+- [x] Add user-visible inference mode selection.
+- [x] Carry selected inference profile through the API/job state/result summary.
+- [x] Show a clear "needs review" warning for fast preview results.
+- [x] Re-run focused verification after UI/backend profile plumbing.
+- [x] Update `README.md`, `REVIEW.md`, and `SEGMENTATION_METRICS_SUMMARY.md` after implementation.
 - [ ] Commit and push the follow-up work.
 
 ## Phase 1: Product Mode Selection
@@ -26,18 +26,18 @@ Goal: make the quality/fast distinction explicit in the product instead of relyi
 
 Tasks:
 
-- [ ] Inspect current job creation UI and backend request schema.
-- [ ] Add a mode control with two choices: `quality` and `fast`.
-- [ ] Default to `quality`.
-- [ ] Label `fast` as quick preview only and requiring review.
-- [ ] Persist selected profile in job state and `job_summary.json`.
-- [ ] Ensure cache key still includes the effective inference options.
+- [x] Inspect current job creation UI and backend request schema.
+- [x] Add a mode control with two choices: `quality` and `fast`.
+- [x] Default to `quality`.
+- [x] Label `fast` as quick preview only and requiring review.
+- [x] Persist selected profile in job state and `job_summary.json`.
+- [x] Ensure cache key still includes the effective inference options.
 
 Acceptance checks:
 
-- [ ] A default submission uses `quality`.
-- [ ] A fast preview submission uses `fast`, `tile_step_size=1.0`, and TTA disabled unless explicitly overridden by backend config.
-- [ ] Fast results cannot be mistaken for official quality results in the UI or job summary.
+- [x] A default submission uses `quality`.
+- [x] A fast preview submission uses `fast`, `tile_step_size=1.0`, and TTA disabled unless explicitly overridden by backend config.
+- [x] Fast results cannot be mistaken for official quality results in the UI or job summary.
 
 ## Phase 2: Benchmark Discipline
 

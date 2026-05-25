@@ -1667,6 +1667,27 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\.test-output\perf-quality-profi
 - 产品策略应采用 `质量推理` 作为默认/正式报告依据；`快速预览` 可作为显式可选模式，只能用于快速查看和演示，并在界面和文档中标注“需复核”。
 - 后处理可以作为后续独立实验：对 absent label 或小体积标签设置最小体素阈值过滤。但这必须记录为 `postprocess`，不能混同模型原始输出，也不能用过滤后的分数替代模型原始质量指标。
 
+## 三十三、2026-05-25 推理模式产品化
+
+### 33.1 实现内容
+
+- 前端“分割控制”新增 `质量推理` / `快速预览` 模式选择，默认 `质量推理`。
+- 选择 `快速预览` 时，界面显示“需人工复核”警示；fast 结果元信息和最近导入状态也标注为快速预览结果，不能误认为正式报告依据。
+- `createInferenceJob()` 提交 `inference_profile`，后端按每次 job 生成 effective `inference_options`，不再只能依赖进程环境变量。
+- job state、创建响应、SSE complete 事件和 `job_summary.json` 都携带 `inference_profile` / `inference_options`；cache key 继续使用最终 options，隔离 fast/quality 缓存。
+
+### 33.2 验证
+
+- `node tests/imagingLogic.test.ts`：通过，覆盖 UI 文案、fast 结果元信息、SSE `inference_options` 解析和前端表单提交。
+- `python tests/backendState.test.py`：通过，覆盖请求级 `inference_profile`、job state、cache key 输入和 cached complete event。
+- `npm test`：通过。
+- `npm run build`：通过。
+
+### 33.3 仍然不变的边界
+
+- 本轮没有新增真实推理 benchmark，因此不改变 32.9 的 fast/quality 数值结论。
+- `fast` 仍只能作为快速预览/演示路径；正式报告和质量结论仍以 `quality` 原始输出为准。
+
 ---
 
 *文档版本：2026-05-25*

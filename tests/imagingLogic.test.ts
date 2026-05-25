@@ -14,7 +14,7 @@ import {
   voxelCoordToSlicePoint
 } from "../src/imaging/voxelMapping.ts";
 import { buildLabelLookup, defaultOrganLabels, getOrganDetail } from "../src/data/organDetails.ts";
-import { getInferenceResultMeta, getInferenceStatusCopy, getPhaseTimingSummary, getResourceSnapshotCopy, normalizeModelLabels, parseInferenceEvent } from "../src/inference/inferenceClient.ts";
+import { createInferenceJob, getInferenceResultMeta, getInferenceStatusCopy, getPhaseTimingSummary, getResourceSnapshotCopy, normalizeModelLabels, parseInferenceEvent } from "../src/inference/inferenceClient.ts";
 import { buildOrganLayersFromLabels } from "../src/organLayerLogic.ts";
 import { DEFAULT_REFERENCE_CASES, getReferenceCaseOriginalUrl, normalizeReferenceCases } from "../src/referenceCases.ts";
 
@@ -26,6 +26,9 @@ for (const copy of ["载入 AMOS " + "样例", "本地 AMOS " + "样例", "AMOS 
 assert.equal(mainSource.includes("载入参考病例"), true, "UI should expose built-in data as a reference case");
 assert.equal(mainSource.includes("内置参考病例"), true, "UI should distinguish the built-in reference case from arbitrary imported CT cases");
 assert.equal(mainSource.includes("api/samples/amos_0117/original"), false, "UI should load reference cases through sample metadata, not a hard-coded AMOS URL");
+assert.equal(mainSource.includes("质量推理"), true, "UI should expose the default quality inference profile");
+assert.equal(mainSource.includes("快速预览"), true, "UI should expose the fast preview inference profile");
+assert.equal(mainSource.includes("需人工复核"), true, "UI should warn that fast preview results require review");
 
 assert.deepEqual(normalizeReferenceCases({
   samples: [
@@ -215,6 +218,17 @@ assert.deepEqual(parseInferenceEvent('data: {"type":"complete","progress":100,"s
     validation: 2.1
   }
 });
+assert.deepEqual(parseInferenceEvent('data: {"type":"complete","progress":100,"stage":"完成","inference_options":{"profile":"fast","tile_step_size":1,"disable_tta":true,"not_on_device":false}}\n\n'), {
+  type: "complete",
+  progress: 100,
+  stage: "完成",
+  inference_options: {
+    profile: "fast",
+    tile_step_size: 1,
+    disable_tta: true,
+    not_on_device: false
+  }
+});
 assert.equal(getInferenceStatusCopy({ status: "running", progress: 45, stage: "推理中" }), "推理中 · 45%");
 assert.equal(getInferenceStatusCopy({ status: "succeeded", mode: "real-nnunetv2", duration_seconds: 386.42 }), "真实 nnUNetv2 推理完成 · 6分26秒");
 assert.equal(getInferenceStatusCopy({ status: "succeeded", mode: "cached-real-nnunetv2", duration_seconds: 0.38 }), "缓存推理结果回填完成 · 0秒");
@@ -236,6 +250,7 @@ assert.equal(getPhaseTimingSummary({
 assert.equal(getInferenceResultMeta("real-nnunetv2", "512x512x100"), "512x512x100 · nnUNetv2 真实推理结果");
 assert.equal(getInferenceResultMeta("cached-real-nnunetv2", "512x512x100"), "512x512x100 · 历史缓存 nnUNetv2 结果");
 assert.equal(getInferenceResultMeta("debug-label-fallback", "512x512x100"), "512x512x100 · 调试标签回填结果（非真实推理）");
+assert.equal(getInferenceResultMeta("real-nnunetv2", "512x512x100", { profile: "fast", tile_step_size: 1, disable_tta: true, not_on_device: false }), "512x512x100 · 快速预览 nnUNetv2 结果（需人工复核）");
 assert.deepEqual(normalizeModelLabels({
   models: [{
     labels: [
@@ -248,3 +263,42 @@ assert.deepEqual(normalizeModelLabels({
   { label: 4, id: "pancreas", nameZh: "胰腺", color: "#f4b95f" },
   { label: 10, id: "label-10", nameZh: "食管", color: "#ffd166" }
 ]);
+
+const originalFetch = globalThis.fetch;
+let submittedFormData: FormData | undefined;
+try {
+  globalThis.fetch = async (_input, init) => {
+    submittedFormData = init?.body as FormData;
+    return new Response(JSON.stringify({
+      job_id: "profilejob001",
+      mode: "real-nnunetv2",
+      cached_result: false,
+      inference_profile: "fast",
+      inference_options: {
+        profile: "fast",
+        tile_step_size: 1,
+        disable_tta: true,
+        not_on_device: false
+      }
+    }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
+  };
+  const createdJob = await createInferenceJob("http://127.0.0.1:8000", new File(["nifti"], "case.nii.gz"), {
+    modelId: "abdomen",
+    confidenceThreshold: 72,
+    postprocess: { removeIslands: true },
+    inferenceProfile: "fast"
+  });
+  assert.equal(submittedFormData?.get("inference_profile"), "fast");
+  assert.equal(createdJob.inference_profile, "fast");
+  assert.deepEqual(createdJob.inference_options, {
+    profile: "fast",
+    tile_step_size: 1,
+    disable_tta: true,
+    not_on_device: false
+  });
+} finally {
+  globalThis.fetch = originalFetch;
+}

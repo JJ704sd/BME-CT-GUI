@@ -43,7 +43,7 @@ import demoChestCtImage from "./assets/demo-chest-ct.png";
 import demoPancreasCtImage from "./assets/demo-pancreas-ct.png";
 import { OrthogonalViewer } from "./components/OrthogonalViewer";
 import { buildLabelLookup, defaultOrganLabels, getOrganDetail } from "./data/organDetails";
-import { cancelInferenceJob, createInferenceJob, downloadInferenceResult, fetchModelLabels, getInferenceResultMeta, getInferenceStatusCopy, getPhaseTimingSummary, getResourceSnapshotCopy, parseInferenceEvent, type InferenceStatus, type PhaseTimings, type ResourceSnapshot, type ValidationSummary } from "./inference/inferenceClient";
+import { cancelInferenceJob, createInferenceJob, downloadInferenceResult, fetchModelLabels, getInferenceResultMeta, getInferenceStatusCopy, getPhaseTimingSummary, getResourceSnapshotCopy, parseInferenceEvent, type InferenceOptions, type InferenceProfile, type InferenceStatus, type PhaseTimings, type ResourceSnapshot, type ValidationSummary } from "./inference/inferenceClient";
 import type { VoxelCoord } from "./imaging/voxelMapping";
 import { buildOrganLayersFromLabels, formatOrganScore, getMeanOrganDice, type OrganLayer as Organ, type OrganLayerQuality as QualityState } from "./organLayerLogic";
 import { DEFAULT_REFERENCE_CASES, getReferenceCaseOriginalUrl, normalizeReferenceCases, type ReferenceCase } from "./referenceCases";
@@ -207,6 +207,11 @@ const modelOptions = [
   { id: "abdomen", name: "Abdomen-TotalSegmentator", scope: "肝脏、胰腺、胆囊、胃肠道", speed: "32 s" },
   { id: "lung", name: "Lung-Lobe-AirwayNet", scope: "肺叶、气管树、肺血管、结节", speed: "26 s" },
   { id: "hybrid", name: "RespDigest-Hybrid", scope: "胸腹联合器官分割", speed: "41 s" }
+];
+
+const inferenceProfileOptions: { id: InferenceProfile; label: string; detail: string; meta: string }[] = [
+  { id: "quality", label: "质量推理", detail: "默认正式结果", meta: "TTA 开启 · tile 0.5" },
+  { id: "fast", label: "快速预览", detail: "需人工复核", meta: "TTA 关闭 · tile 1.0" }
 ];
 
 const windowPresets = [
@@ -500,6 +505,8 @@ function App() {
   const [dragTarget, setDragTarget] = useState<UploadRole | null>(null);
   const [lastImport, setLastImport] = useState("等待导入本地影像或分割结果图");
   const [selectedModelId, setSelectedModelId] = useState("abdomen");
+  const [selectedInferenceProfile, setSelectedInferenceProfile] = useState<InferenceProfile>("quality");
+  const [resultInferenceOptions, setResultInferenceOptions] = useState<InferenceOptions | null>(null);
   const [confidenceThreshold, setConfidenceThreshold] = useState(72);
   const [postprocessConfig, setPostprocessConfig] = useState({
     removeIslands: true,
@@ -524,6 +531,9 @@ function App() {
   const currentSliceIndex = clampSliceIndex(selectedSlice - 1, currentTotalSlices);
   const selectedOrgan = organs.find((organ) => organ.id === selectedOrganId) ?? organs[0];
   const selectedModel = modelOptions.find((model) => model.id === selectedModelId) ?? modelOptions[0];
+  const selectedInferenceProfileOption = inferenceProfileOptions.find((item) => item.id === selectedInferenceProfile) ?? inferenceProfileOptions[0];
+  const fastProfileNeedsReview = selectedInferenceProfile === "fast" || resultInferenceOptions?.profile === "fast";
+  const resultProfileCopy = resultInferenceOptions?.profile === "fast" ? "快速预览 · 需人工复核" : resultInferenceOptions?.profile === "quality" ? "质量推理" : selectedInferenceProfileOption.label;
   const selectedReferenceCase = referenceCases.find((item) => item.id === selectedReferenceCaseId) ?? referenceCases[0] ?? DEFAULT_REFERENCE_CASES[0];
   const selectedReferenceCaseMeta = selectedReferenceCase
     ? `${selectedReferenceCase.dataset} · ${selectedReferenceCase.validationAvailable ? "有标准答案" : "无标准答案"}`
@@ -750,18 +760,21 @@ function App() {
     setViewMode("Mask");
     setCompareMode("overlay");
     setValidationSummary(null);
+    setResultInferenceOptions(null);
     activeJobIdRef.current = null;
     setInferenceStatus({ status: "submitting" });
-    setLogs([`提交本地 nnUNetv2 任务：${selectedModel.name}`, `质控提示阈值 ${confidenceThreshold}% · 后处理 ${Object.values(postprocessConfig).filter(Boolean).length}/3`, ...baseLogs]);
+    setLogs([`提交本地 nnUNetv2 任务：${selectedModel.name} · ${selectedInferenceProfileOption.label}`, `质控提示阈值 ${confidenceThreshold}% · 后处理 ${Object.values(postprocessConfig).filter(Boolean).length}/3`, ...baseLogs]);
 
     try {
       const endpoint = API_ENDPOINT;
       const job = await createInferenceJob(endpoint, sourceImage.file!, {
         modelId: selectedModelId,
         confidenceThreshold,
-        postprocess: postprocessConfig
+        postprocess: postprocessConfig,
+        inferenceProfile: selectedInferenceProfile
       });
       activeJobIdRef.current = job.job_id;
+      let inferenceOptions = job.inference_options;
       setInferenceStatus({
         status: "running",
         jobId: job.job_id,
@@ -797,6 +810,7 @@ function App() {
               resultSizeBytes = parsed.result_size_bytes;
               resourceLatest = parsed.resource_latest;
               phaseTimings = parsed.phase_timings;
+              if (parsed.inference_options) inferenceOptions = parsed.inference_options;
               if (resourceLatest) {
                 setLogs((items) => [`资源记录：${getResourceSnapshotCopy(resourceLatest)}`, ...items].slice(0, 8));
               }
@@ -820,22 +834,26 @@ function App() {
       const resultBuffer = await downloadInferenceResult(endpoint, job.job_id);
       const resultVol = parseNiftiVolume(resultBuffer);
       const sliceIndex = Math.min(resultVol.slices - 1, voxelCoord.z);
+      const resultKindLabel = inferenceOptions?.profile === "fast"
+        ? "快速预览结果（需人工复核）"
+        : job.cached_result ? "缓存推理结果" : job.mode === "debug-label-fallback" ? "调试结果" : "真实推理结果";
       setResultImage({
         src: renderNiftiSliceToDataUrl(resultVol, sliceIndex, "mask"),
         name: `${sourceImage.name.replace(/\.nii(\.gz)?$/i, "")}_seg.nii.gz`,
         kind: "NIfTI",
-        meta: getInferenceResultMeta(job.mode, `${resultVol.columns}x${resultVol.rows}x${resultVol.slices}`),
+        meta: getInferenceResultMeta(job.mode, `${resultVol.columns}x${resultVol.rows}x${resultVol.slices}`, inferenceOptions),
         dimensions: `${resultVol.columns}x${resultVol.rows}x${resultVol.slices}`,
         sizeText: `${(resultBuffer.byteLength / 1024 / 1024).toFixed(2)} MB`,
         format: "NII.GZ",
         volume: resultVol,
         sliceIndex
       });
+      setResultInferenceOptions(inferenceOptions ?? null);
       setProgress(100);
       setRunState("complete");
-      setInferenceStatus({ status: "succeeded", jobId: job.job_id, mode: job.mode, duration_seconds: durationSeconds, result_size_bytes: resultSizeBytes, resource_latest: resourceLatest, phase_timings: phaseTimings });
+      setInferenceStatus({ status: "succeeded", jobId: job.job_id, mode: job.mode, duration_seconds: durationSeconds, result_size_bytes: resultSizeBytes, resource_latest: resourceLatest, phase_timings: phaseTimings, inference_options: inferenceOptions });
       activeJobIdRef.current = null;
-      setLastImport(`${job.cached_result ? "缓存推理结果" : job.mode === "debug-label-fallback" ? "调试结果" : "真实推理结果"}就绪：${job.job_id}`);
+      setLastImport(`${resultKindLabel}就绪：${job.job_id}`);
       setLogs((items) => [`分割结果已加载到三正交视图 · ${formatSeconds(durationSeconds)} · ${formatBytes(resultSizeBytes)}`, ...items].slice(0, 8));
     } catch (error) {
       const message = error instanceof Error ? error.message : "推理失败";
@@ -894,6 +912,7 @@ function App() {
     setViewMode(nextCase.custom ? "CT" : nextCase.id.includes("LUNG") ? "CT" : "Mask");
     setLoadedImage(nextSource);
     setResultImage(nextResult);
+    setResultInferenceOptions(null);
     setValidationSummary(null);
     setOrgans(nextCase.organs);
     setSelectedOrganId(nextCase.organs[0].id);
@@ -953,6 +972,7 @@ function App() {
     const fallbackSource = selectedCase.sourceImage ?? { src: selectedCase.demoImage, name: selectedCase.imageName, kind: "Demo" as const, meta: selectedCase.imageMeta };
     setLoadedImage(fallbackSource);
     setResultImage(null);
+    setResultInferenceOptions(null);
     setLastImport(`本地文件已移除，恢复演示病例：${selectedCase.id}`);
     setToast("本地上传文件已从当前演示中移除");
   }
@@ -960,6 +980,7 @@ function App() {
   function clearResultImage() {
     if (!customCasesUseSrc(resultImage?.src)) revokeObjectUrl(resultImage?.src);
     setResultImage(null);
+    setResultInferenceOptions(null);
     setLastImport("结果图已清除，当前使用内置掩膜预览");
     setToast("结果图已移除");
   }
@@ -1031,6 +1052,7 @@ function App() {
       return;
     }
     setResultImage(image);
+    setResultInferenceOptions(null);
     setValidationSummary(null);
     if (!loadedImage.volume && image.volume) setSelectedSlice((image.sliceIndex ?? Math.floor(image.volume.slices / 2)) + 1);
     if (image.volume) syncOrganLayers(modelLabels);
@@ -1501,6 +1523,25 @@ function App() {
                       </button>
                     ))}
                   </div>
+                  <div className="inference-profile-grid" aria-label="推理模式">
+                    {inferenceProfileOptions.map((profile) => (
+                      <button
+                        key={profile.id}
+                        className={selectedInferenceProfile === profile.id ? "profile-option active" : "profile-option"}
+                        onClick={() => setSelectedInferenceProfile(profile.id)}
+                      >
+                        <span>{profile.label}</span>
+                        <strong>{profile.detail}</strong>
+                        <small>{profile.meta}</small>
+                      </button>
+                    ))}
+                  </div>
+                  {fastProfileNeedsReview ? (
+                    <div className="profile-warning">
+                      <AlertTriangle size={16} />
+                      <span>快速预览仅用于缩短等待时间，结果需人工复核，不能作为正式报告依据。</span>
+                    </div>
+                  ) : null}
                   <label className="slider-row">质控提示<input type="range" min="50" max="95" value={confidenceThreshold} onChange={(event) => setConfidenceThreshold(Number(event.target.value))} /><strong>{confidenceThreshold}%</strong></label>
                   <div className="toggle-grid">
                     {Object.entries(postprocessConfig).map(([key, checked]) => (
@@ -1551,6 +1592,7 @@ function App() {
                   <Metric label="平均 Dice" value={displayedAverageDice} />
                   <Metric label="最低 Dice" value={formatDiceMetric(validationSummary?.min_dice)} />
                   <Metric label="标准答案" value={validationStatusCopy} />
+                  <Metric label="推理模式" value={resultProfileCopy} />
                   <Metric label="推理耗时" value={inferenceDurationCopy} />
                   <Metric label="瓶颈阶段" value={inferencePhaseTimingCopy} />
                   <Metric label="结果大小" value={inferenceResultSizeCopy} />

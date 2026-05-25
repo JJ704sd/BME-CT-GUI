@@ -42,9 +42,18 @@ export type ResourceSnapshot = {
 
 export type PhaseTimings = Record<string, number>;
 
+export type InferenceProfile = "quality" | "fast";
+
+export type InferenceOptions = {
+  profile: InferenceProfile;
+  tile_step_size?: number;
+  disable_tta?: boolean;
+  not_on_device?: boolean;
+};
+
 export type InferenceEvent =
   | { type: "progress"; progress: number; stage: string }
-  | { type: "complete"; progress: number; stage: string; duration_seconds?: number; result_size_bytes?: number; validation?: ValidationSummary; resource_latest?: ResourceSnapshot; phase_timings?: PhaseTimings }
+  | { type: "complete"; progress: number; stage: string; duration_seconds?: number; result_size_bytes?: number; validation?: ValidationSummary; resource_latest?: ResourceSnapshot; phase_timings?: PhaseTimings; inference_options?: InferenceOptions }
   | { type: "error"; message: string; log_tail?: string; resource_latest?: ResourceSnapshot };
 
 export type InferenceJobMode = "real-nnunetv2" | "cached-real-nnunetv2" | "debug-label-fallback" | "unavailable";
@@ -53,7 +62,7 @@ export type InferenceStatus =
   | { status: "idle" }
   | { status: "submitting" }
   | { status: "running"; progress: number; stage: string; jobId?: string }
-  | { status: "succeeded"; jobId?: string; mode?: InferenceJobMode; duration_seconds?: number; result_size_bytes?: number; resource_latest?: ResourceSnapshot; phase_timings?: PhaseTimings }
+  | { status: "succeeded"; jobId?: string; mode?: InferenceJobMode; duration_seconds?: number; result_size_bytes?: number; resource_latest?: ResourceSnapshot; phase_timings?: PhaseTimings; inference_options?: InferenceOptions }
   | { status: "cancelled"; jobId?: string }
   | { status: "failed"; message: string; jobId?: string };
 
@@ -146,6 +155,18 @@ function normalizePhaseTimings(payload: unknown): PhaseTimings | undefined {
   return Object.keys(timings).length ? timings : undefined;
 }
 
+function normalizeInferenceOptions(payload: unknown): InferenceOptions | undefined {
+  if (!payload || typeof payload !== "object") return undefined;
+  const raw = payload as Record<string, unknown>;
+  const profile = raw.profile === "fast" ? "fast" : raw.profile === "quality" ? "quality" : undefined;
+  if (!profile) return undefined;
+  const options: InferenceOptions = { profile };
+  if (Number.isFinite(Number(raw.tile_step_size))) options.tile_step_size = Number(raw.tile_step_size);
+  if (typeof raw.disable_tta === "boolean") options.disable_tta = raw.disable_tta;
+  if (typeof raw.not_on_device === "boolean") options.not_on_device = raw.not_on_device;
+  return options;
+}
+
 export function parseInferenceEvent(raw: string): InferenceEvent {
   const line = raw.split(/\r?\n/).find((item) => item.startsWith("data:"));
   if (!line) throw new Error("无效的推理事件");
@@ -171,6 +192,8 @@ export function parseInferenceEvent(raw: string): InferenceEvent {
     if (resource) event.resource_latest = resource;
     const phaseTimings = normalizePhaseTimings(parsed.phase_timings);
     if (phaseTimings) event.phase_timings = phaseTimings;
+    const inferenceOptions = normalizeInferenceOptions(parsed.inference_options);
+    if (inferenceOptions) event.inference_options = inferenceOptions;
   }
   return event;
 }
@@ -234,7 +257,9 @@ export function getInferenceStatusCopy(status: InferenceStatus) {
   return "等待推理";
 }
 
-export function getInferenceResultMeta(mode: InferenceJobMode | undefined, dimensions: string) {
+export function getInferenceResultMeta(mode: InferenceJobMode | undefined, dimensions: string, inferenceOptions?: InferenceOptions) {
+  if (inferenceOptions?.profile === "fast" && mode === "cached-real-nnunetv2") return `${dimensions} · 快速预览缓存 nnUNetv2 结果（需人工复核）`;
+  if (inferenceOptions?.profile === "fast" && mode !== "debug-label-fallback" && mode !== "unavailable") return `${dimensions} · 快速预览 nnUNetv2 结果（需人工复核）`;
   if (mode === "cached-real-nnunetv2") return `${dimensions} · 历史缓存 nnUNetv2 结果`;
   if (mode === "debug-label-fallback") return `${dimensions} · 调试标签回填结果（非真实推理）`;
   if (mode === "unavailable") return `${dimensions} · 模型不可用，未生成真实结果`;
@@ -274,13 +299,14 @@ export async function fetchModelLabels(endpoint: string): Promise<OrganLabel[]> 
 export async function createInferenceJob(
   endpoint: string,
   file: File,
-  options: { modelId: string; confidenceThreshold: number; postprocess: Record<string, boolean> }
+  options: { modelId: string; confidenceThreshold: number; postprocess: Record<string, boolean>; inferenceProfile?: InferenceProfile }
 ) {
   const formData = new FormData();
   formData.append("file", file, file.name);
   formData.append("model_id", options.modelId);
   formData.append("confidence_threshold", String(options.confidenceThreshold));
   formData.append("postprocess", JSON.stringify(options.postprocess));
+  formData.append("inference_profile", options.inferenceProfile ?? "quality");
 
   const response = await fetch(`${endpoint}/api/segment/jobs`, { method: "POST", body: formData });
   if (!response.ok) {
@@ -290,6 +316,8 @@ export async function createInferenceJob(
   return await response.json() as {
     job_id: string;
     mode?: InferenceJobMode;
+    inference_profile?: InferenceProfile;
+    inference_options?: InferenceOptions;
     confidence_threshold_effective?: boolean;
     model_status?: {
       ready?: boolean;

@@ -31,6 +31,8 @@
 - `quality` is the default and official result path.
 - `fast` is allowed only as a quick preview/demo path.
 - Fast preview must be visibly marked as requiring review.
+- Frontend job submission now sends `inference_profile` per job; backend environment variables remain fallback defaults.
+- Effective `inference_options` are persisted through create response, job state, SSE complete event, `job_summary.json`, and cache key input.
 - Label 14/15 small-volume false positives are a known fast-profile risk from the current AMOS 0117 comparison.
 - Any filtering for label 14/15 must be documented as `postprocess`, not as raw model output.
 - Do not claim a speed improvement unless it is tied to a recorded benchmark run with the same input, checkpoint, script, and cache state.

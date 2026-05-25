@@ -179,6 +179,58 @@ def test_fast_inference_profile_controls_nnunet_prediction_flags():
     assert "--not_on_device" in command
 
 
+def test_create_job_uses_requested_inference_profile_for_options_and_cache_key():
+    server = load_server_module()
+    temp_root = make_test_output_dir(f"requested-profile-job-{os.getpid()}")
+    captured_model_state = {}
+
+    class NoopThread:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def start(self):
+            pass
+
+    def fake_cache_key(_input_sha, model_state):
+        captured_model_state.update(model_state)
+        return "requested-profile-cache-key"
+
+    with patch.dict(os.environ, {
+        "SEGMENTATION_INFERENCE_PROFILE": "quality",
+    }, clear=True), \
+         patch.object(server, "WORK_DIR", temp_root), \
+         patch.object(server, "get_model_state", return_value={
+             "ready": True,
+             "status": "ready",
+             "mode": "real-nnunetv2",
+             "missing": [],
+         }), \
+         patch.object(server, "build_prediction_cache_key", side_effect=fake_cache_key), \
+         patch.object(server, "find_cached_prediction", return_value=None), \
+         patch.object(server.threading, "Thread", NoopThread):
+        client = TestClient(server.app)
+        response = client.post(
+            "/api/segment/jobs",
+            files={"file": ("case_0000.nii.gz", b"profile-input", "application/octet-stream")},
+            data={"model_id": "abdomen", "inference_profile": "fast"},
+        )
+        body = response.json()
+        state = client.get(f"/api/segment/jobs/{body['job_id']}").json()
+
+    expected_options = {
+        "profile": "fast",
+        "tile_step_size": 1.0,
+        "disable_tta": True,
+        "not_on_device": False,
+    }
+    assert response.status_code == 200
+    assert body["inference_profile"] == "fast"
+    assert body["inference_options"] == expected_options
+    assert state["inference_profile"] == "fast"
+    assert state["inference_options"] == expected_options
+    assert captured_model_state["inference_options"] == expected_options
+
+
 def test_prediction_cache_key_changes_with_inference_options():
     server = load_server_module()
     base_state = {
@@ -653,6 +705,7 @@ def test_create_job_reuses_cached_prediction_for_matching_cache_key():
     assert state["cache_source_job_id"] == cached_job_id
     assert state["validation"] == validation
     assert server.jobs[body["job_id"]].events[-1]["cached_result"] is True
+    assert server.jobs[body["job_id"]].events[-1]["inference_options"]["profile"] == "quality"
     assert result_response.status_code == 200
     assert result_response.content == b"cached-result"
 
@@ -794,6 +847,7 @@ if __name__ == "__main__":
     test_predict_command_uses_model_folder_and_job_io()
     test_predict_worker_counts_have_safe_defaults_and_clamps()
     test_fast_inference_profile_controls_nnunet_prediction_flags()
+    test_create_job_uses_requested_inference_profile_for_options_and_cache_key()
     test_prediction_cache_key_changes_with_inference_options()
     test_legacy_reference_cache_requires_matching_summary_cache_key()
     test_persistent_worker_key_includes_inference_options()

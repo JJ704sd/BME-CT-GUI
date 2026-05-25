@@ -31,7 +31,9 @@
 
 未缓存首次推理仍主要受 3D full-res sliding-window 计算影响。AMOS 0117 同脚本单次对照中，`quality` 耗时 `1360.398s` 且验证通过；`fast` 耗时 `384.345s`，但 mean Dice 降到 `0.777243`，并对 label 14/15 产生小体积假阳性。因此默认/正式报告应使用 `quality`，`fast` 只能作为快速预览或演示候选。persistent worker 未证明能加速；当前只作为实验路径保留。
 
-新增的在线快速配置会显式传给 nnUNetv2，并纳入 cache key，避免不同质量/速度参数误用同一缓存：
+前端“分割控制”面板现在提供 `质量推理` 和 `快速预览` 两个推理模式。默认选择 `质量推理`；选择 `快速预览` 时界面会显示“需人工复核”提示，成功结果元信息也会标注为快速预览结果，避免误认为正式报告依据。
+
+后端仍支持环境变量作为默认配置；前端每次提交 job 时会把所选 `inference_profile` 显式传给 `/api/segment/jobs`。最终生效的 `inference_options` 会写入创建响应、job state、SSE complete 事件和 `job_summary.json`，并纳入 cache key，避免不同质量/速度参数误用同一缓存：
 
 ```powershell
 $env:SEGMENTATION_INFERENCE_PROFILE='fast'
@@ -148,9 +150,9 @@ nnunetv2_files/amos_0117(2).nii.gz
 - `GET /api/samples`：本地参考病例列表。
 - `GET /api/samples/{sample_id}/original`：下载参考病例原图。
 - `GET /api/samples/{sample_id}/label`：下载参考病例标准答案。
-- `POST /api/segment/jobs`：创建 nnUNetv2 推理任务。
-- `GET /api/segment/jobs/{job_id}`：查询任务状态、耗时、资源和验证摘要。
-- `GET /api/segment/jobs/{job_id}/events`：SSE 推理进度。
+- `POST /api/segment/jobs`：创建 nnUNetv2 推理任务；表单字段 `inference_profile=quality|fast` 可按任务选择质量/速度配置。
+- `GET /api/segment/jobs/{job_id}`：查询任务状态、耗时、资源、验证摘要和最终 `inference_options`。
+- `GET /api/segment/jobs/{job_id}/events`：SSE 推理进度；complete 事件包含最终 `inference_options`。
 - `POST /api/segment/jobs/{job_id}/cancel`：请求取消运行中任务。
 - `GET /api/segment/jobs/{job_id}/result`：下载结果 NIfTI。
 
