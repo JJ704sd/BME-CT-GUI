@@ -24,3 +24,16 @@
   - `npm --prefix 'D:\BME2026\BME_CT_Seg\segmentation-gui-prototype' test`
   - `npm --prefix 'D:\BME2026\BME_CT_Seg\segmentation-gui-prototype' run build`
 - Remaining planned action: review git diff, then commit and push the follow-up work.
+
+## 2026-05-25 Main Baseline Closure
+
+- Confirmed the active branch is `main` tracking `origin/main`.
+- Confirmed selectable inference profile work has been merged and pushed at commit `838e77e merge selectable inference profiles`.
+- Updated the follow-up plan so the remaining work starts from benchmark discipline, postprocess experiment gating, and broader reference-case validation rather than repeating Phase 1.
+- Verification to run for this baseline:
+  - `npm test`
+  - `npm run build`
+- Verification completed:
+  - `npm --prefix 'D:\BME2026\BME_CT_Seg\segmentation-gui-prototype' test` exited 0.
+  - `npm --prefix 'D:\BME2026\BME_CT_Seg\segmentation-gui-prototype' run build` exited 0; Vite built `1595` modules in `5.04s`.
+- `git status --short` shows only planning-file edits under `.planning/online-inference-followup/`.

@@ -2,7 +2,8 @@
 
 ## Established Evidence
 
-- Latest pushed commit: `ed5cf86 docs: record quality inference comparison`.
+- Latest pushed main commit: `838e77e merge selectable inference profiles`.
+- Selectable inference profile work has been merged from `codex/update-ct-gui-prototype` into `main`; the old branch is no longer the active planning baseline.
 - Fast no-cache run:
   - Run directory: `.test-output\perf-fast-profile-20260525-1305`
   - Job id: `6802e01f1a73`
@@ -46,7 +47,6 @@
 
 ## Open Questions
 
-- Should the frontend send profile per job, or should the backend remain environment-driven and expose the active profile as read-only?
-- Should fast preview be available by default, or hidden behind an advanced/experimental UI affordance?
 - What minimum validation set is required before any label 14/15 postprocess filter can be enabled by default?
 - Should warm-cache quality/fast timings be added as a separate comparison, or is no-cache still the only decision metric for first-run UX?
+- Which non-AMOS local CT cases should be registered next for broader acceptance?
