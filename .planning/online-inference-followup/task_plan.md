@@ -2,9 +2,9 @@
 
 **Scope:** Track the next round of online inference product work after the 2026-05-25 fast vs quality comparison.
 
-**Current branch:** `codex/update-ct-gui-prototype`
+**Current branch:** `main`
 
-**Current baseline:** commit `ed5cf86 docs: record quality inference comparison`
+**Current baseline:** commit `838e77e merge selectable inference profiles`
 
 **Primary rule:** `quality` remains the default and official report path. `fast` is only a quick preview path and must be visibly marked as needing review.
 
@@ -18,7 +18,7 @@
 - [x] Show a clear "needs review" warning for fast preview results.
 - [x] Re-run focused verification after UI/backend profile plumbing.
 - [x] Update `README.md`, `REVIEW.md`, and `SEGMENTATION_METRICS_SUMMARY.md` after implementation.
-- [ ] Commit and push the follow-up work.
+- [x] Merge and push the selectable inference profile follow-up to `origin/main`.
 
 ## Phase 1: Product Mode Selection
 
@@ -73,13 +73,11 @@ Acceptance checks:
 - [ ] Raw fast metrics remain visible in documentation.
 - [ ] No product default changes until the filter is validated on more than one case.
 
-## Phase 4: Final Verification and Handoff
+## Phase 4: Main Baseline Verification
 
 Tasks:
 
-- [ ] Run `npm --prefix 'D:\BME2026\BME_CT_Seg\segmentation-gui-prototype' test`.
-- [ ] Run `npm --prefix 'D:\BME2026\BME_CT_Seg\segmentation-gui-prototype' run build`.
-- [ ] If inference behavior changes, run at least a dry-run benchmark command and document the exact output expectation.
-- [ ] Check `git status --short`.
-- [ ] Commit with a focused message.
-- [ ] Push to `origin/codex/update-ct-gui-prototype`.
+- [x] Run `npm test` from the project root.
+- [x] Run `npm run build` from the project root.
+- [x] Check `git status --short`.
+- [x] Record the verified `main` baseline in `progress.md`.
