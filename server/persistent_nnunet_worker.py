@@ -15,6 +15,19 @@ initialized_model_dir: str | None = None
 initialized_device: str | None = None
 
 
+def as_bool(value: Any, default: bool = False) -> bool:
+  if isinstance(value, bool):
+    return value
+  if value is None:
+    return default
+  normalized = str(value).strip().lower()
+  if normalized in {"1", "true", "yes", "on"}:
+    return True
+  if normalized in {"0", "false", "no", "off"}:
+    return False
+  return default
+
+
 def send(payload: dict[str, Any]) -> None:
   protocol_stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
   protocol_stdout.flush()
@@ -28,13 +41,16 @@ def handle_init(payload: dict[str, Any]) -> None:
   model_dir = str(payload["model_dir"])
   checkpoint_name = str(payload.get("checkpoint") or "checkpoint_best.pth")
   device = str(payload.get("device") or "cuda")
+  tile_step_size = float(payload.get("tile_step_size") or 0.5)
+  disable_tta = as_bool(payload.get("disable_tta"), False)
+  not_on_device = as_bool(payload.get("not_on_device"), False)
   initialized_model_dir = model_dir
   initialized_device = device
   predictor = nnUNetPredictor(
-    tile_step_size=0.5,
+    tile_step_size=tile_step_size,
     use_gaussian=True,
-    use_mirroring=True,
-    perform_everything_on_device=True,
+    use_mirroring=not disable_tta,
+    perform_everything_on_device=not not_on_device,
     device=torch.device(device),
     verbose=False,
     verbose_preprocessing=False,
@@ -51,6 +67,9 @@ def handle_init(payload: dict[str, Any]) -> None:
     "model_dir": model_dir,
     "device": device,
     "checkpoint": checkpoint_name,
+    "tile_step_size": tile_step_size,
+    "disable_tta": disable_tta,
+    "not_on_device": not_on_device,
   })
 
 

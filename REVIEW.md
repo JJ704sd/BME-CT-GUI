@@ -1384,5 +1384,311 @@ warm 输出补充指标：
 
 ---
 
-*文档版本：2026-05-24*
-*更新依据：当前 `src/main.tsx`、`src/components/OrthogonalViewer.tsx`、`src/imaging/voxelMapping.ts`、`src/imaging/sliceRenderer.ts`、`src/data/organDetails.ts`、`src/inference/inferenceClient.ts`、`server/main.py`、`server/requirements.txt`、`ACCEPTANCE.md`、`SEGMENTATION_METRICS_SUMMARY.md`、`reference_cases.example.json`、`tests/*.test.ts` 与本地运行验证结果。*
+## 三十二、2026-05-25 在线推理 fast profile 准备与缓存隔离
+
+### 32.1 本轮目标
+
+在正式运行新的无缓存推理对照前，先把上一节复盘结论落实到工程记录和代码状态：
+
+- 不再把 `SEGMENTATION_PERSISTENT_WORKER=1` 表述为已验证的首次推理加速方案。
+- 保留已证实有效的 `cached-real-nnunetv2` 重复回填路径。
+- 为下一轮真实运行准备可复现的 fast/quality 推理参数，并确保不同参数不会误用同一缓存结果。
+
+本轮没有启动新的真实长耗时 nnUNetv2 推理；未缓存 fast profile 是否实际更快，仍需要下一轮实测记录。
+
+### 32.2 后端推理参数透明化
+
+新增后端推理配置读取：
+
+| 环境变量 | 默认 | 作用 |
+|---|---|---|
+| `SEGMENTATION_INFERENCE_PROFILE` | `quality` | 可选 `quality` / `fast` |
+| `SEGMENTATION_TILE_STEP_SIZE` | `quality=0.5`，`fast=1.0` | 对应 nnUNetv2 `-step_size`，越大通常越快但重叠更少 |
+| `SEGMENTATION_DISABLE_TTA` | `quality=0`，`fast=1` | 对应 nnUNetv2 `--disable_tta`，关闭 mirroring/TTA |
+| `SEGMENTATION_NOT_ON_DEVICE` | `0` | 对应 nnUNetv2 `--not_on_device`，用于降低显存压力 |
+
+实现点：
+
+- `server/main.py` 新增 `get_inference_options()`，并在 `/api/health` 的 `model_status.inference_options` 中返回当前配置。
+- `build_predict_command()` 会按配置追加 `-step_size`、`--disable_tta` 和 `--not_on_device`。
+- `server/persistent_nnunet_worker.py` 初始化 `nnUNetPredictor` 时使用同一组参数：`tile_step_size`、`use_mirroring=not disable_tta`、`perform_everything_on_device=not not_on_device`。
+- persistent worker key 增加 `tile_step_size`、`disable_tta`、`not_on_device`，避免不同参数复用同一个常驻 predictor。
+
+### 32.3 缓存正确性修正
+
+缓存 key 现在纳入 `inference_options`，因此以下情况不会相互复用缓存：
+
+- `quality` 与 `fast` profile。
+- 不同 `SEGMENTATION_TILE_STEP_SIZE`。
+- TTA 开关不同。
+- `SEGMENTATION_NOT_ON_DEVICE` 开关不同。
+
+同时收紧 AMOS 0117 legacy 缓存路径：历史 `009d4efdc5f6` 结果不再只凭输入等同就直接作为缓存源，必须存在可读取的 `job_summary.json` 且 `cache_key` 与当前请求一致。这样可以避免新权重或新推理参数误用旧权重/旧参数的历史输出。
+
+### 32.4 README 与性能脚本更新
+
+- `README.md` 已重写并修复乱码，新增“在线推理速度策略”章节。
+- README 明确区分：
+  - `cached-real-nnunetv2`：已验证的重复演示加速路径。
+  - `SEGMENTATION_INFERENCE_PROFILE=fast`：待实测的快速推理配置。
+  - `SEGMENTATION_PERSISTENT_WORKER=1`：实验选项，目前无缓存对照未证明加速。
+- `tools/perf_no_cache_persistent.py` 新增参数：
+  - `--inference-profile`
+  - `--tile-step-size`
+  - `--disable-tta`
+  - `--not-on-device`
+
+dry-run 示例已能输出 fast 配置：
+
+```powershell
+python tools/perf_no_cache_persistent.py --dry-run --inference-profile fast --disable-tta --tile-step-size 1.0
+```
+
+### 32.5 自动验证记录
+
+本轮新增/更新测试覆盖：
+
+- `tests/backendState.test.py`
+  - fast profile 会进入 nnUNetv2 命令参数。
+  - 推理参数变化会改变 prediction cache key。
+  - legacy AMOS 缓存必须匹配 summary cache key。
+  - persistent worker key 包含推理参数。
+- `tests/perfTool.test.ts`
+  - 性能脚本包含 fast profile 参数。
+- `tests/acceptanceDocs.test.ts`
+  - README 记录当前推理速度策略与关键环境变量。
+
+验证命令：
+
+```powershell
+npm --prefix 'D:\BME2026\BME_CT_Seg\segmentation-gui-prototype' test
+npm --prefix 'D:\BME2026\BME_CT_Seg\segmentation-gui-prototype' run build
+python tools/perf_no_cache_persistent.py --dry-run --inference-profile fast --disable-tta --tile-step-size 1.0
+```
+
+结果：
+
+- `npm test`：通过。
+- `npm run build`：通过。
+- fast profile dry-run：通过，输出 `inference_profile=fast`、`tile_step_size=1.0`、`disable_tta=true`。
+
+### 32.6 当前判断与下一步
+
+| 目标 | 当前判断 |
+|---|---|
+| 重复在线演示加速 | `cached-real-nnunetv2` 已验证可秒级回填 |
+| 首次未缓存推理加速 | 已完成同脚本 fast/quality 单次对照；fast 明显更快但质量下降明显 |
+| persistent worker | 上一轮 warm worker 反而显著变慢，暂不作为推荐路径 |
+| cache 正确性 | 已按 checkpoint 与 inference options 隔离 |
+
+下一步应在启动更多真实长任务前确认实验矩阵：
+
+1. `quality`：`tile_step_size=0.5`，TTA 开启。
+2. `fast`：`tile_step_size=1.0`，TTA 关闭。
+3. 两组都显式禁用历史缓存，记录 `duration_seconds`、`phase_timings`、结果大小、Dice/IoU/Hausdorff、GPU 显存与是否能回填 GUI。
+
+### 32.7 Fast profile 单次未缓存真实运行记录
+
+在用户确认可以继续后，本轮追加执行一次单次 fast/no-cache 推理。该运行不使用历史缓存，仍走 persistent worker 路径；目的不是证明最终策略，而是先获得 fast profile 的真实耗时和质量代价。
+
+运行目录：
+
+```text
+D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\.test-output\perf-fast-profile-20260525-1305
+```
+
+运行设置：
+
+| 项目 | 值 |
+|---|---|
+| runs | `1` |
+| device | `cuda` |
+| preprocess_workers | `2` |
+| export_workers | `2` |
+| inference_profile | `fast` |
+| tile_step_size | `1.0` |
+| disable_tta | `true` |
+| not_on_device | `false` |
+| cache_policy | `disabled via patch(server.find_cached_prediction, return_value=None)` |
+| worker_policy | `SEGMENTATION_PERSISTENT_WORKER=1` |
+
+运行结果：
+
+| 项目 | 结果 |
+|---|---|
+| job id | `6802e01f1a73` |
+| mode | `real-nnunetv2` |
+| cached_result | `false` |
+| status | `succeeded` |
+| duration_seconds | `384.345` |
+| phase_timings | `persistent_worker=381.448`，`validation=2.670`，`collect_result=0.008` |
+| result_status | `200` |
+| result_bytes | `142578` |
+| checkpoint_sha256 | `45021cef5f37868f8e76f4c372b5d911eef259db6d38943779ba25318c37e6c7` |
+| output | `.test-output\perf-fast-profile-20260525-1305\work\6802e01f1a73\output\6802e01f1a73.nii.gz` |
+
+资源快照：
+
+| 阶段 | GPU | 显存 | 利用率 |
+|---|---|---:|---:|
+| started | NVIDIA GeForce RTX 4060 Laptop GPU | `1645 / 8188 MiB` | `22%` |
+| completed | NVIDIA GeForce RTX 4060 Laptop GPU | `1745 / 8188 MiB` | `43%` |
+
+标准答案验证：
+
+| 指标 | 值 |
+|---|---:|
+| validation status | `review` |
+| mean Dice | `0.777243` |
+| min Dice | `0.000000` |
+| foreground Dice | `0.972898` |
+| mean IoU | `0.713592` |
+| min IoU | `0.000000` |
+| foreground IoU | `0.947226` |
+| Pixel/Voxel Accuracy | `0.998068` |
+| mean Hausdorff Distance | `10.282058 mm` |
+| max Hausdorff Distance | `24.616009 mm` |
+
+指标输出：
+
+| 项目 | 路径 |
+|---|---|
+| job summary | `.test-output\perf-fast-profile-20260525-1305\work\6802e01f1a73\output\job_summary.json` |
+| perf summary | `.test-output\perf-fast-profile-20260525-1305\perf_no_cache_persistent_summary.json` |
+| metrics JSON | `.test-output\segmentation-metrics-fast-profile-20260525-1312\fast-profile-amos0117-segmentation-metrics.json` |
+| metrics Markdown | `.test-output\segmentation-metrics-fast-profile-20260525-1312\fast-profile-amos0117-segmentation-metrics.md` |
+
+质量结论：
+
+- 与 29.3 中新权重默认质量配置的 `1124.327s` 相比，本次 fast 单次耗时降到 `384.345s`，但两者都是单次运行，仍需同一脚本矩阵复核。
+- fast profile 明显牺牲质量：`mean_dice` 从 29.3 的 `0.924791` 降到 `0.777243`，`min_dice` 从 `0.846551` 降到 `0.0`。
+- `min_dice=0.0` 主要来自 label `14=膀胱` 与 `15=前列腺/子宫`：参考标签中两者为 `0` voxels，但 fast 预测产生了少量假阳性（分别 `664` 和 `670` voxels）。
+- 因此 fast profile 可以作为“快速预览/演示候选”，不能替代默认质量推理结果，也不能把本次结果写成自动验收通过。
+
+### 32.8 Quality profile 单次未缓存真实运行记录
+
+为和 fast profile 形成同脚本对照，本轮继续执行一次单次 quality/no-cache 推理。该运行同样禁用历史缓存、使用同一输入和 checkpoint，并保留 persistent worker 路径。
+
+运行目录：
+
+```text
+D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\.test-output\perf-quality-profile-20260525-1330
+```
+
+运行设置：
+
+| 项目 | 值 |
+|---|---|
+| runs | `1` |
+| device | `cuda` |
+| preprocess_workers | `2` |
+| export_workers | `2` |
+| inference_profile | `quality` |
+| tile_step_size | `0.5` |
+| disable_tta | `false` |
+| not_on_device | `false` |
+| cache_policy | `disabled via patch(server.find_cached_prediction, return_value=None)` |
+| worker_policy | `SEGMENTATION_PERSISTENT_WORKER=1` |
+
+运行结果：
+
+| 项目 | 结果 |
+|---|---|
+| job id | `b3c528cc9e20` |
+| mode | `real-nnunetv2` |
+| cached_result | `false` |
+| status | `succeeded` |
+| duration_seconds | `1360.398` |
+| phase_timings | `persistent_worker=1357.677`，`validation=2.500`，`collect_result=0.003` |
+| result_status | `200` |
+| result_bytes | `141568` |
+| checkpoint_sha256 | `45021cef5f37868f8e76f4c372b5d911eef259db6d38943779ba25318c37e6c7` |
+| output | `.test-output\perf-quality-profile-20260525-1330\work\b3c528cc9e20\output\b3c528cc9e20.nii.gz` |
+
+资源快照：
+
+| 阶段 | GPU | 显存 | 利用率 |
+|---|---|---:|---:|
+| started | NVIDIA GeForce RTX 4060 Laptop GPU | `1343 / 8188 MiB` | `20%` |
+| completed | NVIDIA GeForce RTX 4060 Laptop GPU | `1540 / 8188 MiB` | `11%` |
+
+标准答案验证：
+
+| 指标 | 值 |
+|---|---:|
+| validation status | `passed` |
+| mean Dice | `0.924780` |
+| min Dice | `0.846569` |
+| foreground Dice | `0.980317` |
+| mean IoU | `0.865088` |
+| min IoU | `0.733957` |
+| foreground IoU | `0.961394` |
+| Pixel/Voxel Accuracy | `0.998578` |
+| mean Hausdorff Distance | `7.716048 mm` |
+| max Hausdorff Distance | `16.562684 mm` |
+
+指标输出：
+
+| 项目 | 路径 |
+|---|---|
+| job summary | `.test-output\perf-quality-profile-20260525-1330\work\b3c528cc9e20\output\job_summary.json` |
+| perf summary | `.test-output\perf-quality-profile-20260525-1330\perf_no_cache_persistent_summary.json` |
+| metrics JSON | `.test-output\segmentation-metrics-quality-profile-20260525-1433\quality-profile-amos0117-segmentation-metrics.json` |
+| metrics Markdown | `.test-output\segmentation-metrics-quality-profile-20260525-1433\quality-profile-amos0117-segmentation-metrics.md` |
+
+### 32.9 Fast vs Quality 对照与产品策略
+
+同一输入、同一 checkpoint、同一脚本、均禁用历史缓存的单次对照：
+
+| 项目 | fast profile | quality profile |
+|---|---:|---:|
+| job id | `6802e01f1a73` | `b3c528cc9e20` |
+| duration_seconds | `384.345` | `1360.398` |
+| persistent_worker | `381.448` | `1357.677` |
+| result_bytes | `142578` | `141568` |
+| validation status | `review` | `passed` |
+| mean Dice | `0.777243` | `0.924780` |
+| min Dice | `0.000000` | `0.846569` |
+| foreground Dice | `0.972898` | `0.980317` |
+| mean IoU | `0.713592` | `0.865088` |
+| min IoU | `0.000000` | `0.733957` |
+| foreground IoU | `0.947226` | `0.961394` |
+| Pixel/Voxel Accuracy | `0.998068` | `0.998578` |
+| mean Hausdorff Distance | `10.282058 mm` | `7.716048 mm` |
+| max Hausdorff Distance | `24.616009 mm` | `16.562684 mm` |
+| label 14 prediction_voxels | `664` | `0` |
+| label 15 prediction_voxels | `670` | `0` |
+
+结论：
+
+- fast profile 单次耗时约为 quality 的 `28.25%`，可以显著缩短等待时间。
+- fast profile 的质量代价明确：`mean Dice` 下降约 `0.147537`，`min Dice` 降到 `0`，`mean Hausdorff Distance` 增加约 `2.566010 mm`。
+- fast profile 的 `min Dice=0` 来自 label `14=膀胱` 与 `15=前列腺/子宫` 的小体积假阳性；quality profile 对这两个 absent labels 预测为 `0` voxels。
+- 产品策略应采用 `质量推理` 作为默认/正式报告依据；`快速预览` 可作为显式可选模式，只能用于快速查看和演示，并在界面和文档中标注“需复核”。
+- 后处理可以作为后续独立实验：对 absent label 或小体积标签设置最小体素阈值过滤。但这必须记录为 `postprocess`，不能混同模型原始输出，也不能用过滤后的分数替代模型原始质量指标。
+
+## 三十三、2026-05-25 推理模式产品化
+
+### 33.1 实现内容
+
+- 前端“分割控制”新增 `质量推理` / `快速预览` 模式选择，默认 `质量推理`。
+- 选择 `快速预览` 时，界面显示“需人工复核”警示；fast 结果元信息和最近导入状态也标注为快速预览结果，不能误认为正式报告依据。
+- `createInferenceJob()` 提交 `inference_profile`，后端按每次 job 生成 effective `inference_options`，不再只能依赖进程环境变量。
+- job state、创建响应、SSE complete 事件和 `job_summary.json` 都携带 `inference_profile` / `inference_options`；cache key 继续使用最终 options，隔离 fast/quality 缓存。
+
+### 33.2 验证
+
+- `node tests/imagingLogic.test.ts`：通过，覆盖 UI 文案、fast 结果元信息、SSE `inference_options` 解析和前端表单提交。
+- `python tests/backendState.test.py`：通过，覆盖请求级 `inference_profile`、job state、cache key 输入和 cached complete event。
+- `npm test`：通过。
+- `npm run build`：通过。
+
+### 33.3 仍然不变的边界
+
+- 本轮没有新增真实推理 benchmark，因此不改变 32.9 的 fast/quality 数值结论。
+- `fast` 仍只能作为快速预览/演示路径；正式报告和质量结论仍以 `quality` 原始输出为准。
+
+---
+
+*文档版本：2026-05-25*
+*更新依据：当前 `src/main.tsx`、`src/components/OrthogonalViewer.tsx`、`src/imaging/voxelMapping.ts`、`src/imaging/sliceRenderer.ts`、`src/data/organDetails.ts`、`src/inference/inferenceClient.ts`、`server/main.py`、`server/persistent_nnunet_worker.py`、`server/requirements.txt`、`tools/perf_no_cache_persistent.py`、`README.md`、`ACCEPTANCE.md`、`SEGMENTATION_METRICS_SUMMARY.md`、`reference_cases.example.json`、`tests/*.test.ts` 与本地运行验证结果。*

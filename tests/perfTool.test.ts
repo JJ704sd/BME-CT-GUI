@@ -8,6 +8,10 @@ assert.equal(existsSync(toolPath), true, "no-cache persistent worker performance
 const source = readFileSync(toolPath, "utf8");
 for (const required of [
   "SEGMENTATION_PERSISTENT_WORKER",
+  "SEGMENTATION_INFERENCE_PROFILE",
+  "--inference-profile",
+  "--tile-step-size",
+  "--disable-tta",
   "find_cached_prediction",
   "cold_persistent_no_cache",
   "warm_persistent_no_cache",

@@ -2903,6 +2903,69 @@ h1 {
   white-space: nowrap;
 }
 
+.inference-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.profile-option {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  min-height: 86px;
+  padding: 11px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.045);
+  color: #d8e4e0;
+  text-align: left;
+  transition: border-color 160ms ease, background 160ms ease, color 160ms ease;
+}
+
+.profile-option:hover,
+.profile-option.active {
+  border-color: rgba(95, 232, 194, 0.36);
+  background: rgba(95, 232, 194, 0.11);
+}
+
+.profile-option span {
+  color: #eef7f3;
+  font-size: 13px;
+  font-weight: 820;
+  line-height: 1.25;
+}
+
+.profile-option strong,
+.profile-option small {
+  color: #9daaa6;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.profile-option.active strong {
+  color: #fff0b3;
+}
+
+.profile-warning {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid rgba(255, 210, 102, 0.22);
+  border-radius: 7px;
+  background: rgba(255, 210, 102, 0.075);
+  color: #f4dfae;
+  font-size: 11px;
+  font-weight: 720;
+  line-height: 1.4;
+}
+
+.profile-warning svg {
+  color: #fff0b3;
+}
+
 .inspector .organ-row {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;

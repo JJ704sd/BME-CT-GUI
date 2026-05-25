@@ -1,62 +1,58 @@
 # BME CT Segmentation GUI Prototype
 
-本项目是一个面向腹部 CT 分割验证流程的本地 GUI 原型。前端使用 React + Vite，后端使用 FastAPI 桥接本机 nnUNetv2 推理环境，目标是完成 CT 浏览、三正交联动、分割结果叠加、器官标签说明和真实模型推理回填。当前内置的 AMOS 0117 只作为参考病例，用于演示、回归和标准答案验证；主流程仍支持导入任意 `.nii` / `.nii.gz` CT 与分割结果。
+本项目是面向腹部 CT 分割验证流程的本地 GUI 原型。前端使用 React + Vite，后端使用 FastAPI 桥接本机 nnUNetv2 环境，目标是完成 CT 浏览、三正交联动、器官 label 说明、真实模型推理回填、结果下载和验收记录。
+
+截至 2026-05-25，项目已经作为独立 GUI 仓库维护；真实 CT、NIfTI、checkpoint 权重和推理输出仍只保留在本机，不提交到 GitHub。
 
 ## 当前状态
 
 - 前端入口：`http://127.0.0.1:5173`
 - 后端健康检查：`http://127.0.0.1:8000/api/health`
-- 当前后端模式：`real-nnunetv2`
-- 当前验证设备：CUDA，可通过 `SEGMENTATION_DEVICE=cuda` 指定
-- 主要进展记录见 [REVIEW.md](./REVIEW.md)
+- 后端模式：模型资源齐备时为 `real-nnunetv2`，缺失时为 `unavailable`
+- 当前主要参考病例：AMOS 0117
+- 当前新权重：`nnunetv2_files/checkpoint_best.pth`
+- 主要进展和实验记录：见 [REVIEW.md](./REVIEW.md) 与 [ACCEPTANCE.md](./ACCEPTANCE.md)
 
 ## 主要功能
 
-- 支持 `.nii` / `.nii.gz` CT 体数据读取和浏览。
+- 读取并浏览 `.nii` / `.nii.gz` CT 体数据。
 - 支持 Axial、Sagittal、Coronal 三正交视图联动。
-- 支持窗宽窗位、切片切换、缩放、叠加透明度调节。
-- 支持分割结果与原图的 `overlay`、`split`、`side`、`difference` 对比。
-- 支持点击非背景 label 后显示对应器官说明。
-- 支持本地 nnUNetv2 在线推理任务创建、SSE 进度、结果下载和 GUI 回填。
-- 支持内置参考病例标准答案验证，当前参考病例为 AMOS 0117，可输出 per-label Dice、平均 Dice、最低 Dice 和前景 Dice。
-- 支持作业摘要持久化：耗时、结果大小、验证摘要、历史 job 回读。
-- 支持 nnUNetv2 子进程日志持久化，失败时显示尾部日志，便于定位 CUDA OOM、输入格式或模型路径问题。
+- 支持窗宽窗位、切片切换、缩放、overlay / split / side / difference 对比。
+- 点击非背景 label 后展示对应器官说明。
+- 通过本地 FastAPI 创建 nnUNetv2 推理任务，并通过 SSE 获取进度。
+- 推理完成后下载 NIfTI 分割结果并回填 GUI。
+- 对带标准答案的参考病例计算 per-label Dice、mean Dice、min Dice 和 foreground Dice。
+- 持久化 job summary、阶段耗时、结果大小、资源快照和 nnUNetv2 日志尾部。
+- 支持同输入、同 checkpoint、同推理配置的历史结果缓存回填：`cached-real-nnunetv2`。
 
-## 参考 CT 推理结果
+## 在线推理速度策略
 
-已使用本地参考 CT 完成一次真实 CUDA 推理：
+当前已验证有效的加速路径是历史结果缓存：同一输入、同一 checkpoint、同一模型配置和同一推理参数重复提交时，后端会返回 `cached-real-nnunetv2`，可把重复演示和复核等待时间降到秒级。
 
-- 输入：`nnunetv2_files/amos_0117(3).nii.gz`
-- 标准答案：`nnunetv2_files/amos_0117(2).nii.gz`
-- 权重：`nnunetv2_files/checkpoint_best.pth`
-- job id：`009d4efdc5f6`
-- 推理耗时：`385.321 秒`，约 `6 分 25 秒`
-- 输出：`server/work/009d4efdc5f6/output/009d4efdc5f6.nii.gz`
-- 结果大小：`141460 bytes`
-- 结果状态：`succeeded`
+未缓存首次推理仍主要受 3D full-res sliding-window 计算影响。AMOS 0117 同脚本单次对照中，`quality` 耗时 `1360.398s` 且验证通过；`fast` 耗时 `384.345s`，但 mean Dice 降到 `0.777243`，并对 label 14/15 产生小体积假阳性。因此默认/正式报告应使用 `quality`，`fast` 只能作为快速预览或演示候选。persistent worker 未证明能加速；当前只作为实验路径保留。
 
-标准答案验证结果：
+前端“分割控制”面板现在提供 `质量推理` 和 `快速预览` 两个推理模式。默认选择 `质量推理`；选择 `快速预览` 时界面会显示“需人工复核”提示，成功结果元信息也会标注为快速预览结果，避免误认为正式报告依据。
 
-| 指标 | 数值 |
-|---|---:|
-| mean_dice | 0.891327 |
-| foreground_dice | 0.971222 |
-| min_dice | 0.555985 |
-| 状态 | review |
+后端仍支持环境变量作为默认配置；前端每次提交 job 时会把所选 `inference_profile` 显式传给 `/api/segment/jobs`。最终生效的 `inference_options` 会写入创建响应、job state、SSE complete 事件和 `job_summary.json`，并纳入 cache key，避免不同质量/速度参数误用同一缓存：
 
-当前参考病例没有完全自动通过验收，主要原因是胃的 Dice 为 `0.555985`，低于最低 label Dice 阈值 `0.70`。界面和文档均应保留“建议人工复核”的结论。
+```powershell
+$env:SEGMENTATION_INFERENCE_PROFILE='fast'
+$env:SEGMENTATION_DISABLE_TTA='1'
+$env:SEGMENTATION_TILE_STEP_SIZE='1.0'
+```
 
-## 三大目标进度
+含义：
 
-| 目标 | 当前完成度 | 说明 |
-|---|---:|---|
-| CT 浏览、三正交联动 | 约 96% | 三视图联动、侧向视图放大、点击留白过滤、底部切片栏稳定窗口和切片渲染缓存已完成并有回归测试；仍需更多真实病例和真机屏幕验收。 |
-| 器官 label 点击与说明 | 约 96% | label 表与器官说明已对齐，并能用标准答案 per-label Dice 回填质控状态；仍需最终确认训练集标签集合是否固定。 |
-| 本地 nnUNetv2 推理与结果回填 | 约 96% | CUDA 推理跑通，结果可回填/下载/覆盖对比，已补历史结果缓存、可配置 worker、常驻 worker 路径、耗时分解和失败日志。 |
+- `SEGMENTATION_INFERENCE_PROFILE=quality`：默认质量模式，nnUNetv2 默认 `tile_step_size=0.5`，保留 TTA/mirroring；用于正式结果和报告依据。
+- `SEGMENTATION_INFERENCE_PROFILE=fast`：在线快速模式，默认 `SEGMENTATION_DISABLE_TTA=1`，`SEGMENTATION_TILE_STEP_SIZE=1.0`。速度更快，但本地 AMOS 0117 对照已显示质量明显下降，只能作为快速预览并需人工复核。
+- `SEGMENTATION_DISABLE_TTA`：显式控制是否关闭 mirroring/TTA。
+- `SEGMENTATION_TILE_STEP_SIZE`：控制 sliding-window 步长，允许 `0.1` 到 `1.0`；越大通常越快但重叠更少。
+- `SEGMENTATION_NOT_ON_DEVICE=1`：关闭 `perform_everything_on_device`，主要用于降低显存压力，不保证更快。
+- `SEGMENTATION_PERSISTENT_WORKER=1`：实验开关，仅建议用于性能对照；当前无缓存实验未证明能加速。
 
 ## 本地运行
 
-安装前端依赖：
+安装依赖：
 
 ```powershell
 npm install
@@ -68,17 +64,25 @@ npm install
 npm run dev -- --port 5173
 ```
 
-启动后端：
+启动后端。默认建议使用质量模式：
 
 ```powershell
 $env:SEGMENTATION_DEVICE='cuda'
+$env:SEGMENTATION_INFERENCE_PROFILE='quality'
 $env:SEGMENTATION_PREPROCESS_WORKERS='2'
 $env:SEGMENTATION_EXPORT_WORKERS='2'
-$env:SEGMENTATION_PERSISTENT_WORKER='1'
 python -m uvicorn server.main:app --host 127.0.0.1 --port 8000
 ```
 
-后端依赖见：
+快速预览示例：
+
+```powershell
+$env:SEGMENTATION_INFERENCE_PROFILE='fast'
+$env:SEGMENTATION_DISABLE_TTA='1'
+$env:SEGMENTATION_TILE_STEP_SIZE='1.0'
+```
+
+后端 Python 依赖见：
 
 ```text
 server/requirements.txt
@@ -86,15 +90,17 @@ server/requirements.txt
 
 ## 模型和参考病例文件
 
-模型权重、真实 CT 和推理输出不建议提交到 GitHub。当前 `.gitignore` 已排除：
+真实数据和权重不进入仓库。当前 `.gitignore` 排除：
 
 - `nnunetv2_files/`
 - `server/work/`
+- `.test-output/`
 - `*.nii`
 - `*.nii.gz`
 - `*.pth`
+- `*.pt`
 
-本地运行真实推理时，需要自行准备：
+本地真实推理至少需要：
 
 ```text
 nnunetv2_files/checkpoint_best.pth
@@ -102,20 +108,52 @@ nnunetv2_files/amos_0117(3).nii.gz
 nnunetv2_files/amos_0117(2).nii.gz
 ```
 
-## 在线推理加速
+可通过 `SEGMENTATION_REFERENCE_CASES_JSON` 登记更多参考病例，格式见 [reference_cases.example.json](./reference_cases.example.json)。
 
-- 同一输入、同一 checkpoint 和同一配置会命中历史结果缓存，重复演示可在秒级回填结果。
-- 首次真实推理不依赖缓存时，可通过 `SEGMENTATION_PERSISTENT_WORKER=1` 启用常驻 nnUNet predictor，减少每个 job 重复启动 Python 和加载模型的成本。
-- `SEGMENTATION_PREPROCESS_WORKERS` 与 `SEGMENTATION_EXPORT_WORKERS` 可调整 nnUNetv2 的预处理和导出 worker 数量。当前默认建议为 `2/2`，后续应结合 GPU 显存、CPU 核心数和实际耗时分解继续调参。
+## 当前验收记录
+
+新权重 AMOS 0117 未缓存真实推理：
+
+| 项目 | 结果 |
+|---|---|
+| job id | `27216eb73220` |
+| mode | `real-nnunetv2` |
+| cached_result | `false` |
+| device | `cuda` |
+| duration_seconds | `1124.327` |
+| phase_timings | `persistent_worker=1121.592`, `validation=2.527` |
+| result_size_bytes | `141569` |
+| checkpoint_sha256 | `45021cef5f37868f8e76f4c372b5d911eef259db6d38943779ba25318c37e6c7` |
+| validation status | `passed` |
+| mean_dice | `0.924791` |
+| foreground_dice | `0.980316` |
+| min_dice | `0.846551` |
+
+新权重同输入缓存回填：
+
+| 项目 | 结果 |
+|---|---|
+| job id | `f200f16f47be` |
+| mode | `cached-real-nnunetv2` |
+| cached_result | `true` |
+| cache_source_job_id | `27216eb73220` |
+| elapsed_seconds | `3.532` |
+| result_status | `200` |
+| result_bytes | `141569` |
+
+这些记录只代表 AMOS 0117 的本地验收，不代表更多外部病例已经完成泛化验证。
 
 ## API 概览
 
-- `GET /api/health`：后端和模型状态。
+- `GET /api/health`：后端和模型状态，含 worker、设备、推理参数。
 - `GET /api/models`：模型与 label 表。
-- `GET /api/samples`：本地参考病例文件状态。
-- `POST /api/segment/jobs`：创建 nnUNetv2 推理任务。
-- `GET /api/segment/jobs/{job_id}`：查询任务状态、耗时、结果大小和验证摘要。
-- `GET /api/segment/jobs/{job_id}/events`：SSE 推理进度。
+- `GET /api/samples`：本地参考病例列表。
+- `GET /api/samples/{sample_id}/original`：下载参考病例原图。
+- `GET /api/samples/{sample_id}/label`：下载参考病例标准答案。
+- `POST /api/segment/jobs`：创建 nnUNetv2 推理任务；表单字段 `inference_profile=quality|fast` 可按任务选择质量/速度配置。
+- `GET /api/segment/jobs/{job_id}`：查询任务状态、耗时、资源、验证摘要和最终 `inference_options`。
+- `GET /api/segment/jobs/{job_id}/events`：SSE 推理进度；complete 事件包含最终 `inference_options`。
+- `POST /api/segment/jobs/{job_id}/cancel`：请求取消运行中任务。
 - `GET /api/segment/jobs/{job_id}/result`：下载结果 NIfTI。
 
 ## 验证命令
@@ -125,13 +163,18 @@ npm test
 npm run build
 ```
 
-后端测试会在 `.test-output/` 下生成临时模型和作业文件，不需要提交真实 CT、`checkpoint_best.pth` 或其它训练权重。
+后端测试会在 `.test-output/` 下生成临时模型和 job 文件，不需要提交真实 CT、checkpoint 或推理输出。
 
-在受限 shell 中，Vite 或 Playwright 可能因为 Windows 子进程创建被拦截而出现 `spawn EPERM`。正常权限下验证通过；如果在浏览器 overlay 中看到该错误，应重启 Vite 到正常权限环境，而不是修改业务代码。
+性能对照脚本：
+
+```powershell
+python tools/perf_no_cache_persistent.py --dry-run
+python tools/perf_no_cache_persistent.py --inference-profile fast --disable-tta --tile-step-size 1.0
+```
 
 ## 当前限制
 
-- `confidenceThreshold` 目前是质控提示，不会真实作用于多标签概率图。
-- 轻量 3D 预览不是医学级体渲染工作台。
-- 已完成单个内置参考病例 CUDA 推理验证，仍需要更多病例的压力测试、取消/重试机制和资源监控。
-- AMOS 0117 参考病例结果处于 `review`，不能表述为模型效果完全达标。
+- `confidenceThreshold` 仍是质控提示，不会真实作用于多标签概率图。
+- fast profile 会牺牲一部分 nnUNetv2 默认质量设置。AMOS 0117 对照中 fast 明显更快，但 validation 为 `review`，不能作为正式报告结果。
+- 单个新病例的首次未缓存推理仍可能达到分钟级到十几分钟级。
+- 当前真实验收主要围绕 AMOS 0117；新增病例后应分别记录三正交显示、label 点击、推理耗时、资源快照和标准答案状态。
