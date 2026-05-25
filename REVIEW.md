@@ -1477,11 +1477,11 @@ python tools/perf_no_cache_persistent.py --dry-run --inference-profile fast --di
 | 目标 | 当前判断 |
 |---|---|
 | 重复在线演示加速 | `cached-real-nnunetv2` 已验证可秒级回填 |
-| 首次未缓存推理加速 | 已完成一次 fast 单次记录；仍缺同条件 quality 对照和重复确认 |
+| 首次未缓存推理加速 | 已完成同脚本 fast/quality 单次对照；fast 明显更快但质量下降明显 |
 | persistent worker | 上一轮 warm worker 反而显著变慢，暂不作为推荐路径 |
 | cache 正确性 | 已按 checkpoint 与 inference options 隔离 |
 
-下一步应在启动真实长任务前确认实验矩阵：
+下一步应在启动更多真实长任务前确认实验矩阵：
 
 1. `quality`：`tile_step_size=0.5`，TTA 开启。
 2. `fast`：`tile_step_size=1.0`，TTA 关闭。
@@ -1565,7 +1565,107 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\.test-output\perf-fast-profile-
 - `min_dice=0.0` 主要来自 label `14=膀胱` 与 `15=前列腺/子宫`：参考标签中两者为 `0` voxels，但 fast 预测产生了少量假阳性（分别 `664` 和 `670` voxels）。
 - 因此 fast profile 可以作为“快速预览/演示候选”，不能替代默认质量推理结果，也不能把本次结果写成自动验收通过。
 
-下一步需要补充同一脚本下的 `quality` 单次 no-cache baseline，确认这次 fast 加速幅度不是 persistent worker 冷启动、GPU 状态或偶然因素导致。
+### 32.8 Quality profile 单次未缓存真实运行记录
+
+为和 fast profile 形成同脚本对照，本轮继续执行一次单次 quality/no-cache 推理。该运行同样禁用历史缓存、使用同一输入和 checkpoint，并保留 persistent worker 路径。
+
+运行目录：
+
+```text
+D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\.test-output\perf-quality-profile-20260525-1330
+```
+
+运行设置：
+
+| 项目 | 值 |
+|---|---|
+| runs | `1` |
+| device | `cuda` |
+| preprocess_workers | `2` |
+| export_workers | `2` |
+| inference_profile | `quality` |
+| tile_step_size | `0.5` |
+| disable_tta | `false` |
+| not_on_device | `false` |
+| cache_policy | `disabled via patch(server.find_cached_prediction, return_value=None)` |
+| worker_policy | `SEGMENTATION_PERSISTENT_WORKER=1` |
+
+运行结果：
+
+| 项目 | 结果 |
+|---|---|
+| job id | `b3c528cc9e20` |
+| mode | `real-nnunetv2` |
+| cached_result | `false` |
+| status | `succeeded` |
+| duration_seconds | `1360.398` |
+| phase_timings | `persistent_worker=1357.677`，`validation=2.500`，`collect_result=0.003` |
+| result_status | `200` |
+| result_bytes | `141568` |
+| checkpoint_sha256 | `45021cef5f37868f8e76f4c372b5d911eef259db6d38943779ba25318c37e6c7` |
+| output | `.test-output\perf-quality-profile-20260525-1330\work\b3c528cc9e20\output\b3c528cc9e20.nii.gz` |
+
+资源快照：
+
+| 阶段 | GPU | 显存 | 利用率 |
+|---|---|---:|---:|
+| started | NVIDIA GeForce RTX 4060 Laptop GPU | `1343 / 8188 MiB` | `20%` |
+| completed | NVIDIA GeForce RTX 4060 Laptop GPU | `1540 / 8188 MiB` | `11%` |
+
+标准答案验证：
+
+| 指标 | 值 |
+|---|---:|
+| validation status | `passed` |
+| mean Dice | `0.924780` |
+| min Dice | `0.846569` |
+| foreground Dice | `0.980317` |
+| mean IoU | `0.865088` |
+| min IoU | `0.733957` |
+| foreground IoU | `0.961394` |
+| Pixel/Voxel Accuracy | `0.998578` |
+| mean Hausdorff Distance | `7.716048 mm` |
+| max Hausdorff Distance | `16.562684 mm` |
+
+指标输出：
+
+| 项目 | 路径 |
+|---|---|
+| job summary | `.test-output\perf-quality-profile-20260525-1330\work\b3c528cc9e20\output\job_summary.json` |
+| perf summary | `.test-output\perf-quality-profile-20260525-1330\perf_no_cache_persistent_summary.json` |
+| metrics JSON | `.test-output\segmentation-metrics-quality-profile-20260525-1433\quality-profile-amos0117-segmentation-metrics.json` |
+| metrics Markdown | `.test-output\segmentation-metrics-quality-profile-20260525-1433\quality-profile-amos0117-segmentation-metrics.md` |
+
+### 32.9 Fast vs Quality 对照与产品策略
+
+同一输入、同一 checkpoint、同一脚本、均禁用历史缓存的单次对照：
+
+| 项目 | fast profile | quality profile |
+|---|---:|---:|
+| job id | `6802e01f1a73` | `b3c528cc9e20` |
+| duration_seconds | `384.345` | `1360.398` |
+| persistent_worker | `381.448` | `1357.677` |
+| result_bytes | `142578` | `141568` |
+| validation status | `review` | `passed` |
+| mean Dice | `0.777243` | `0.924780` |
+| min Dice | `0.000000` | `0.846569` |
+| foreground Dice | `0.972898` | `0.980317` |
+| mean IoU | `0.713592` | `0.865088` |
+| min IoU | `0.000000` | `0.733957` |
+| foreground IoU | `0.947226` | `0.961394` |
+| Pixel/Voxel Accuracy | `0.998068` | `0.998578` |
+| mean Hausdorff Distance | `10.282058 mm` | `7.716048 mm` |
+| max Hausdorff Distance | `24.616009 mm` | `16.562684 mm` |
+| label 14 prediction_voxels | `664` | `0` |
+| label 15 prediction_voxels | `670` | `0` |
+
+结论：
+
+- fast profile 单次耗时约为 quality 的 `28.25%`，可以显著缩短等待时间。
+- fast profile 的质量代价明确：`mean Dice` 下降约 `0.147537`，`min Dice` 降到 `0`，`mean Hausdorff Distance` 增加约 `2.566010 mm`。
+- fast profile 的 `min Dice=0` 来自 label `14=膀胱` 与 `15=前列腺/子宫` 的小体积假阳性；quality profile 对这两个 absent labels 预测为 `0` voxels。
+- 产品策略应采用 `质量推理` 作为默认/正式报告依据；`快速预览` 可作为显式可选模式，只能用于快速查看和演示，并在界面和文档中标注“需复核”。
+- 后处理可以作为后续独立实验：对 absent label 或小体积标签设置最小体素阈值过滤。但这必须记录为 `postprocess`，不能混同模型原始输出，也不能用过滤后的分数替代模型原始质量指标。
 
 ---
 

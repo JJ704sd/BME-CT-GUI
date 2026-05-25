@@ -63,6 +63,9 @@ for (const required of [
   "checkpoint_best.pth",
   "segmentation_metrics_summary.py",
   "new-weight-amos0117-segmentation-metrics.json",
+  "Fast vs Quality No-cache Profile Comparison",
+  "quality-profile-amos0117-segmentation-metrics.json",
+  "fast-profile-amos0117-segmentation-metrics.json",
   "validation_summary.json",
   "膀胱",
   "前列腺/子宫"

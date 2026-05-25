@@ -32,7 +32,7 @@ python tools\segmentation_metrics_summary.py `
 
 - 优先使用本次推理生成的 `validation_summary.json`，因为它来自 checkpoint 内嵌的 `dataset_json`，能保留当前权重的完整标签定义。
 - 不要混用旧的外部 `dataset.json`；如果标签集合不同，会导致 label 名称错位或漏记空标签。
-- 本轮 checkpoint 定义 15 个前景标签，但 AMOS 0117 这份参考标签和预测结果只实际出现 label `1..13`，因此 label `14/15` 会保留为 N/A。
+- 本轮 checkpoint 定义 15 个前景标签。AMOS 0117 的参考标签实际只出现 label `1..13`；如果预测也没有 label `14/15`，它们记录为 N/A。如果预测出现 label `14/15` 假阳性，则 Dice/IoU 为 `0` 并应纳入 fast/quality 对照判断。
 
 ## Latest Run
 
@@ -66,6 +66,15 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\amos_0117(2).nii
 - Markdown: `D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\.test-output\segmentation-metrics-warm-timeout-20260524-2257\warm-timeout-amos0117-segmentation-metrics.md`
 - Result SHA256: `5473EAFB22FA21B896F8511BE9E02FFD49D678DEE4B82E63681FDD99DA57D9C0`
 
+2026-05-25 fast/quality no-cache profile 对照输出：
+
+- Fast prediction: `.test-output\perf-fast-profile-20260525-1305\work\6802e01f1a73\output\6802e01f1a73.nii.gz`
+- Fast JSON: `.test-output\segmentation-metrics-fast-profile-20260525-1312\fast-profile-amos0117-segmentation-metrics.json`
+- Fast Markdown: `.test-output\segmentation-metrics-fast-profile-20260525-1312\fast-profile-amos0117-segmentation-metrics.md`
+- Quality prediction: `.test-output\perf-quality-profile-20260525-1330\work\b3c528cc9e20\output\b3c528cc9e20.nii.gz`
+- Quality JSON: `.test-output\segmentation-metrics-quality-profile-20260525-1433\quality-profile-amos0117-segmentation-metrics.json`
+- Quality Markdown: `.test-output\segmentation-metrics-quality-profile-20260525-1433\quality-profile-amos0117-segmentation-metrics.md`
+
 ## Latest Aggregate Metrics
 
 | Metric | Value |
@@ -80,6 +89,36 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\amos_0117(2).nii
 | Pixel Accuracy | `0.998578` |
 | mean Hausdorff Distance | `7.716048 mm` |
 | max Hausdorff Distance | `16.562684 mm` |
+
+## Fast vs Quality No-cache Profile Comparison
+
+同一 AMOS 0117 输入、同一 checkpoint、同一性能脚本，均禁用历史缓存：
+
+| Metric | Fast profile | Quality profile |
+|---|---:|---:|
+| job id | `6802e01f1a73` | `b3c528cc9e20` |
+| duration_seconds | `384.345` | `1360.398` |
+| persistent_worker | `381.448` | `1357.677` |
+| result_bytes | `142578` | `141568` |
+| validation status | `review` | `passed` |
+| mean Dice | `0.777243` | `0.924780` |
+| min Dice | `0.000000` | `0.846569` |
+| foreground Dice | `0.972898` | `0.980317` |
+| mean IoU | `0.713592` | `0.865088` |
+| min IoU | `0.000000` | `0.733957` |
+| foreground IoU | `0.947226` | `0.961394` |
+| Voxel Accuracy | `0.998068` | `0.998578` |
+| Pixel Accuracy | `0.998068` | `0.998578` |
+| mean Hausdorff Distance | `10.282058 mm` | `7.716048 mm` |
+| max Hausdorff Distance | `24.616009 mm` | `16.562684 mm` |
+| label 14 prediction_voxels | `664` | `0` |
+| label 15 prediction_voxels | `670` | `0` |
+
+结论：
+
+- `quality` 应作为默认/正式报告依据。
+- `fast` 可作为快速预览或演示模式，但必须标注“需复核”。
+- label `14/15` 的小体积假阳性只在本轮 fast profile 中出现；如要过滤，应作为独立 `postprocess` 实验记录，不能混同模型原始输出。
 
 Checkpoint metadata：
 

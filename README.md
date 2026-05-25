@@ -29,7 +29,7 @@
 
 当前已验证有效的加速路径是历史结果缓存：同一输入、同一 checkpoint、同一模型配置和同一推理参数重复提交时，后端会返回 `cached-real-nnunetv2`，可把重复演示和复核等待时间降到秒级。
 
-未缓存首次推理仍主要受 3D full-res sliding-window 计算影响。AMOS 0117 新权重未缓存记录中，`persistent_worker=1121.592s`；无缓存 warm persistent worker 对照中，第二次实际落盘约 `4104.567s`。因此 persistent worker 未证明能加速，默认不建议把它当作在线加速方案。
+未缓存首次推理仍主要受 3D full-res sliding-window 计算影响。AMOS 0117 同脚本单次对照中，`quality` 耗时 `1360.398s` 且验证通过；`fast` 耗时 `384.345s`，但 mean Dice 降到 `0.777243`，并对 label 14/15 产生小体积假阳性。因此默认/正式报告应使用 `quality`，`fast` 只能作为快速预览或演示候选。persistent worker 未证明能加速；当前只作为实验路径保留。
 
 新增的在线快速配置会显式传给 nnUNetv2，并纳入 cache key，避免不同质量/速度参数误用同一缓存：
 
@@ -41,8 +41,8 @@ $env:SEGMENTATION_TILE_STEP_SIZE='1.0'
 
 含义：
 
-- `SEGMENTATION_INFERENCE_PROFILE=quality`：默认质量模式，nnUNetv2 默认 `tile_step_size=0.5`，保留 TTA/mirroring。
-- `SEGMENTATION_INFERENCE_PROFILE=fast`：在线快速模式，默认 `SEGMENTATION_DISABLE_TTA=1`，`SEGMENTATION_TILE_STEP_SIZE=1.0`。速度更快，但可能降低分割质量。
+- `SEGMENTATION_INFERENCE_PROFILE=quality`：默认质量模式，nnUNetv2 默认 `tile_step_size=0.5`，保留 TTA/mirroring；用于正式结果和报告依据。
+- `SEGMENTATION_INFERENCE_PROFILE=fast`：在线快速模式，默认 `SEGMENTATION_DISABLE_TTA=1`，`SEGMENTATION_TILE_STEP_SIZE=1.0`。速度更快，但本地 AMOS 0117 对照已显示质量明显下降，只能作为快速预览并需人工复核。
 - `SEGMENTATION_DISABLE_TTA`：显式控制是否关闭 mirroring/TTA。
 - `SEGMENTATION_TILE_STEP_SIZE`：控制 sliding-window 步长，允许 `0.1` 到 `1.0`；越大通常越快但重叠更少。
 - `SEGMENTATION_NOT_ON_DEVICE=1`：关闭 `perform_everything_on_device`，主要用于降低显存压力，不保证更快。
@@ -62,22 +62,22 @@ npm install
 npm run dev -- --port 5173
 ```
 
-启动后端。在线演示优先使用 fast profile；正式质量复核可改为 `quality`：
+启动后端。默认建议使用质量模式：
 
 ```powershell
 $env:SEGMENTATION_DEVICE='cuda'
-$env:SEGMENTATION_INFERENCE_PROFILE='fast'
+$env:SEGMENTATION_INFERENCE_PROFILE='quality'
 $env:SEGMENTATION_PREPROCESS_WORKERS='2'
 $env:SEGMENTATION_EXPORT_WORKERS='2'
 python -m uvicorn server.main:app --host 127.0.0.1 --port 8000
 ```
 
-质量模式示例：
+快速预览示例：
 
 ```powershell
-$env:SEGMENTATION_INFERENCE_PROFILE='quality'
-$env:SEGMENTATION_DISABLE_TTA='0'
-$env:SEGMENTATION_TILE_STEP_SIZE='0.5'
+$env:SEGMENTATION_INFERENCE_PROFILE='fast'
+$env:SEGMENTATION_DISABLE_TTA='1'
+$env:SEGMENTATION_TILE_STEP_SIZE='1.0'
 ```
 
 后端 Python 依赖见：
@@ -173,6 +173,6 @@ python tools/perf_no_cache_persistent.py --inference-profile fast --disable-tta 
 ## 当前限制
 
 - `confidenceThreshold` 仍是质控提示，不会真实作用于多标签概率图。
-- fast profile 会牺牲一部分 nnUNetv2 默认质量设置，需要用标准答案或人工复核确认结果。
+- fast profile 会牺牲一部分 nnUNetv2 默认质量设置。AMOS 0117 对照中 fast 明显更快，但 validation 为 `review`，不能作为正式报告结果。
 - 单个新病例的首次未缓存推理仍可能达到分钟级到十几分钟级。
 - 当前真实验收主要围绕 AMOS 0117；新增病例后应分别记录三正交显示、label 点击、推理耗时、资源快照和标准答案状态。
