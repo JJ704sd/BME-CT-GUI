@@ -23,6 +23,10 @@ def parse_args() -> argparse.Namespace:
   parser.add_argument("--device", default="cuda", choices=["cuda", "cpu", "mps"])
   parser.add_argument("--preprocess-workers", type=int, default=2)
   parser.add_argument("--export-workers", type=int, default=2)
+  parser.add_argument("--inference-profile", default="quality", choices=["quality", "fast"])
+  parser.add_argument("--tile-step-size", type=float, default=None, help="Override nnUNet sliding-window step size.")
+  parser.add_argument("--disable-tta", action="store_true", help="Disable mirroring/TTA for faster but less accurate inference.")
+  parser.add_argument("--not-on-device", action="store_true", help="Disable perform_everything_on_device to reduce VRAM pressure.")
   parser.add_argument("--timeout-seconds", type=int, default=1800)
   parser.add_argument("--dry-run", action="store_true", help="Print resolved settings without running inference.")
   return parser.parse_args()
@@ -40,6 +44,8 @@ def main() -> int:
   args = parse_args()
   stamp = time.strftime("%Y%m%d-%H%M%S")
   run_root = (args.run_root or PROJECT_ROOT / ".test-output" / f"perf-no-cache-persistent-{stamp}").resolve()
+  tile_step_size = args.tile_step_size if args.tile_step_size is not None else (1.0 if args.inference_profile == "fast" else 0.5)
+  disable_tta = bool(args.disable_tta or args.inference_profile == "fast")
 
   settings = {
     "project_root": str(PROJECT_ROOT),
@@ -49,6 +55,10 @@ def main() -> int:
     "device": args.device,
     "preprocess_workers": args.preprocess_workers,
     "export_workers": args.export_workers,
+    "inference_profile": args.inference_profile,
+    "tile_step_size": tile_step_size,
+    "disable_tta": disable_tta,
+    "not_on_device": args.not_on_device,
     "timeout_seconds": args.timeout_seconds,
     "cache_policy": "disabled via patch(server.find_cached_prediction, return_value=None)",
     "worker_policy": "SEGMENTATION_PERSISTENT_WORKER=1",
@@ -67,6 +77,10 @@ def main() -> int:
   os.environ["SEGMENTATION_PREPROCESS_WORKERS"] = str(args.preprocess_workers)
   os.environ["SEGMENTATION_EXPORT_WORKERS"] = str(args.export_workers)
   os.environ["SEGMENTATION_PERSISTENT_WORKER"] = "1"
+  os.environ["SEGMENTATION_INFERENCE_PROFILE"] = args.inference_profile
+  os.environ["SEGMENTATION_TILE_STEP_SIZE"] = str(tile_step_size)
+  os.environ["SEGMENTATION_DISABLE_TTA"] = "1" if disable_tta else "0"
+  os.environ["SEGMENTATION_NOT_ON_DEVICE"] = "1" if args.not_on_device else "0"
 
   from fastapi.testclient import TestClient
   import server.main as server

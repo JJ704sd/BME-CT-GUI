@@ -107,7 +107,10 @@ def test_predict_command_uses_model_folder_and_job_io():
     with patch.dict(os.environ, {
         "SEGMENTATION_PREPROCESS_WORKERS": "3",
         "SEGMENTATION_EXPORT_WORKERS": "2",
-    }):
+        "SEGMENTATION_INFERENCE_PROFILE": "quality",
+        "SEGMENTATION_DISABLE_TTA": "0",
+        "SEGMENTATION_TILE_STEP_SIZE": "0.5",
+    }, clear=True):
         command = server.build_predict_command(
             input_dir=Path("work/input"),
             output_dir=Path("work/output"),
@@ -146,6 +149,108 @@ def test_predict_worker_counts_have_safe_defaults_and_clamps():
         "SEGMENTATION_EXPORT_WORKERS": "bad",
     }):
         assert server.get_predict_worker_counts() == (2, 2)
+
+
+def test_fast_inference_profile_controls_nnunet_prediction_flags():
+    server = load_server_module()
+
+    with patch.dict(os.environ, {
+        "SEGMENTATION_INFERENCE_PROFILE": "fast",
+        "SEGMENTATION_NOT_ON_DEVICE": "1",
+    }, clear=True):
+        options = server.get_inference_options()
+        command = server.build_predict_command(
+            input_dir=Path("work/input"),
+            output_dir=Path("work/output"),
+            device="cuda",
+            model_dir=Path("runtime/model"),
+            inference_options=options,
+        )
+
+    assert options == {
+        "profile": "fast",
+        "tile_step_size": 1.0,
+        "disable_tta": True,
+        "not_on_device": True,
+    }
+    assert "-step_size" in command
+    assert command[command.index("-step_size") + 1] == "1"
+    assert "--disable_tta" in command
+    assert "--not_on_device" in command
+
+
+def test_prediction_cache_key_changes_with_inference_options():
+    server = load_server_module()
+    base_state = {
+        "checkpoint_dataset_name": "Dataset001_AMOS22",
+        "checkpoint_configuration": "3d_fullres",
+        "labels_source": "checkpoint",
+    }
+
+    with patch.object(server, "get_checkpoint_sha256", return_value="checkpoint-sha"):
+        quality_key = server.build_prediction_cache_key("input-sha", {
+            **base_state,
+            "inference_options": {
+                "profile": "quality",
+                "tile_step_size": 0.5,
+                "disable_tta": False,
+                "not_on_device": False,
+            },
+        })
+        fast_key = server.build_prediction_cache_key("input-sha", {
+            **base_state,
+            "inference_options": {
+                "profile": "fast",
+                "tile_step_size": 1.0,
+                "disable_tta": True,
+                "not_on_device": False,
+            },
+        })
+
+    assert quality_key != fast_key
+
+
+def test_legacy_reference_cache_requires_matching_summary_cache_key():
+    server = load_server_module()
+    temp_root = make_test_output_dir("legacy-cache-key-guard")
+    current_job_id = "current0001"
+    legacy_job_id = "009d4efdc5f6"
+    input_dir = temp_root / current_job_id / "input"
+    legacy_output = temp_root / legacy_job_id / "output"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    legacy_output.mkdir(parents=True, exist_ok=True)
+    debug_original = temp_root / "amos_0117.nii.gz"
+    input_path = input_dir / f"{current_job_id}_0000.nii.gz"
+    debug_original.write_bytes(b"same-debug-input")
+    input_path.write_bytes(b"same-debug-input")
+    (legacy_output / f"{legacy_job_id}.nii.gz").write_bytes(b"legacy-result")
+
+    with patch.object(server, "WORK_DIR", temp_root), \
+         patch.object(server, "DEBUG_ORIGINAL", debug_original):
+        assert server.find_cached_prediction("new-cache-key", input_path, current_job_id) is None
+
+
+def test_persistent_worker_key_includes_inference_options():
+    server = load_server_module()
+    quality_options = {
+        "profile": "quality",
+        "tile_step_size": 0.5,
+        "disable_tta": False,
+        "not_on_device": False,
+    }
+    fast_options = {
+        "profile": "fast",
+        "tile_step_size": 1.0,
+        "disable_tta": True,
+        "not_on_device": False,
+    }
+
+    quality_key = server.get_persistent_worker_key(Path("runtime/model"), quality_options)
+    fast_key = server.get_persistent_worker_key(Path("runtime/model"), fast_options)
+
+    assert quality_key != fast_key
+    assert quality_key[-3:] == (0.5, False, False)
+    assert fast_key[-3:] == (1.0, True, False)
 
 
 def test_same_file_content_uses_samefile_fast_path():
@@ -688,6 +793,10 @@ if __name__ == "__main__":
     test_create_job_rejects_when_model_is_not_ready()
     test_predict_command_uses_model_folder_and_job_io()
     test_predict_worker_counts_have_safe_defaults_and_clamps()
+    test_fast_inference_profile_controls_nnunet_prediction_flags()
+    test_prediction_cache_key_changes_with_inference_options()
+    test_legacy_reference_cache_requires_matching_summary_cache_key()
+    test_persistent_worker_key_includes_inference_options()
     test_same_file_content_uses_samefile_fast_path()
     test_job_phase_timings_are_recorded()
     test_project_checkpoint_is_preferred_as_weight_source()

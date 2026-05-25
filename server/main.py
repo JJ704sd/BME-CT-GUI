@@ -150,6 +150,7 @@ class Job:
   cache_key: str | None = None
   cached_result: bool = False
   cache_source_job_id: str | None = None
+  inference_options: dict[str, Any] = field(default_factory=dict)
   phase_started_at: dict[str, float] = field(default_factory=dict, repr=False)
   phase_timings: dict[str, float] = field(default_factory=dict)
   log_tail: str | None = None
@@ -165,7 +166,7 @@ jobs: dict[str, Job] = {}
 jobs_lock = threading.Lock()
 persistent_worker_lock = threading.Lock()
 persistent_worker_process: subprocess.Popen[str] | None = None
-persistent_worker_key: tuple[str, str, str, int, int] | None = None
+persistent_worker_key: tuple[str, str, str, int, int, float, bool, bool] | None = None
 persistent_worker_log_handle: Any | None = None
 
 
@@ -531,6 +532,7 @@ def build_job_summary(job: Job) -> dict[str, Any]:
     "cache_key": job.cache_key,
     "cached_result": job.cached_result,
     "cache_source_job_id": job.cache_source_job_id,
+    "inference_options": job.inference_options,
     "phase_timings": job.phase_timings,
     "result_ready": job.status == "succeeded" and job.result_path is not None and job.result_path.exists(),
     "result_path": str(job.result_path) if job.result_path else None,
@@ -846,6 +848,7 @@ def get_model_state() -> dict[str, Any]:
   checkpoint_source = get_checkpoint_source()
   checkpoint_args = load_checkpoint_init_args()
   checkpoint_plans = checkpoint_args.get("plans") if checkpoint_args else None
+  inference_options = get_inference_options()
   required_files = [
     ("dataset.json", FLARE_DATASET_JSON),
     ("plans.json", FLARE_PLANS_JSON),
@@ -885,6 +888,7 @@ def get_model_state() -> dict[str, Any]:
       "preprocess": get_predict_worker_counts()[0],
       "export": get_predict_worker_counts()[1],
     },
+    "inference_options": inference_options,
   }
 
 
@@ -899,6 +903,45 @@ def get_env_int(name: str, default: int, minimum: int = 1, maximum: int = 8) -> 
   except (TypeError, ValueError):
     value = default
   return max(minimum, min(maximum, value))
+
+
+def get_env_float(name: str, default: float, minimum: float, maximum: float) -> float:
+  try:
+    value = float(os.environ.get(name, str(default)).strip())
+  except (TypeError, ValueError):
+    value = default
+  return round(max(minimum, min(maximum, value)), 3)
+
+
+def get_env_bool(name: str, default: bool) -> bool:
+  raw = os.environ.get(name)
+  if raw is None:
+    return default
+  normalized = raw.strip().lower()
+  if normalized in {"1", "true", "yes", "on"}:
+    return True
+  if normalized in {"0", "false", "no", "off"}:
+    return False
+  return default
+
+
+def get_inference_options() -> dict[str, Any]:
+  profile = os.environ.get("SEGMENTATION_INFERENCE_PROFILE", "quality").strip().lower()
+  if profile not in {"quality", "fast"}:
+    profile = "quality"
+  fast_profile = profile == "fast"
+  return {
+    "profile": profile,
+    "tile_step_size": get_env_float("SEGMENTATION_TILE_STEP_SIZE", 1.0 if fast_profile else 0.5, 0.1, 1.0),
+    "disable_tta": get_env_bool("SEGMENTATION_DISABLE_TTA", fast_profile),
+    "not_on_device": get_env_bool("SEGMENTATION_NOT_ON_DEVICE", False),
+  }
+
+
+def format_cli_float(value: float) -> str:
+  if float(value).is_integer():
+    return str(int(value))
+  return f"{value:.3f}".rstrip("0").rstrip(".")
 
 
 def get_predict_worker_counts() -> tuple[int, int]:
@@ -916,10 +959,17 @@ def get_predict_environment() -> dict[str, str]:
   return env
 
 
-def build_predict_command(input_dir: Path, output_dir: Path, device: str | None = None, model_dir: Path | None = None) -> list[str]:
+def build_predict_command(
+  input_dir: Path,
+  output_dir: Path,
+  device: str | None = None,
+  model_dir: Path | None = None,
+  inference_options: dict[str, Any] | None = None,
+) -> list[str]:
   model_root = model_dir or FLARE_MODEL_DIR
   preprocess_workers, export_workers = get_predict_worker_counts()
-  return [
+  options = inference_options or get_inference_options()
+  command = [
     str(NNUNET_PYTHON_COMMAND),
     "-c",
     NNUNET_PREDICT_ENTRYPOINT,
@@ -933,15 +983,33 @@ def build_predict_command(input_dir: Path, output_dir: Path, device: str | None 
     "-device", device or get_predict_device(),
     "--disable_progress_bar",
   ]
+  tile_step_size = float(options.get("tile_step_size", 0.5))
+  if tile_step_size != 0.5:
+    command.extend(["-step_size", format_cli_float(tile_step_size)])
+  if bool(options.get("disable_tta", False)):
+    command.append("--disable_tta")
+  if bool(options.get("not_on_device", False)):
+    command.append("--not_on_device")
+  return command
 
 
 def persistent_worker_enabled() -> bool:
   return os.environ.get("SEGMENTATION_PERSISTENT_WORKER", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def get_persistent_worker_key(model_dir: Path) -> tuple[str, str, str, int, int]:
+def get_persistent_worker_key(model_dir: Path, inference_options: dict[str, Any] | None = None) -> tuple[str, str, str, int, int, float, bool, bool]:
   preprocess_workers, export_workers = get_predict_worker_counts()
-  return (str(model_dir), get_predict_device(), "checkpoint_best.pth", preprocess_workers, export_workers)
+  options = inference_options or get_inference_options()
+  return (
+    str(model_dir),
+    get_predict_device(),
+    "checkpoint_best.pth",
+    preprocess_workers,
+    export_workers,
+    float(options.get("tile_step_size", 0.5)),
+    bool(options.get("disable_tta", False)),
+    bool(options.get("not_on_device", False)),
+  )
 
 
 def close_persistent_worker_locked() -> None:
@@ -986,9 +1054,10 @@ def send_persistent_worker_request(process: subprocess.Popen[str], payload: dict
   process.stdin.flush()
 
 
-def ensure_persistent_worker(model_dir: Path) -> subprocess.Popen[str]:
+def ensure_persistent_worker(model_dir: Path, inference_options: dict[str, Any] | None = None) -> subprocess.Popen[str]:
   global persistent_worker_process, persistent_worker_key, persistent_worker_log_handle
-  key = get_persistent_worker_key(model_dir)
+  options = inference_options or get_inference_options()
+  key = get_persistent_worker_key(model_dir, options)
   if persistent_worker_process is not None and persistent_worker_process.poll() is None and persistent_worker_key == key:
     return persistent_worker_process
 
@@ -1016,6 +1085,9 @@ def ensure_persistent_worker(model_dir: Path) -> subprocess.Popen[str]:
     "checkpoint": "checkpoint_best.pth",
     "preprocess_workers": preprocess_workers,
     "export_workers": export_workers,
+    "tile_step_size": options.get("tile_step_size", 0.5),
+    "disable_tta": bool(options.get("disable_tta", False)),
+    "not_on_device": bool(options.get("not_on_device", False)),
   })
   event = read_persistent_worker_event(persistent_worker_process)
   if event.get("type") != "ready":
@@ -1027,7 +1099,8 @@ def ensure_persistent_worker(model_dir: Path) -> subprocess.Popen[str]:
 def run_persistent_worker_prediction(job: Job, input_dir: Path, output_dir: Path, model_dir: Path) -> subprocess.CompletedProcess[str]:
   with persistent_worker_lock:
     try:
-      process = ensure_persistent_worker(model_dir)
+      options = job.inference_options or get_inference_options()
+      process = ensure_persistent_worker(model_dir, options)
       with jobs_lock:
         job.process = process
       preprocess_workers, export_workers = get_predict_worker_counts()
@@ -1037,6 +1110,9 @@ def run_persistent_worker_prediction(job: Job, input_dir: Path, output_dir: Path
         "output_dir": str(output_dir),
         "preprocess_workers": preprocess_workers,
         "export_workers": export_workers,
+        "tile_step_size": options.get("tile_step_size", 0.5),
+        "disable_tta": bool(options.get("disable_tta", False)),
+        "not_on_device": bool(options.get("not_on_device", False)),
       })
       event = read_persistent_worker_event(process)
       if event.get("type") == "complete":
@@ -1091,6 +1167,7 @@ def build_prediction_cache_key(input_sha256: str, model_state: dict[str, Any] | 
     "checkpoint_dataset_name": state.get("checkpoint_dataset_name"),
     "checkpoint_configuration": state.get("checkpoint_configuration"),
     "labels_source": state.get("labels_source"),
+    "inference_options": state.get("inference_options") or get_inference_options(),
   }
   encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
   return hashlib.sha256(encoded).hexdigest()
@@ -1115,7 +1192,13 @@ def find_cached_prediction(cache_key: str, input_path: Path, current_job_id: str
 
   legacy_job_id = "009d4efdc5f6"
   legacy_result = WORK_DIR / legacy_job_id / "output" / f"{legacy_job_id}.nii.gz"
-  if is_debug_original_upload(input_path) and legacy_result.exists():
+  legacy_summary = read_persisted_job_summary(legacy_job_id)
+  if (
+    is_debug_original_upload(input_path) and
+    legacy_result.exists() and
+    legacy_summary and
+    legacy_summary.get("cache_key") == cache_key
+  ):
     validation = None
     validation_path = legacy_result.parent / "validation_summary.json"
     if validation_path.exists():
@@ -1254,7 +1337,7 @@ def run_real_job(job_id: str, input_path: Path) -> None:
       finish_job_phase(job, "persistent_worker")
     else:
       start_job_phase(job, "build_predict_command")
-      command = build_predict_command(input_dir, output_dir, model_dir=model_dir)
+      command = build_predict_command(input_dir, output_dir, model_dir=model_dir, inference_options=job.inference_options)
       finish_job_phase(job, "build_predict_command")
       push_event(job, {"type": "progress", "progress": 20, "stage": "nnUNetv2 命令运行中"})
       start_job_phase(job, "nnunet_process")
@@ -1423,6 +1506,7 @@ async def create_job(
     input_sha256=input_sha,
     checkpoint_sha256=get_checkpoint_sha256(),
     cache_key=cache_key,
+    inference_options=model_state.get("inference_options") or get_inference_options(),
   )
   with jobs_lock:
     jobs[job_id] = job
@@ -1439,6 +1523,7 @@ async def create_job(
       "model_status": model_state,
       "cached_result": True,
       "cache_source_job_id": job.cache_source_job_id,
+      "inference_options": job.inference_options,
     }
   thread = threading.Thread(target=run_real_job, args=(job_id, input_path), daemon=True)
   thread.start()
@@ -1451,6 +1536,7 @@ async def create_job(
     "mode": job.mode,
     "model_status": model_state,
     "cached_result": False,
+    "inference_options": job.inference_options,
   }
 
 
