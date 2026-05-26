@@ -1126,6 +1126,24 @@ h1 {
   opacity: var(--mask-opacity, 0.58);
 }
 
+.compare-split.has-mask .ortho-mask {
+  clip-path: inset(0 calc(100% - var(--compare-position, 52%)) 0 0);
+}
+
+.compare-split.has-mask .ortho-image-stage::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--compare-position, 52%);
+  z-index: 3;
+  width: 2px;
+  transform: translateX(-50%);
+  background: linear-gradient(180deg, transparent, #fff0b3 12%, #fff0b3 88%, transparent);
+  box-shadow: 0 0 12px rgba(255, 240, 179, 0.45);
+  pointer-events: none;
+}
+
 .compare-difference .ortho-source {
   filter: grayscale(1) contrast(1.08);
 }

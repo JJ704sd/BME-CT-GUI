@@ -5,15 +5,18 @@ const acceptancePath = new URL("../ACCEPTANCE.md", import.meta.url);
 const readmePath = new URL("../README.md", import.meta.url);
 const registryPath = new URL("../reference_cases.example.json", import.meta.url);
 const metricsSummaryPath = new URL("../SEGMENTATION_METRICS_SUMMARY.md", import.meta.url);
+const codeModuleGuidePath = new URL("../CODE_MODULE_GUIDE.md", import.meta.url);
 
 assert.equal(existsSync(acceptancePath), true, "ACCEPTANCE.md should document the three-goal验收包");
 assert.equal(existsSync(readmePath), true, "README.md should document current local inference controls");
 assert.equal(existsSync(registryPath), true, "reference_cases.example.json should show how to register more than AMOS");
 assert.equal(existsSync(metricsSummaryPath), true, "SEGMENTATION_METRICS_SUMMARY.md should document reusable segmentation metrics");
+assert.equal(existsSync(codeModuleGuidePath), true, "CODE_MODULE_GUIDE.md should support module-level code walkthroughs");
 
 const acceptance = readFileSync(acceptancePath, "utf8");
 const readme = readFileSync(readmePath, "utf8");
 const metricsSummary = readFileSync(metricsSummaryPath, "utf8");
+const codeModuleGuide = readFileSync(codeModuleGuidePath, "utf8");
 const registry = JSON.parse(readFileSync(registryPath, "utf8")) as {
   samples?: Array<Record<string, unknown>>;
 };
@@ -71,4 +74,15 @@ for (const required of [
   "前列腺/子宫"
 ]) {
   assert.equal(metricsSummary.includes(required), true, `SEGMENTATION_METRICS_SUMMARY.md should mention ${required}`);
+}
+
+for (const required of [
+  "src/main.tsx",
+  "src/components/OrthogonalViewer.tsx",
+  "src/imaging/sliceRenderer.ts",
+  "server/main.py",
+  "tools/segmentation_metrics_summary.py",
+  "requestAnimationFrame"
+]) {
+  assert.equal(codeModuleGuide.includes(required), true, `CODE_MODULE_GUIDE.md should mention ${required}`);
 }

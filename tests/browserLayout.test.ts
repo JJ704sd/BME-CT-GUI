@@ -62,6 +62,24 @@ function fixture() {
   `;
 }
 
+function splitFixture() {
+  const imageSrc = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
+  return `
+    <style>${css}</style>
+    <div class="ortho-canvas compare-split has-mask" style="width:400px; --compare-position:75%; --slice-aspect: 1 / 1; --slice-pixel-aspect: 1 / 1; --mask-opacity: .58;">
+      <div class="ortho-image-stage">
+        <img class="ortho-source" src="${imageSrc}" alt="">
+        <img class="ortho-mask" src="${imageSrc}" alt="">
+      </div>
+    </div>
+    <div class="ortho-canvas compare-split no-mask" style="width:400px; --compare-position:75%; --slice-aspect: 1 / 1; --slice-pixel-aspect: 1 / 1;">
+      <div class="ortho-image-stage">
+        <img class="ortho-source" src="${imageSrc}" alt="">
+      </div>
+    </div>
+  `;
+}
+
 type LayoutSnapshot = {
   viewport: { width: number; height: number };
   document: { clientWidth: number; scrollWidth: number };
@@ -70,6 +88,12 @@ type LayoutSnapshot = {
   panels: DOMRect[];
   canvases: DOMRect[];
   images: { objectFit: string; pointerEvents: string; userDrag: string | null }[];
+};
+
+type SplitSnapshot = {
+  clipPath: string;
+  dividerContent: string;
+  noMaskDividerContent: string;
 };
 
 async function snapshot(width: number, height: number): Promise<LayoutSnapshot> {
@@ -115,6 +139,26 @@ async function snapshot(width: number, height: number): Promise<LayoutSnapshot> 
   }
 }
 
+async function splitSnapshot(): Promise<SplitSnapshot> {
+  const browser = await chromium.launch(browserExecutable ? { executablePath: browserExecutable } : undefined);
+  const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
+  try {
+    await page.setContent(splitFixture(), { waitUntil: "load" });
+    return await page.evaluate(() => {
+      const mask = document.querySelector(".has-mask .ortho-mask")!;
+      const stageWithMask = document.querySelector(".has-mask .ortho-image-stage")!;
+      const stageWithoutMask = document.querySelector(".no-mask .ortho-image-stage")!;
+      return {
+        clipPath: getComputedStyle(mask).clipPath,
+        dividerContent: getComputedStyle(stageWithMask, "::after").content,
+        noMaskDividerContent: getComputedStyle(stageWithoutMask, "::after").content
+      };
+    });
+  } finally {
+    await browser.close();
+  }
+}
+
 const desktop = await snapshot(1366, 768);
 assert.equal(desktop.panels.length, 3);
 assert.ok(desktop.panels[0].left < desktop.panels[1].left, "desktop axial panel should occupy the left side");
@@ -137,3 +181,8 @@ for (const image of [...desktop.images, ...mobile.images]) {
   assert.equal(image.objectFit, "contain");
   assert.equal(image.pointerEvents, "none");
 }
+
+const split = await splitSnapshot();
+assert.notEqual(split.clipPath, "none", "orthogonal split mode should clip the mask layer");
+assert.notEqual(split.dividerContent, "none", "orthogonal split mode should show a divider when mask exists");
+assert.equal(split.noMaskDividerContent, "none", "orthogonal split mode should not show a divider without a mask");

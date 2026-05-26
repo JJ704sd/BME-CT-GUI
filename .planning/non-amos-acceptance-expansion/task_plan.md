@@ -11,12 +11,14 @@
 - [x] Confirm main baseline is already verified by `npm test` and `npm run build`.
 - [x] Confirm current tracked example registry only contains AMOS plus a placeholder external example.
 - [x] Confirm local `nnunetv2_files/` currently contains AMOS 0117 assets and the active checkpoint, but no confirmed non-AMOS acceptance case.
-- [ ] Identify candidate non-AMOS `.nii` / `.nii.gz` files.
-- [ ] Create a private local reference-case registry.
-- [ ] Validate `/api/samples` metadata for registered cases.
+- [x] Identify candidate non-AMOS `.nii` / `.nii.gz` files.
+- [x] Create a private local reference-case registry.
+- [x] Validate `/api/samples` metadata for registered cases.
 - [ ] Run manual GUI acceptance for each selected case.
 - [ ] Run segmentation metrics only for cases with compatible real labels.
-- [ ] Update acceptance and metrics documentation with evidence.
+- [x] Update acceptance and metrics documentation with evidence.
+- [x] Fix three-view interaction lag mitigation and split-mode visibility for real NIfTI views.
+- [x] Add module-level code walkthrough document: `CODE_MODULE_GUIDE.md`.
 
 ## Rules and Constraints
 
@@ -34,7 +36,7 @@ Goal: pick credible non-AMOS local cases before changing app behavior or documen
 
 Tasks:
 
-- [ ] Search for candidate NIfTI files outside the current AMOS-only inputs:
+- [x] Search for candidate NIfTI files outside the current AMOS-only inputs:
 
 ```powershell
 Get-ChildItem -Path 'D:\BME2026' -Recurse -File -Include *.nii,*.nii.gz |
@@ -42,7 +44,7 @@ Get-ChildItem -Path 'D:\BME2026' -Recurse -File -Include *.nii,*.nii.gz |
   Select-Object FullName, Length, LastWriteTime
 ```
 
-- [ ] For each candidate, record this table in `progress.md`:
+- [x] For each candidate, record this table in `progress.md`:
 
 | Field | Required value |
 |---|---|
@@ -54,15 +56,15 @@ Get-ChildItem -Path 'D:\BME2026' -Recurse -File -Include *.nii,*.nii.gz |
 | expected_validation | `metrics` when label taxonomy matches, otherwise `manual-only` |
 | notes | Anything about anatomy coverage, spacing, privacy, or uncertainty |
 
-- [ ] Select at least two cases if available:
+- [x] Select at least two cases if available:
   - One labeled case for metrics, if a compatible label exists.
   - One additional non-AMOS case for browser and inference workflow coverage.
 
 Acceptance checks:
 
-- [ ] Selected cases are not just copies of AMOS 0117.
-- [ ] Label availability is explicitly recorded.
-- [ ] Any taxonomy mismatch is treated as `manual-only`, not as failed model quality.
+- [x] Selected cases are not just copies of AMOS 0117.
+- [x] Label availability is explicitly recorded.
+- [x] Any taxonomy mismatch is treated as `manual-only`, not as failed model quality.
 
 ## Phase 2: Private Reference Registry
 
@@ -70,7 +72,7 @@ Goal: make selected cases available through `/api/samples` without exposing priv
 
 Tasks:
 
-- [ ] Create `nnunetv2_files/reference_cases.local.json` with this structure:
+- [x] Create `nnunetv2_files/reference_cases.local.json` with this structure:
 
 ```json
 {
@@ -98,7 +100,7 @@ Tasks:
 }
 ```
 
-- [ ] Start the backend with the private registry:
+- [x] Start the backend with the private registry:
 
 ```powershell
 $env:SEGMENTATION_REFERENCE_CASES_JSON = "D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\reference_cases.local.json"
@@ -109,7 +111,7 @@ $env:SEGMENTATION_EXPORT_WORKERS = "2"
 python -m uvicorn server.main:app --host 127.0.0.1 --port 8000
 ```
 
-- [ ] Confirm `/api/samples` exposes the case and correct `validation_available`:
+- [x] Confirm `/api/samples` exposes the case and correct `validation_available`:
 
 ```powershell
 Invoke-RestMethod 'http://127.0.0.1:8000/api/samples' | ConvertTo-Json -Depth 6
@@ -117,9 +119,9 @@ Invoke-RestMethod 'http://127.0.0.1:8000/api/samples' | ConvertTo-Json -Depth 6
 
 Acceptance checks:
 
-- [ ] Cases with both original and compatible label show `validation_available=true`.
-- [ ] Cases without labels show `validation_available=false`.
-- [ ] No private registry or true NIfTI path is staged for Git.
+- [ ] Cases with both original and compatible label show `validation_available=true` (not applicable until a compatible labeled case is found).
+- [x] Cases without labels or without compatible labels show `validation_available=false`.
+- [x] No private registry or true NIfTI path is staged for Git.
 
 ## Phase 3: GUI Acceptance Run
 
@@ -219,8 +221,8 @@ Goal: make the new evidence useful without overstating model generalization.
 
 Tasks:
 
-- [ ] Update `ACCEPTANCE.md` with non-AMOS manual acceptance records.
-- [ ] Update `SEGMENTATION_METRICS_SUMMARY.md` only for labeled compatible cases with real metrics.
+- [x] Update `ACCEPTANCE.md` with non-AMOS manual acceptance records.
+- [x] Update `SEGMENTATION_METRICS_SUMMARY.md` only with clearly marked FLARE22 taxonomy-remapped comparison metrics; do not treat them as backend automatic validation.
 - [ ] Update `README.md` only if the user-facing workflow changes; do not move the full experiment log into README.
 - [ ] Run focused checks:
 
@@ -242,6 +244,35 @@ Acceptance checks:
 - [ ] Documentation distinguishes AMOS evidence from non-AMOS evidence.
 - [ ] Unlabeled cases are manual-only.
 - [ ] No private imaging files, ignored outputs, or local registry files are staged.
+
+## Phase 6: GUI Interaction Performance and Split-mode Follow-up
+
+Goal: reduce visible cursor-move lag and make the `分屏` control observable in the real three-view NIfTI workflow.
+
+Tasks:
+
+- [x] Confirm root cause: high-frequency pointer movement can trigger synchronous NIfTI slice rasterization and preview thumbnail refresh.
+- [x] Coalesce three-view image rerendering with `requestAnimationFrame` while keeping crosshair feedback immediate.
+- [x] Coalesce selected axial slice preview updates per animation frame.
+- [x] Reuse the shared cached slice renderer for axial side/footer previews.
+- [x] Fix split mode in `OrthogonalViewer`: clip `.ortho-mask` by `--compare-position` when `maskVolume` exists.
+- [x] Avoid showing a fake split divider when only the original CT is loaded.
+- [x] Document the split-mode meaning: it is original-vs-mask sliding comparison, not Axial/Sagittal/Coronal layout switching.
+- [x] Add `CODE_MODULE_GUIDE.md` for code walkthroughs.
+
+Verification:
+
+- [x] `node tests/imagingLogic.test.ts`
+- [x] `node tests/acceptanceDocs.test.ts`
+- [x] `npm test`
+- [x] `npm run build`
+
+Acceptance checks:
+
+- [x] Split slider affects orthogonal mask clipping when a mask exists.
+- [x] No split divider appears when no mask exists.
+- [x] Crosshair uses immediate coordinates; heavy image rendering is frame-coalesced.
+- [x] Documentation records that metrics/inference results are unchanged by this GUI-only fix.
 
 ## Stop Conditions
 
