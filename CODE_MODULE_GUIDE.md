@@ -26,8 +26,9 @@
 
 本轮性能相关改动：
 
-- `handleVoxelCoordChange()` 先去重体素坐标，避免同一坐标重复触发 React 状态更新。
-- `scheduleSelectedSlice()` 使用 `requestAnimationFrame` 合并高频 z 切片更新。鼠标快速移动时，`voxelCoord` 仍快速响应十字线；右侧预览和底部缩略图按浏览器帧节奏更新，减少主线程被同步切片渲染阻塞。
+- `handleVoxelCoordChange()` 不再在每个 `pointermove` 上直接提交 `setVoxelCoord`，而是进入 `scheduleVoxelCoordChange()`。
+- `scheduleVoxelCoordChange()` 使用 `requestAnimationFrame` 合并高频体素坐标更新，每帧最多提交一次 `voxelCoord` 和由拖动派生的 `selectedSlice`。
+- `scheduleSelectedSlice()` 保留给非拖动路径的按帧 z 切片同步；主切片滑块和底部切片点击仍可正常驱动 z 坐标。
 
 讲解重点：
 
@@ -127,6 +128,7 @@
 - `AMOS_0117` 是有原生 label 的自动 validation 病例。
 - `FLARE22_Tr_0009` 当前只注册 original，不注册 label，因为 FLARE22 label ID 与 AMOS22 checkpoint 不同。
 - `shouldUpdateVoxelCoord()` 是本轮性能优化的基础小工具，用于阻止重复坐标更新。
+- `getVoxelCoordDragCommit()` 用于三视图拖动时的坐标裁剪、去重和 axial selected slice 推导，避免把该逻辑写死在 React 事件处理里。
 
 ## 8. 后端桥接：`server/main.py`
 
@@ -210,7 +212,8 @@ npm run build
 
 - 十字线位置继续绑定即时 `coord`，保持快速反馈。
 - 三视图图像重绘改用 `requestAnimationFrame` 合并坐标变化，只渲染最新一帧。
-- 主页面 `selectedSlice` 更新也按帧合并，避免右侧/底部预览在每个 pointer event 同步重绘。
+- 主页面 `voxelCoord` 与拖动派生的 `selectedSlice` 也按帧合并，避免右侧/底部预览在每个 pointer event 同步重绘。
+- `selectedSliceSyncSourceRef` 区分 voxel 驱动和 slice 驱动同步，防止旧 selected slice 反向覆盖矢状/冠状拖动中的最新 z 坐标。
 - axial 预览改用 `src/imaging/sliceRenderer.ts` 的缓存渲染函数，避免重复渲染已生成切片。
 
 验证结果：

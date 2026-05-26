@@ -1836,6 +1836,28 @@ FLARE22 label ID 与当前 AMOS22 checkpoint 不一致：
 - `npm run build`：通过。
 - `git diff --check`：通过。
 
+## 三十七、2026-05-26 三视图拖动卡顿二次修复
+
+### 37.1 现象和根因
+
+用户在上一轮回跳修复后继续反馈：拖动三视图时仍有卡顿，尤其在矢状面/冠状面快速移动时，CT 图像跟随有延迟。复查后确认上一轮只修复了 `selectedSlice` 延迟回写导致的 z 坐标回跳，但 `handleVoxelCoordChange()` 仍会在每个 `pointermove` 上立即提交 React 状态。这样会让 `App` 父组件、三视图读数、右侧 axial 预览和底部切片状态按指针事件频率重渲染；当新切片未命中缓存时，还会同步执行 NIfTI 像素遍历和 `canvas.toDataURL()`，主线程容易被占满。
+
+### 37.2 本轮修复
+
+- `src/viewerLogic.ts` 新增 `getVoxelCoordDragCommit()`，把拖动坐标的边界裁剪、去重和 axial 切片推导抽成可测试纯函数。
+- `src/main.tsx` 新增 `voxelCoordRef`、`pendingVoxelCoordRef` 和 `voxelCoordFrameRef`，拖动时只记录最新坐标，每个 `requestAnimationFrame` 最多提交一次 React 状态。
+- `voxelCoord` 与由拖动派生的 `selectedSlice` 在同一个 rAF 提交周期内更新，避免父组件在单个指针事件流中被多次同步刷新。
+- 若用户在下一帧前把光标移回原坐标，会清空待提交坐标，避免提交过时中间帧。
+- 保留上一轮 `selectedSliceSyncSourceRef` 逻辑，确保 voxel 驱动同步不会反向覆盖最新 z 坐标；滑块/底部切片点击仍按 slice 驱动更新 z。
+
+### 37.3 验证
+
+- `node tests/imagingLogic.test.ts`：先失败后通过，新增覆盖拖动坐标合并提交、边界裁剪、selected slice 推导和禁止同步提交 `setVoxelCoord(clampedCoord)`。
+- `npm test`：通过，包含浏览器布局/三视图相关 smoke。
+- `npm run build`：通过。
+- `git diff --check`：通过。
+- 本轮仅改变前端交互渲染节奏，不改变 nnUNetv2 推理、validation、Dice/IoU/Hausdorff 指标或 FLARE22 taxonomy remap。
+
 ---
 
 *文档版本：2026-05-26*

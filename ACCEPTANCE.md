@@ -373,3 +373,24 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\checkpoint_best.
 - 三视图拖动时，十字线和体素坐标以最新 `voxelCoord` 为准。
 - 右侧 axial 预览和底部缩略图仍按帧同步，但不再反向覆盖正在拖动的矢状/冠状坐标。
 - 本改动不改变 nnUNetv2 推理、validation、Dice/IoU/Hausdorff 指标或 FLARE22 taxonomy remap。
+
+## 2026-05-26 三视图拖动卡顿二次修复记录
+
+范围：
+
+- 修复上一轮回跳修复后，快速拖动三视图仍会按每个 `pointermove` 同步刷新父组件导致的卡顿。
+- 保持十字线、体素坐标、主切片滑块和底部切片入口之间的联动语义不变。
+
+验收证据：
+
+| 检查项 | 结果 |
+|---|---|
+| 根因 | `handleVoxelCoordChange()` 每个指针事件立即提交 `voxelCoord`，带动父组件、右侧 axial 预览和底部状态高频重渲染。 |
+| 回归测试 | `tests/imagingLogic.test.ts` 覆盖 `getVoxelCoordDragCommit()`、rAF 坐标合并入口和禁止同步提交旧 `clampedCoord`。 |
+| 自动验证 | `node tests/imagingLogic.test.ts`、`npm test`、`npm run build`、`git diff --check` 均通过。 |
+
+行为边界：
+
+- 三视图拖动坐标每帧最多提交一次 React 状态，快速拖动时只保留最新待提交坐标。
+- 如果下一帧前回到原坐标，待提交中间坐标会被清空，不会再触发过时切片渲染。
+- 本改动只影响前端渲染调度，不改变 nnUNetv2 推理、validation、Dice/IoU/Hausdorff 指标或 FLARE22 taxonomy remap。

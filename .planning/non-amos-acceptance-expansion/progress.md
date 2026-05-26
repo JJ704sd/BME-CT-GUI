@@ -129,3 +129,21 @@
   - `npm test`
   - `npm run build`
   - `git diff --check`
+
+## 2026-05-26 三视图拖动卡顿二次修复
+
+- 用户继续反馈：上一轮回跳修复后，三视图快速拖动仍有可见卡顿。
+- 根因复查：
+  - `OrthogonalViewer` 内部切片图像已经按 rAF 合并，但 `main.tsx` 的 `handleVoxelCoordChange()` 仍会在每个 `pointermove` 上立即提交 `setVoxelCoord`。
+  - 该同步提交会带动 `App` 父组件、三视图读数、右侧 axial 预览和底部切片状态高频重渲染。
+  - 未命中缓存的新切片仍可能触发 NIfTI 像素遍历和 `canvas.toDataURL()`，造成主线程压力。
+- 已实现：
+  - `src/viewerLogic.ts` 新增 `getVoxelCoordDragCommit()`，统一裁剪、去重和 selected slice 推导。
+  - `src/main.tsx` 新增 rAF 级 `scheduleVoxelCoordChange()`，拖动时只保留最新待提交坐标，每帧最多更新一次 React 状态。
+  - 拖动派生的 `voxelCoord` 和 `selectedSlice` 在同一帧提交，继续保留 source-aware selected-slice sync，避免 z 回跳。
+- 验证完成：
+  - `node tests/imagingLogic.test.ts`
+  - `npm test`
+  - `npm run build`
+  - `git diff --check`
+- 指标边界：本轮不改变 nnUNetv2 推理、validation、Dice/IoU/Hausdorff 或 FLARE22 taxonomy-remap 数据。

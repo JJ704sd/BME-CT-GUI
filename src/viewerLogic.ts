@@ -41,6 +41,27 @@ export function getVoxelCoordForSelectedSliceSync(
   };
 }
 
+export function getVoxelCoordDragCommit(
+  current: DisplayVoxelCoord,
+  next: DisplayVoxelCoord,
+  volume: Pick<DisplayGridVolume, "columns" | "rows" | "slices">
+) {
+  const coord = {
+    x: clampIndex(next.x, volume.columns),
+    y: clampIndex(next.y, volume.rows),
+    z: clampIndex(next.z, volume.slices)
+  };
+
+  if (!shouldUpdateVoxelCoord(current, coord)) {
+    return null;
+  }
+
+  return {
+    coord,
+    selectedSlice: getSelectedSliceForVoxelCoord(coord, volume.slices)
+  };
+}
+
 export function volumesShareDisplayGrid(source: DisplayGridVolume, result: DisplayGridVolume) {
   return source.columns === result.columns
     && source.rows === result.rows
