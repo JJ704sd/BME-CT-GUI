@@ -1,10 +1,10 @@
-# Segmentation Experiment Comparison
+# 分割实验对比
 
-Generated: 2026-05-26
+生成日期：2026-05-26
 
-This document collects the historical segmentation experiment records for quick comparison. It is intended as a companion to `SEGMENTATION_METRICS_SUMMARY.md`: that file records the latest summary and command context, while this file keeps the cross-run comparison table.
+本文档汇总历史分割实验记录，便于横向比较。它与 `SEGMENTATION_METRICS_SUMMARY.md` 配套使用：后者记录当前指标摘要和命令上下文，本文保留跨轮次对比表。
 
-## Data Sources
+## 数据来源
 
 - `.test-output\acceptance-real-20260524-194750\work\32dfe3117b40\output\job_summary.json`
 - `.test-output\perf-persistent-20260524-200515\work\a4b3806cfe1f\output\job_summary.json`
@@ -13,46 +13,46 @@ This document collects the historical segmentation experiment records for quick 
 - `.test-output\segmentation-metrics-fast-profile-20260525-1312\fast-profile-amos0117-segmentation-metrics.md`
 - `.test-output\segmentation-metrics-quality-profile-20260525-1433\quality-profile-amos0117-segmentation-metrics.md`
 - `.test-output\flare22-tr-0009-quality-20260526\metrics-remapped\flare22-tr-0009-quality-remapped-segmentation-metrics.md`
-- `.test-output\*\job_summary.json` for runtime, status, cache, and validation metadata.
+- `.test-output\*\job_summary.json`：用于核对运行时间、状态、缓存和验证元数据。
 
-Notes:
+说明：
 
-- Old acceptance and old persistent runs only contain per-label Dice and voxel counts in `job_summary.json`; they do not include per-label IoU or Hausdorff Distance.
-- AMOS 0117 records use the native checkpoint label taxonomy.
-- FLARE22 Tr 0009 uses an offline organ-name remap into AMOS label IDs. It is useful as cross-dataset evidence, but should not be mixed directly with native AMOS validation.
-- `N/A` means both prediction and reference are empty for that label. `0.000000` means the run predicted voxels for a label that was absent in the reference.
+- 旧验收和旧 persistent 运行的 `job_summary.json` 只包含逐标签 Dice 和体素数，不包含逐标签 IoU 或 Hausdorff Distance。
+- AMOS 0117 记录使用当前 checkpoint 原生标签体系。
+- FLARE22 Tr 0009 使用离线器官名映射，把 FLARE22 label 映射到 AMOS label ID。它可以作为跨数据集证据，但不能直接和 AMOS 原生验证混算。
+- `N/A` 表示该标签在预测和参考中均为空。`0.000000` 表示参考中没有该标签，但预测产生了体素。
 
-## Experiment Name Guide
+## 实验名称说明
 
-Use this table when reading the comparison columns or debugging a historical result. The short names in later tables are intentionally compact, but each one maps to a specific purpose.
+阅读对比表或排查历史结果时，先看本表。后续表格使用较短名称，但每个名称都对应明确实验目的。
 
-| Short name | Plain meaning | When to check it | Source run |
+| 简称 | 含义 | 适用场景 | 来源运行 |
 |---|---|---|---|
 | 旧模型首跑 | 旧 checkpoint / 旧推理流程的第一次有效 AMOS 0117 验证 | 排查“为什么旧结果没过阈值”或对比新权重提升幅度 | `acceptance-real-20260524-194750`, job `32dfe3117b40` |
 | 旧模型常驻 | 旧 checkpoint 在 persistent worker 流程下的复测 | 判断旧结果问题是否来自 worker 流程；结果与旧模型首跑基本一致 | `perf-persistent-20260524-200515`, job `a4b3806cfe1f` |
 | 新权重首跑 | 更换到当前 checkpoint 后的第一次完整 AMOS 0117 验证 | 查看新权重相对旧模型的主要提升，尤其胃、食管、肾上腺 | `acceptance-new-weight-20260524-201714`, job `27216eb73220` |
 | 新权重补算 | 同一新权重在 no-cache / warm persistent 场景下的补充指标 | 排查超时、缓存关闭或 warm worker 场景；指标应接近新权重首跑 | `segmentation-metrics-warm-timeout-20260524-2257`, job `685426290aa4` |
-| 快速预览 | fast profile：关闭 TTA、较大 tile step，优先速度 | 排查演示/预览模式；不要作为正式质量结论，注意 label 14/15 假阳性 | `perf-fast-profile-20260525-1305`, job `6802e01f1a73` |
-| 正式质量 | quality profile：开启 TTA、较稳的正式推理配置 | 正式报告、验收截图、基准对比优先使用这一列 | `perf-quality-profile-20260525-1330`, job `b3c528cc9e20` |
+| 快速预览 | `fast` profile：关闭 TTA、较大 tile step，优先速度 | 排查演示/预览模式；不要作为正式质量结论，注意 label 14/15 假阳性 | `perf-fast-profile-20260525-1305`, job `6802e01f1a73` |
+| 正式质量 | `quality` profile：开启 TTA、较稳的正式推理配置 | 正式报告、验收截图、基准对比优先使用这一列 | `perf-quality-profile-20260525-1330`, job `b3c528cc9e20` |
 | 跨数据集 FLARE | FLARE22 病例按器官名 remap 到 AMOS 标签后的离线对照 | 排查模型在非 AMOS 数据上的泛化趋势；不能直接和 AMOS 原生验证混算 | `flare22-tr-0009-quality-20260526`, job `86b0153d0a73` |
 
-## Experiment Overview
+## 实验总览
 
-| Run | Job ID | Sample | Profile / mode | Status | Cached | Duration (s) | Mean Dice | Min Dice | Foreground Dice | Mean IoU | Voxel Accuracy | Mean HD (mm) |
+| 运行 | Job ID | 病例 | 推理配置/模式 | 状态 | 是否缓存 | 耗时（秒） | 平均 Dice | 最低 Dice | 前景 Dice | 平均 IoU | 体素准确率 | 平均 HD（mm） |
 |---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
 | 旧模型首跑 | `32dfe3117b40` | AMOS 0117 | real-nnUNetv2 | review | false | 359.425 | 0.891305 | 0.555910 | 0.971220 | N/A | N/A | N/A |
 | 旧模型首跑缓存 | `c8cecb040657` | AMOS 0117 | cached-real-nnUNetv2 | review | true | 0.000 | 0.891305 | 0.555910 | 0.971220 | N/A | N/A | N/A |
 | 旧模型常驻 | `a4b3806cfe1f` | AMOS 0117 | real-nnUNetv2 | review | false | 356.950 | 0.891327 | 0.555985 | 0.971222 | N/A | N/A | N/A |
 | 新权重首跑 | `27216eb73220` | AMOS 0117 | real-nnUNetv2 | passed | false | 1124.327 | 0.924791 | 0.846551 | 0.980316 | 0.865105 | 0.998578 | 7.716048 |
 | 新权重缓存 | `f200f16f47be` | AMOS 0117 | cached-real-nnUNetv2 | passed | true | 0.000 | 0.924791 | 0.846551 | 0.980316 | N/A | N/A | N/A |
-| 新权重补算 | `685426290aa4` | AMOS 0117 | real-nnUNetv2 | metrics available after timeout | false | >=1800.785 | 0.924782 | 0.846540 | 0.980316 | 0.865092 | 0.998578 | 7.716048 |
+| 新权重补算 | `685426290aa4` | AMOS 0117 | real-nnUNetv2 | timeout 后补算指标可用 | false | >=1800.785 | 0.924782 | 0.846540 | 0.980316 | 0.865092 | 0.998578 | 7.716048 |
 | 快速预览 | `6802e01f1a73` | AMOS 0117 | fast, TTA off | review | false | 384.345 | 0.777243 | 0.000000 | 0.972898 | 0.713592 | 0.998068 | 10.282058 |
 | 正式质量 | `b3c528cc9e20` | AMOS 0117 | quality, TTA on | passed | false | 1360.398 | 0.924780 | 0.846569 | 0.980317 | 0.865088 | 0.998578 | 7.716048 |
-| 跨数据集 FLARE | `86b0153d0a73` | FLARE22 Tr 0009 | quality, offline remap | comparison only | false | 237.323 | 0.893127 | 0.673730 | 0.949908 | 0.815941 | 0.991879 | 12.595149 |
+| 跨数据集 FLARE | `86b0153d0a73` | FLARE22 Tr 0009 | quality，离线 remap | 仅作对照 | false | 237.323 | 0.893127 | 0.673730 | 0.949908 | 0.815941 | 0.991879 | 12.595149 |
 
-## Per-label Dice Comparison
+## 逐标签 Dice 对比
 
-| Label | Organ | 旧模型首跑 | 旧模型常驻 | 新权重首跑 | 新权重补算 | 快速预览 | 正式质量 | 跨数据集 FLARE |
+| 标签 | 器官 | 旧模型首跑 | 旧模型常驻 | 新权重首跑 | 新权重补算 | 快速预览 | 正式质量 | 跨数据集 FLARE |
 |---:|---|---:|---:|---:|---:|---:|---:|---:|
 | 1 | 脾脏 | 0.979075 | 0.979085 | 0.985234 | 0.985251 | 0.982458 | 0.985242 | 0.965952 |
 | 2 | 右肾 | 0.978732 | 0.978704 | 0.982296 | 0.982287 | 0.980218 | 0.982291 | 0.945245 |
@@ -70,11 +70,11 @@ Use this table when reading the comparison columns or debugging a historical res
 | 14 | 膀胱 | N/A | N/A | N/A | N/A | 0.000000 | N/A | N/A |
 | 15 | 前列腺/子宫 | N/A | N/A | N/A | N/A | 0.000000 | N/A | N/A |
 
-## Old Acceptance Details
+## 旧模型首跑详情
 
-Run: `acceptance-real-20260524-194750`, job `32dfe3117b40`
+运行：`acceptance-real-20260524-194750`，job `32dfe3117b40`
 
-| Label | Organ | Dice | Pred voxels | Ref voxels |
+| 标签 | 器官 | Dice | 预测体素 | 参考体素 |
 |---:|---|---:|---:|---:|
 | 1 | 脾脏 | 0.979075 | 200907 | 202345 |
 | 2 | 右肾 | 0.978732 | 107369 | 106851 |
@@ -92,11 +92,11 @@ Run: `acceptance-real-20260524-194750`, job `32dfe3117b40`
 | 14 | 膀胱 | N/A | 0 | 0 |
 | 15 | 前列腺/子宫 | N/A | 0 | 0 |
 
-## Old Persistent Details
+## 旧模型常驻详情
 
-Run: `perf-persistent-20260524-200515`, job `a4b3806cfe1f`
+运行：`perf-persistent-20260524-200515`，job `a4b3806cfe1f`
 
-| Label | Organ | Dice | Pred voxels | Ref voxels |
+| 标签 | 器官 | Dice | 预测体素 | 参考体素 |
 |---:|---|---:|---:|---:|
 | 1 | 脾脏 | 0.979085 | 200911 | 202345 |
 | 2 | 右肾 | 0.978704 | 107369 | 106851 |
@@ -114,11 +114,11 @@ Run: `perf-persistent-20260524-200515`, job `a4b3806cfe1f`
 | 14 | 膀胱 | N/A | 0 | 0 |
 | 15 | 前列腺/子宫 | N/A | 0 | 0 |
 
-## New Weight Details
+## 新权重首跑详情
 
-Run: `segmentation-metrics-new-weight-20260524-2215`, job `27216eb73220`
+运行：`segmentation-metrics-new-weight-20260524-2215`，job `27216eb73220`
 
-| Label | Organ | Dice | IoU | HD mm | Pred voxels | Ref voxels |
+| 标签 | 器官 | Dice | IoU | HD mm | 预测体素 | 参考体素 |
 |---:|---|---:|---:|---:|---:|---:|
 | 1 | 脾脏 | 0.985234 | 0.970898 | 5.025721 | 201624 | 202345 |
 | 2 | 右肾 | 0.982296 | 0.965208 | 7.090247 | 108355 | 106851 |
@@ -136,11 +136,11 @@ Run: `segmentation-metrics-new-weight-20260524-2215`, job `27216eb73220`
 | 14 | 膀胱 | N/A | N/A | N/A | 0 | 0 |
 | 15 | 前列腺/子宫 | N/A | N/A | N/A | 0 | 0 |
 
-## Warm No-cache Details
+## 新权重补算详情
 
-Run: `segmentation-metrics-warm-timeout-20260524-2257`, job `685426290aa4`
+运行：`segmentation-metrics-warm-timeout-20260524-2257`，job `685426290aa4`
 
-| Label | Organ | Dice | IoU | HD mm | Pred voxels | Ref voxels |
+| 标签 | 器官 | Dice | IoU | HD mm | 预测体素 | 参考体素 |
 |---:|---|---:|---:|---:|---:|---:|
 | 1 | 脾脏 | 0.985251 | 0.970932 | 5.025721 | 201627 | 202345 |
 | 2 | 右肾 | 0.982287 | 0.965190 | 7.090247 | 108355 | 106851 |
@@ -158,11 +158,11 @@ Run: `segmentation-metrics-warm-timeout-20260524-2257`, job `685426290aa4`
 | 14 | 膀胱 | N/A | N/A | N/A | 0 | 0 |
 | 15 | 前列腺/子宫 | N/A | N/A | N/A | 0 | 0 |
 
-## Fast Profile Details
+## 快速预览详情
 
-Run: `segmentation-metrics-fast-profile-20260525-1312`, job `6802e01f1a73`
+运行：`segmentation-metrics-fast-profile-20260525-1312`，job `6802e01f1a73`
 
-| Label | Organ | Dice | IoU | HD mm | Pred voxels | Ref voxels |
+| 标签 | 器官 | Dice | IoU | HD mm | 预测体素 | 参考体素 |
 |---:|---|---:|---:|---:|---:|---:|
 | 1 | 脾脏 | 0.982458 | 0.965522 | 6.423376 | 202407 | 202345 |
 | 2 | 右肾 | 0.980218 | 0.961203 | 6.218303 | 108695 | 106851 |
@@ -180,11 +180,11 @@ Run: `segmentation-metrics-fast-profile-20260525-1312`, job `6802e01f1a73`
 | 14 | 膀胱 | 0.000000 | 0.000000 | N/A | 664 | 0 |
 | 15 | 前列腺/子宫 | 0.000000 | 0.000000 | N/A | 670 | 0 |
 
-## Quality Profile Details
+## 正式质量详情
 
-Run: `segmentation-metrics-quality-profile-20260525-1433`, job `b3c528cc9e20`
+运行：`segmentation-metrics-quality-profile-20260525-1433`，job `b3c528cc9e20`
 
-| Label | Organ | Dice | IoU | HD mm | Pred voxels | Ref voxels |
+| 标签 | 器官 | Dice | IoU | HD mm | 预测体素 | 参考体素 |
 |---:|---|---:|---:|---:|---:|---:|
 | 1 | 脾脏 | 0.985242 | 0.970912 | 5.025721 | 201627 | 202345 |
 | 2 | 右肾 | 0.982291 | 0.965199 | 7.090247 | 108354 | 106851 |
@@ -202,11 +202,11 @@ Run: `segmentation-metrics-quality-profile-20260525-1433`, job `b3c528cc9e20`
 | 14 | 膀胱 | N/A | N/A | N/A | 0 | 0 |
 | 15 | 前列腺/子宫 | N/A | N/A | N/A | 0 | 0 |
 
-## FLARE22 Tr 0009 Remap Details
+## FLARE22 Tr 0009 重映射详情
 
-Run: `flare22-tr-0009-quality-20260526`, job `86b0153d0a73`
+运行：`flare22-tr-0009-quality-20260526`，job `86b0153d0a73`
 
-| Label | Organ | Dice | IoU | HD mm | Pred voxels | Ref voxels |
+| 标签 | 器官 | Dice | IoU | HD mm | 预测体素 | 参考体素 |
 |---:|---|---:|---:|---:|---:|---:|
 | 1 | 脾脏 | 0.965952 | 0.934146 | 5.064649 | 94799 | 90086 |
 | 2 | 右肾 | 0.945245 | 0.896175 | 12.998884 | 108115 | 118275 |
@@ -224,25 +224,32 @@ Run: `flare22-tr-0009-quality-20260526`, job `86b0153d0a73`
 | 14 | 膀胱 | N/A | N/A | N/A | 0 | 0 |
 | 15 | 前列腺/子宫 | N/A | N/A | N/A | 0 | 0 |
 
-## Interpretation
+## 结论解读
 
-- The new checkpoint is the main historical improvement. The weakest AMOS label changed from stomach Dice about `0.556` in the old runs to about `0.8465` in the new weight and quality runs.
-- The quality profile should remain the baseline for formal reporting. It reproduces the new-weight metrics closely and avoids the label 14/15 false positives seen in fast mode.
-- The fast profile is useful for speed-sensitive preview work. It reduced runtime from `1360.398s` to `384.345s`, but lowered mean Dice from `0.924780` to `0.777243` and introduced bladder/prostate-or-uterus false positives.
-- FLARE22 Tr 0009 remap shows useful cross-dataset behavior, but the taxonomy remap and missing labels mean it is not equivalent to native AMOS validation. Its weakest labels were duodenum, pancreas, and esophagus.
+- 新 checkpoint 是历史结果中的主要提升点。AMOS 最弱标签从旧模型胃 Dice 约 `0.556` 提升到新权重和正式质量配置中的约 `0.8465`。
+- `quality` profile 应继续作为正式报告基线。它与新权重首跑指标接近，并避免了 fast 模式下 label 14/15 的假阳性。
+- `fast` profile 适合速度敏感的预览工作。它把耗时从 `1360.398s` 降到 `384.345s`，但 mean Dice 从 `0.924780` 降到 `0.777243`，并引入膀胱/前列腺或子宫假阳性。
+- FLARE22 Tr 0009 remap 展示了有价值的跨数据集表现，但 taxonomy remap 和缺失标签意味着它不等同于 AMOS 原生验证。该例最弱标签为十二指肠、胰腺和食管。
 
-## 2026-05-26 Audit Notes
+## 2026-05-26 审核记录
 
-- Reviewed this comparison against `SEGMENTATION_METRICS_SUMMARY.md` and `REVIEW.md`; the shared numeric values and interpretation boundaries are aligned.
-- `quality profile b3c528cc9e20` remains the formal AMOS baseline.
-- `flare22-tr-0009-quality-20260526` remains cross-dataset evidence only. It uses an offline organ-name remap into AMOS label IDs and must not be mixed into native AMOS validation tables.
-- `fast profile 6802e01f1a73` remains a preview/demo option only because it introduced label 14/15 false positives and lower aggregate quality.
+- 已与 `SEGMENTATION_METRICS_SUMMARY.md` 和 `REVIEW.md` 交叉审核；共享数值和解释边界一致。
+- `quality` profile `b3c528cc9e20` 仍是正式 AMOS 基线。
+- `flare22-tr-0009-quality-20260526` 仍仅作为跨数据集证据。它使用离线器官名 remap 到 AMOS label ID，不能混入 AMOS 原生验证表。
+- `fast` profile `6802e01f1a73` 仍仅作为预览/演示选项，因为它引入 label 14/15 假阳性且整体质量下降。
 
-## Recommended Baselines
+## 2026-05-26 GUI 拖动修复审核记录
 
-| Purpose | Recommended run | Reason |
+- 本轮矢状/冠状拖动卡顿修复只改变前端三视图渲染调度，不改变本文件中任何推理实验数值。
+- 拖动期间三视图仍实时变化，只是使用 `interactive` 轻量预览；释放后恢复完整质量，实验指标表不受影响。
+- `quality`、`fast`、FLARE22 remap 的对比口径继续沿用上方说明：正式 AMOS 报告看 `quality`，快速预览需复核，FLARE22 只作为跨数据集器官名重映射证据。
+- 文档主体已复核为中文；保留 Dice、IoU、HD、profile、job id、checkpoint 等必要技术字段。
+
+## 推荐基线
+
+| 用途 | 推荐运行 | 原因 |
 |---|---|---|
-| Formal AMOS report | quality profile `b3c528cc9e20` | Highest stable AMOS validation profile with full metrics and no label 14/15 false positives. |
-| Historical model comparison | old persistent vs quality profile | Shows the major gain from the old model/process to the current quality baseline. |
-| Demo / quick preview | fast profile `6802e01f1a73` | Much faster, but must be labeled as review-only. |
-| Cross-dataset evidence | FLARE22 remap `86b0153d0a73` | Useful for external organ-name-aligned checking, not for native AMOS score claims. |
+| 正式 AMOS 报告 | `quality` profile `b3c528cc9e20` | 当前稳定 AMOS 验证配置，指标完整，且没有 label 14/15 假阳性。 |
+| 历史模型对比 | 旧模型常驻 vs `quality` profile | 展示旧模型/旧流程到当前质量基线的主要提升。 |
+| 演示/快速预览 | `fast` profile `6802e01f1a73` | 明显更快，但必须标注为需复核。 |
+| 跨数据集证据 | FLARE22 remap `86b0153d0a73` | 适合做外部器官名对齐检查，不能用于 AMOS 原生分数声明。 |

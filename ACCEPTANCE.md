@@ -352,3 +352,66 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\checkpoint_best.
 - FLARE22 Tr 0009 的后端在线推理链路通过，结果可下载，且未命中历史缓存。
 - 该病例不是 AMOS 原生标签验收；自动 Dice 验证被正确关闭。
 - Remapped 指标显示总体可用，但 duodenum 低于 `0.70`，pancreas/esophagus 约 `0.81`，正式报告仍需人工复核三正交视图和局部边界。
+
+## 2026-05-26 矢状/冠状拖动回跳修复记录
+
+范围：
+
+- 修复矢状面或冠状面快速拖动时，旧 `selectedSlice` 延迟回写导致 `voxelCoord.z` 被拉回的问题。
+- 保持三视图拖动和主切片滑块两种交互路径可用。
+
+验收证据：
+
+| 检查项 | 结果 |
+|---|---|
+| 根因 | `voxelCoord.z` 与 `selectedSlice` 双向同步发生延迟回写，不是 nnUNetv2 推理或 NIfTI 标签体系问题。 |
+| 回归测试 | `tests/imagingLogic.test.ts` 覆盖 voxel 驱动同步不得回退 z 坐标、slice 驱动同步仍可更新 z 坐标。 |
+| 自动验证 | `node tests/imagingLogic.test.ts`、`npm test`、`npm run build` 均通过。 |
+
+行为边界：
+
+- 三视图拖动时，十字线和体素坐标以最新 `voxelCoord` 为准。
+- 右侧 axial 预览和底部缩略图仍按帧同步，但不再反向覆盖正在拖动的矢状/冠状坐标。
+- 本改动不改变 nnUNetv2 推理、validation、Dice/IoU/Hausdorff 指标或 FLARE22 taxonomy remap。
+
+## 2026-05-26 三视图拖动卡顿二次修复记录
+
+范围：
+
+- 修复上一轮回跳修复后，快速拖动三视图仍会按每个 `pointermove` 同步刷新父组件导致的卡顿。
+- 保持十字线、体素坐标、主切片滑块和底部切片入口之间的联动语义不变。
+
+验收证据：
+
+| 检查项 | 结果 |
+|---|---|
+| 根因 | `handleVoxelCoordChange()` 每个指针事件立即提交 `voxelCoord`，带动父组件、右侧 axial 预览和底部状态高频重渲染。 |
+| 回归测试 | `tests/imagingLogic.test.ts` 覆盖 `getVoxelCoordDragCommit()`、rAF 坐标合并入口和禁止同步提交旧 `clampedCoord`。 |
+| 自动验证 | `node tests/imagingLogic.test.ts`、`npm test`、`npm run build`、`git diff --check` 均通过。 |
+
+行为边界：
+
+- 三视图拖动坐标每帧最多提交一次 React 状态，快速拖动时只保留最新待提交坐标。
+- 如果下一帧前回到原坐标，待提交中间坐标会被清空，不会再触发过时切片渲染。
+- 本改动只影响前端渲染调度，不改变 nnUNetv2 推理、validation、Dice/IoU/Hausdorff 指标或 FLARE22 taxonomy remap。
+
+## 2026-05-26 矢状/冠状拖动卡顿三次修复记录
+
+范围：
+
+- 修复矢状面、冠状面拖动时仍比横断面更容易卡顿的问题。
+- 保持三视图实时变化和十字线即时联动，同时降低拖动期间的图像重绘压力。
+
+验收证据：
+
+| 检查项 | 结果 |
+|---|---|
+| 根因 | 横断面拖动多为 `x/y` 变化，固定 `z` 切片不变；矢状/冠状拖动会连续改变 `z`，带动 Axial 面板和辅助预览刷新。 |
+| 交互修复 | `OrthogonalViewer` 拖动期间启用 `interactive` 轻量渲染，三张视图仍实时更新；释放后自动回到 `full` 完整质量。 |
+| 回归测试 | `tests/imagingLogic.test.ts` 覆盖 `activePointerOrientation`、`interactiveRenderMode`、`latestSliceKeyRef` 和空闲同步入口。 |
+
+行为边界：
+
+- 拖动过程中十字线和体素坐标仍以最新位置为准。
+- 三张视图在拖动过程中仍会实时变化；快速拖动时使用轻量预览图像，释放后恢复完整质量。
+- 本改动不改变 nnUNetv2 推理、validation、Dice/IoU/Hausdorff 指标或 FLARE22 taxonomy remap。

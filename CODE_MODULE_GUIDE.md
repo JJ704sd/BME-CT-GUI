@@ -26,8 +26,9 @@
 
 本轮性能相关改动：
 
-- `handleVoxelCoordChange()` 先去重体素坐标，避免同一坐标重复触发 React 状态更新。
-- `scheduleSelectedSlice()` 使用 `requestAnimationFrame` 合并高频 z 切片更新。鼠标快速移动时，`voxelCoord` 仍快速响应十字线；右侧预览和底部缩略图按浏览器帧节奏更新，减少主线程被同步切片渲染阻塞。
+- `handleVoxelCoordChange()` 不再在每个 `pointermove` 上直接提交 `setVoxelCoord`，而是进入 `scheduleVoxelCoordChange()`。
+- `scheduleVoxelCoordChange()` 使用 `requestAnimationFrame` 合并高频体素坐标更新，每帧最多提交一次 `voxelCoord`；由拖动派生的 `selectedSlice` 辅助预览改为空闲后同步。
+- `scheduleSelectedSlice()` 保留给非拖动路径的按帧 z 切片同步；主切片滑块和底部切片点击仍可正常驱动 z 坐标。
 
 讲解重点：
 
@@ -52,12 +53,14 @@
 - 新增 `useRafCoalescedCoord()`：把高频 `coord` 变化合并到每帧一次的 `renderCoord`。
 - 十字线仍使用即时 `props.coord`，所以视觉反馈优先。
 - 切片图像使用 `renderCoord`，减少快速拖动时三张大图反复同步 rasterize。
+- 拖动期间三张视图仍实时变化，但切片渲染使用 `interactive` 轻量质量；释放后自动恢复 `full` 完整质量。
 - 点击拾取 label 不依赖坐标是否变化，即使点击当前十字线位置也仍能拾取器官。
 
 讲解重点：
 
 - `props.coord` 和 `renderCoord` 的区别：前者用于即时交互，后者用于较重的图像重绘。
 - `requestAnimationFrame` 不是降低最终准确性，而是把中间无意义帧合并掉。
+- `interactiveRenderMode` 不冻结视图，只降低拖动中的切片采样密度，保证三视图仍能连续观察。
 
 ## 4. 成像映射：`src/imaging/voxelMapping.ts`
 
@@ -86,6 +89,7 @@
 
 - `getVoxelValue()` / `getLabelAtVoxel()`：按 NIfTI datatype 从 ArrayBuffer 读取体素值。
 - `renderNiftiSliceToDataUrl()`：根据 orientation、coord 和 mode 生成 intensity 或 mask 图片。
+- `NiftiRenderQuality`：`interactive` 用于拖动实时预览，`full` 用于静止后的完整质量查看。
 - 对 intensity 做当前切片 min/max 灰度归一化。
 - 对 mask 使用固定调色板，并根据 `visibleLabels` 控制透明度。
 - 使用 WeakMap 做 volume 级缓存，最多保存 `MAX_CACHED_SLICES_PER_VOLUME` 个切片。
@@ -93,7 +97,7 @@
 讲解重点：
 
 - 这是三视图里最重的同步逻辑，包含像素遍历、ImageData 写入和 `canvas.toDataURL()`。
-- 本轮卡帧缓解不是改变算法结果，而是减少它在 pointer move 路径上的调用频率，并让右侧/底部 axial 预览复用缓存。
+- 本轮卡帧缓解不是改变算法结果，而是在 pointer move 路径上使用轻量实时预览，并让右侧/底部 axial 预览复用缓存。
 
 ## 6. 前端推理客户端：`src/inference/inferenceClient.ts`
 
@@ -127,6 +131,7 @@
 - `AMOS_0117` 是有原生 label 的自动 validation 病例。
 - `FLARE22_Tr_0009` 当前只注册 original，不注册 label，因为 FLARE22 label ID 与 AMOS22 checkpoint 不同。
 - `shouldUpdateVoxelCoord()` 是本轮性能优化的基础小工具，用于阻止重复坐标更新。
+- `getVoxelCoordDragCommit()` 用于三视图拖动时的坐标裁剪、去重和 axial selected slice 推导，避免把该逻辑写死在 React 事件处理里。
 
 ## 8. 后端桥接：`server/main.py`
 
@@ -210,7 +215,9 @@ npm run build
 
 - 十字线位置继续绑定即时 `coord`，保持快速反馈。
 - 三视图图像重绘改用 `requestAnimationFrame` 合并坐标变化，只渲染最新一帧。
-- 主页面 `selectedSlice` 更新也按帧合并，避免右侧/底部预览在每个 pointer event 同步重绘。
+- 拖动期间三视图仍实时变化，并使用 `interactive` 轻量切片；释放后使用 `full` 完整质量重新渲染当前坐标。
+- 主页面 `voxelCoord` 与拖动派生的 `selectedSlice` 也按帧合并，避免右侧/底部预览在每个 pointer event 同步重绘。
+- `selectedSliceSyncSourceRef` 区分 voxel 驱动和 slice 驱动同步，防止旧 selected slice 反向覆盖矢状/冠状拖动中的最新 z 坐标。
 - axial 预览改用 `src/imaging/sliceRenderer.ts` 的缓存渲染函数，避免重复渲染已生成切片。
 
 验证结果：
@@ -224,5 +231,5 @@ npm run build
 
 - 真实 NIfTI、checkpoint、推理输出和私有 registry 不提交。
 - `AMOS_0117` 是当前自动 validation 的主要原生标签案例。
-- `FLARE22_Tr_0009` 已完成真实 `quality` 在线推理，但 label taxonomy 与 AMOS22 checkpoint 不一致，所以只做 manual-only 和离线 taxonomy-remapped comparison。
+- `FLARE22_Tr_0009` 已完成真实 `quality` 在线推理，但标签体系与 AMOS22 checkpoint 不一致，所以只做人工复核和离线标签体系重映射对照。
 - 任何后续新增病例都应先判断 label taxonomy，再决定是否允许后端自动 validation。

@@ -115,3 +115,54 @@
   - full `npm test` exited 0;
   - `npm run build` exited 0;
   - Git tracking check confirmed `nnunetv2_files/`, `.test-output/`, `server/work/`, and `nnunetv2_files/reference_cases.local.json` are not tracked.
+
+## 2026-05-26 Sagittal/Coronal Drag Rewind Fix
+
+- Follow-up issue: dragging in sagittal or coronal views could still show CT slice stutter and view back-and-forth switching.
+- Root cause: voxel-driven `selectedSlice` updates were delayed with `requestAnimationFrame`, then the selected-slice effect wrote the older `selectedSlice - 1` back into `voxelCoord.z`.
+- Implemented source-aware selected-slice sync:
+  - `voxel` source clamps coordinates but does not overwrite the newer z coordinate.
+  - `slice` source still lets slider/footer slice changes update z.
+- Added regression coverage in `tests/imagingLogic.test.ts`.
+- Verification completed:
+  - `node tests/imagingLogic.test.ts`
+  - `npm test`
+  - `npm run build`
+  - `git diff --check`
+
+## 2026-05-26 三视图拖动卡顿二次修复
+
+- 用户继续反馈：上一轮回跳修复后，三视图快速拖动仍有可见卡顿。
+- 根因复查：
+  - `OrthogonalViewer` 内部切片图像已经按 rAF 合并，但 `main.tsx` 的 `handleVoxelCoordChange()` 仍会在每个 `pointermove` 上立即提交 `setVoxelCoord`。
+  - 该同步提交会带动 `App` 父组件、三视图读数、右侧 axial 预览和底部切片状态高频重渲染。
+  - 未命中缓存的新切片仍可能触发 NIfTI 像素遍历和 `canvas.toDataURL()`，造成主线程压力。
+- 已实现：
+  - `src/viewerLogic.ts` 新增 `getVoxelCoordDragCommit()`，统一裁剪、去重和 selected slice 推导。
+  - `src/main.tsx` 新增 rAF 级 `scheduleVoxelCoordChange()`，拖动时只保留最新待提交坐标，每帧最多更新一次 React 状态。
+  - 拖动派生的 `voxelCoord` 和 `selectedSlice` 在同一帧提交，继续保留 source-aware selected-slice sync，避免 z 回跳。
+- 验证完成：
+  - `node tests/imagingLogic.test.ts`
+  - `npm test`
+  - `npm run build`
+  - `git diff --check`
+- 指标边界：本轮不改变 nnUNetv2 推理、validation、Dice/IoU/Hausdorff 或 FLARE22 taxonomy-remap 数据。
+
+## 2026-05-26 矢状/冠状拖动实时预览修复
+
+- 用户反馈：矢状面和冠状面拖动仍比横断面更卡，但仍希望保留三视图实时变化，而不是等待拖动结束后静态刷新。
+- 根因复查：
+  - 横断面拖动主要改变 `x/y`，固定 `z` 切片不变。
+  - 矢状/冠状拖动连续改变 `z`，会带动 Axial 面板和辅助 selected-slice 预览刷新。
+  - 完整质量 NIfTI 切片每帧都要做像素遍历和 `canvas.toDataURL()`，拖动时成本偏高。
+- 已实现：
+  - `src/imaging/sliceRenderer.ts` 新增 `NiftiRenderQuality`，支持 `interactive` 轻量实时预览和 `full` 完整质量。
+  - `src/components/OrthogonalViewer.tsx` 在拖动期间让三张视图都实时使用 `interactive` 渲染，释放后回到 `full`。
+  - `src/main.tsx` 保持 selected-slice 辅助预览空闲同步，避免右侧预览和底部缩略图抢占主线程。
+  - 6 个指定文档已复核并改为中文主体说明；必要英文仅保留为路径、命令、profile、指标名和代码符号。
+- 验证完成：
+  - `node tests/imagingLogic.test.ts`
+  - `npm test`
+  - `npm run build`
+  - `git diff --check`
+- 指标边界：本轮仍只改变 GUI 渲染节奏，不改变 nnUNetv2 推理、validation、Dice/IoU/Hausdorff 或 FLARE22 taxonomy-remap 数据。

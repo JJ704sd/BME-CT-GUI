@@ -17,7 +17,7 @@ import { buildLabelLookup, defaultOrganLabels, getOrganDetail } from "../src/dat
 import { createInferenceJob, getInferenceResultMeta, getInferenceStatusCopy, getPhaseTimingSummary, getResourceSnapshotCopy, normalizeModelLabels, parseInferenceEvent } from "../src/inference/inferenceClient.ts";
 import { buildOrganLayersFromLabels } from "../src/organLayerLogic.ts";
 import { DEFAULT_REFERENCE_CASES, getReferenceCaseOriginalUrl, normalizeReferenceCases } from "../src/referenceCases.ts";
-import { shouldUpdateVoxelCoord } from "../src/viewerLogic.ts";
+import { getVoxelCoordDragCommit, getVoxelCoordForSelectedSliceSync, shouldUpdateVoxelCoord } from "../src/viewerLogic.ts";
 
 const mainSource = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
 const orthogonalViewerSource = readFileSync(new URL("../src/components/OrthogonalViewer.tsx", import.meta.url), "utf8");
@@ -39,7 +39,15 @@ for (const realCaseId of ["AMOS_0117", "FLARE22_Tr_0009"]) {
   assert.equal(mainSource.includes(realCaseId), true, `top case selector should expose local real case ${realCaseId}`);
 }
 assert.equal(orthogonalViewerSource.includes("useRafCoalescedCoord"), true, "orthogonal slice images should coalesce fast cursor moves before rerendering");
+assert.equal(orthogonalViewerSource.includes("latestSliceKeyRef"), true, "orthogonal panels should skip image render state updates when their fixed slice key is unchanged");
+assert.equal(orthogonalViewerSource.includes("activePointerOrientation"), true, "orthogonal viewer should know which panel is being dragged");
+assert.equal(orthogonalViewerSource.includes("interactiveRenderMode"), true, "orthogonal viewer should keep all three views live with a lightweight drag render mode");
+assert.equal(orthogonalViewerSource.includes("deferImageUpdates"), false, "orthogonal panels should not freeze non-active views while dragging");
 assert.equal(mainSource.includes("setSelectedSlice(getSelectedSliceForVoxelCoord"), false, "cursor movement should not synchronously rerender axial previews on every pointer event");
+assert.equal(mainSource.includes("scheduleVoxelCoordChange"), true, "orthogonal cursor movement should coalesce voxel state updates before rerendering App");
+assert.equal(mainSource.includes("setVoxelCoord(clampedCoord);"), false, "orthogonal cursor movement should not commit voxel state synchronously on every pointer event");
+assert.equal(mainSource.includes("scheduleSelectedSliceAfterVoxelIdle"), true, "sagittal/coronal drags should defer expensive selected-slice preview sync until cursor movement idles");
+assert.equal(mainSource.includes("commitSelectedSliceFromVoxel(commit.selectedSlice);"), false, "coalesced voxel frames should not immediately rerender selected-slice previews");
 assert.equal(stylesSource.includes(".compare-split.has-mask .ortho-mask"), true, "orthogonal split mode should clip the mask layer only when a mask exists");
 assert.equal(orthogonalViewerSource.includes("has-mask"), true, "orthogonal split mode should know when a mask volume is present");
 assert.equal(stylesSource.includes("var(--compare-position"), true, "orthogonal split mode should use the split slider position");
@@ -131,6 +139,29 @@ assert.equal(getSliceImageCacheKey("axial", coord, volume, "mask", new Set([3, 1
 assert.notEqual(getSliceImageCacheKey("axial", coord, volume, "mask", new Set([3, 1])), getSliceImageCacheKey("axial", coord, volume, "mask", new Set([1])));
 assert.equal(shouldUpdateVoxelCoord(coord, { ...coord }), false);
 assert.equal(shouldUpdateVoxelCoord(coord, { ...coord, z: coord.z + 1 }), true);
+assert.deepEqual(
+  getVoxelCoordForSelectedSliceSync({ x: 4, y: 8, z: 20 }, 13, volume, "voxel"),
+  { x: 4, y: 8, z: 20 },
+  "voxel-driven selected-slice sync should not rewind a newer sagittal/coronal drag z coordinate"
+);
+assert.deepEqual(
+  getVoxelCoordForSelectedSliceSync({ x: 4, y: 8, z: 20 }, 13, volume, "slice"),
+  { x: 4, y: 8, z: 12 },
+  "slider/footer selected-slice changes should still move the axial coordinate"
+);
+assert.deepEqual(
+  getVoxelCoordDragCommit({ x: 4, y: 8, z: 12 }, { x: 12, y: -4, z: 42 }, volume),
+  {
+    coord: { x: 9, y: 0, z: 29 },
+    selectedSlice: 30
+  },
+  "orthogonal drags should clamp once and derive the selected axial slice from the coalesced voxel coordinate"
+);
+assert.equal(
+  getVoxelCoordDragCommit({ x: 4, y: 8, z: 12 }, { x: 4, y: 8, z: 12 }, volume),
+  null,
+  "unchanged orthogonal cursor positions should not schedule a React state update"
+);
 
 assert.deepEqual(voxelCoordToSlicePoint("axial", coord, volume), { column: 4, row: 11 });
 assert.deepEqual(voxelCoordToSlicePoint("sagittal", coord, volume), { column: 11, row: 17 });

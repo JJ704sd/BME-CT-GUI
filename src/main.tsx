@@ -46,7 +46,7 @@ import { renderNiftiSliceToDataUrl as renderOrientedNiftiSliceToDataUrl } from "
 import type { VoxelCoord } from "./imaging/voxelMapping";
 import { buildOrganLayersFromLabels, formatOrganScore, getMeanOrganDice, type OrganLayer as Organ, type OrganLayerQuality as QualityState } from "./organLayerLogic";
 import { DEFAULT_REFERENCE_CASES, getReferenceCaseOriginalUrl, normalizeReferenceCases, type ReferenceCase } from "./referenceCases";
-import { buildCustomCaseId, getAlignmentCaptionCopy, getCustomCasePanelCopy, getDisplayAspectRatio, getRegistrationStatus, getSelectedSliceForVoxelCoord, getSplitPositionFromClientX, getStableSliceWindowStart, shouldUpdateVoxelCoord, volumesShareDisplayGrid } from "./viewerLogic";
+import { buildCustomCaseId, getAlignmentCaptionCopy, getCustomCasePanelCopy, getDisplayAspectRatio, getRegistrationStatus, getSelectedSliceForVoxelCoord, getSplitPositionFromClientX, getStableSliceWindowStart, getVoxelCoordDragCommit, getVoxelCoordForSelectedSliceSync, shouldUpdateVoxelCoord, volumesShareDisplayGrid, type SelectedSliceSyncSource } from "./viewerLogic";
 import "./styles.css";
 
 const API_ENDPOINT = "http://127.0.0.1:8000";
@@ -218,6 +218,8 @@ const windowPresets = [
 const runSteps = ["数据预处理", "器官候选区定位", "掩膜后处理", "质控指标刷新", "报告草稿同步"];
 const baseLogs = ["演示病例已加载", "支持 PNG/JPG/WebP 与 .nii/.nii.gz 体数据", "侧栏支持导入、删除、质控与报告"];
 const FOOTER_SLICE_COUNT = 7;
+const INITIAL_VOXEL_COORD: VoxelCoord = { x: 256, y: 256, z: 150 };
+const VOXEL_SLICE_SYNC_IDLE_MS = 120;
 
 function toArrayBuffer(data: ArrayBufferLike) {
   if (data instanceof ArrayBuffer) return data;
@@ -465,7 +467,7 @@ function App() {
   const [activeModule, setActiveModule] = useState<ModuleId>("分割");
   const [selectedSlice, setSelectedSlice] = useState(151);
   const [footerSliceStart, setFooterSliceStart] = useState(1);
-  const [voxelCoord, setVoxelCoord] = useState<VoxelCoord>({ x: 256, y: 256, z: 150 });
+  const [voxelCoord, setVoxelCoord] = useState<VoxelCoord>(INITIAL_VOXEL_COORD);
   const [selectedCase, setSelectedCase] = useState(cases[0]);
   const [customCases, setCustomCases] = useState<CaseItem[]>([]);
   const [showCaseMenu, setShowCaseMenu] = useState(false);
@@ -481,6 +483,12 @@ function App() {
   const splitDragActiveRef = useRef(false);
   const pendingSelectedSliceRef = useRef<number | null>(null);
   const selectedSliceFrameRef = useRef<number | null>(null);
+  const selectedSliceSyncSourceRef = useRef<SelectedSliceSyncSource>("slice");
+  const pendingVoxelSelectedSliceRef = useRef<number | null>(null);
+  const voxelSelectedSliceTimerRef = useRef<number | null>(null);
+  const voxelCoordRef = useRef<VoxelCoord>(INITIAL_VOXEL_COORD);
+  const pendingVoxelCoordRef = useRef<VoxelCoord | null>(null);
+  const voxelCoordFrameRef = useRef<number | null>(null);
   const [compareMode, setCompareMode] = useState<CompareMode>("split");
   const [measureMode, setMeasureMode] = useState(false);
   const [heatmapVisible, setHeatmapVisible] = useState(true);
@@ -630,6 +638,15 @@ function App() {
     measurements.length > 0 ? `已记录 ${measurements.length} 个测量点` : "尚未添加测量点"
   ];
 
+  function commitSelectedSliceFromVoxel(nextSlice: number) {
+    const safeSlice = Math.max(1, Math.min(currentTotalSlices, Math.round(nextSlice)));
+    setSelectedSlice((slice) => {
+      if (slice === safeSlice) return slice;
+      selectedSliceSyncSourceRef.current = "voxel";
+      return safeSlice;
+    });
+  }
+
   function scheduleSelectedSlice(nextSlice: number) {
     pendingSelectedSliceRef.current = Math.max(1, Math.min(currentTotalSlices, Math.round(nextSlice)));
     if (selectedSliceFrameRef.current !== null) return;
@@ -637,8 +654,53 @@ function App() {
     selectedSliceFrameRef.current = requestAnimationFrame(() => {
       selectedSliceFrameRef.current = null;
       const pendingSlice = pendingSelectedSliceRef.current;
+      pendingSelectedSliceRef.current = null;
       if (pendingSlice === null) return;
-      setSelectedSlice((slice) => (slice === pendingSlice ? slice : pendingSlice));
+      commitSelectedSliceFromVoxel(pendingSlice);
+    });
+  }
+
+  function scheduleSelectedSliceAfterVoxelIdle(nextSlice: number) {
+    pendingVoxelSelectedSliceRef.current = Math.max(1, Math.min(currentTotalSlices, Math.round(nextSlice)));
+    if (voxelSelectedSliceTimerRef.current !== null) {
+      window.clearTimeout(voxelSelectedSliceTimerRef.current);
+    }
+
+    voxelSelectedSliceTimerRef.current = window.setTimeout(() => {
+      voxelSelectedSliceTimerRef.current = null;
+      const pendingSlice = pendingVoxelSelectedSliceRef.current;
+      pendingVoxelSelectedSliceRef.current = null;
+      if (pendingSlice === null) return;
+      commitSelectedSliceFromVoxel(pendingSlice);
+    }, VOXEL_SLICE_SYNC_IDLE_MS);
+  }
+
+  function scheduleVoxelCoordChange(nextCoord: VoxelCoord) {
+    if (!loadedImage.volume) {
+      if (!shouldUpdateVoxelCoord(voxelCoordRef.current, nextCoord)) return;
+      voxelCoordRef.current = nextCoord;
+      setVoxelCoord(nextCoord);
+      return;
+    }
+
+    const pendingCommit = getVoxelCoordDragCommit(voxelCoordRef.current, nextCoord, loadedImage.volume);
+    if (!pendingCommit) {
+      pendingVoxelCoordRef.current = null;
+      return;
+    }
+    pendingVoxelCoordRef.current = pendingCommit.coord;
+    if (voxelCoordFrameRef.current !== null) return;
+
+    voxelCoordFrameRef.current = requestAnimationFrame(() => {
+      voxelCoordFrameRef.current = null;
+      const pendingCoord = pendingVoxelCoordRef.current;
+      pendingVoxelCoordRef.current = null;
+      if (!pendingCoord || !loadedImage.volume) return;
+      const commit = getVoxelCoordDragCommit(voxelCoordRef.current, pendingCoord, loadedImage.volume);
+      if (!commit) return;
+      voxelCoordRef.current = commit.coord;
+      setVoxelCoord(commit.coord);
+      scheduleSelectedSliceAfterVoxelIdle(commit.selectedSlice);
     });
   }
 
@@ -646,15 +708,26 @@ function App() {
     if (selectedSliceFrameRef.current !== null) {
       cancelAnimationFrame(selectedSliceFrameRef.current);
     }
+    if (voxelCoordFrameRef.current !== null) {
+      cancelAnimationFrame(voxelCoordFrameRef.current);
+    }
+    if (voxelSelectedSliceTimerRef.current !== null) {
+      window.clearTimeout(voxelSelectedSliceTimerRef.current);
+    }
   }, []);
 
   useEffect(() => {
+    voxelCoordRef.current = voxelCoord;
+  }, [voxelCoord]);
+
+  useEffect(() => {
     if (!loadedImage.volume) return;
-    setVoxelCoord((coord) => ({
-      x: Math.max(0, Math.min(loadedImage.volume!.columns - 1, coord.x)),
-      y: Math.max(0, Math.min(loadedImage.volume!.rows - 1, coord.y)),
-      z: Math.max(0, Math.min(loadedImage.volume!.slices - 1, selectedSlice - 1))
-    }));
+    const syncSource = selectedSliceSyncSourceRef.current;
+    selectedSliceSyncSourceRef.current = "slice";
+    setVoxelCoord((coord) => {
+      const nextCoord = getVoxelCoordForSelectedSliceSync(coord, selectedSlice, loadedImage.volume!, syncSource);
+      return shouldUpdateVoxelCoord(coord, nextCoord) ? nextCoord : coord;
+    });
   }, [loadedImage.volume, selectedSlice]);
 
   useEffect(() => {
@@ -666,10 +739,12 @@ function App() {
   }, [currentTotalSlices, selectedSlice]);
 
   useEffect(() => {
-    if (loadedImage.volume) {
-      scheduleSelectedSlice(voxelCoord.z + 1);
+    if (!loadedImage.volume) return;
+    const nextSlice = getSelectedSliceForVoxelCoord(voxelCoord, loadedImage.volume.slices);
+    if (nextSlice !== selectedSlice) {
+      scheduleSelectedSliceAfterVoxelIdle(nextSlice);
     }
-  }, [voxelCoord.z, loadedImage.volume, currentTotalSlices]);
+  }, [voxelCoord.z, loadedImage.volume, currentTotalSlices, selectedSlice]);
 
   useEffect(() => {
     setToast(getInferenceStatusCopy(inferenceStatus));
@@ -715,17 +790,10 @@ function App() {
 
   function handleVoxelCoordChange(nextCoord: VoxelCoord) {
     if (!loadedImage.volume) {
-      setVoxelCoord(nextCoord);
+      scheduleVoxelCoordChange(nextCoord);
       return;
     }
-    const clampedCoord = {
-      x: Math.max(0, Math.min(loadedImage.volume.columns - 1, nextCoord.x)),
-      y: Math.max(0, Math.min(loadedImage.volume.rows - 1, nextCoord.y)),
-      z: Math.max(0, Math.min(loadedImage.volume.slices - 1, nextCoord.z))
-    };
-    if (!shouldUpdateVoxelCoord(voxelCoord, clampedCoord)) return;
-    setVoxelCoord(clampedCoord);
-    scheduleSelectedSlice(getSelectedSliceForVoxelCoord(clampedCoord, loadedImage.volume.slices));
+    scheduleVoxelCoordChange(nextCoord);
   }
 
   function updateSplitPositionFromPointer(event: PointerEvent<HTMLDivElement>) {

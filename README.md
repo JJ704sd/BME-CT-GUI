@@ -1,23 +1,25 @@
-# BME CT Segmentation GUI Prototype
+# BME CT 分割 GUI 原型
 
 本项目是面向腹部 CT 分割验证流程的本地 GUI 原型。前端使用 React + Vite，后端使用 FastAPI 桥接本机 nnUNetv2 环境，目标是完成 CT 浏览、三正交联动、器官 label 说明、真实模型推理回填、结果下载和验收记录。
 
-截至 2026-05-25，项目已经作为独立 GUI 仓库维护；真实 CT、NIfTI、checkpoint 权重和推理输出仍只保留在本机，不提交到 GitHub。
+截至 2026-05-26，项目已经作为独立 GUI 仓库维护；真实 CT、NIfTI、checkpoint 权重和推理输出仍只保留在本机，不提交到 GitHub。
 
 ## 当前状态
 
 - 前端入口：`http://127.0.0.1:5173`
 - 后端健康检查：`http://127.0.0.1:8000/api/health`
 - 后端模式：模型资源齐备时为 `real-nnunetv2`，缺失时为 `unavailable`
-- 当前主要参考病例：AMOS 0117
+- 当前主要参考病例：AMOS 0117、FLARE22 Tr 0009
 - 当前新权重：`nnunetv2_files/checkpoint_best.pth`
-- 主要进展和实验记录：见 [REVIEW.md](./REVIEW.md) 与 [ACCEPTANCE.md](./ACCEPTANCE.md)
+- 主要进展和实验记录：见 [REVIEW.md](./REVIEW.md)、[ACCEPTANCE.md](./ACCEPTANCE.md) 与 [SEGMENTATION_EXPERIMENT_COMPARISON.md](./SEGMENTATION_EXPERIMENT_COMPARISON.md)
+- 代码讲解材料：见 [CODE_MODULE_GUIDE.md](./CODE_MODULE_GUIDE.md)
 
 ## 主要功能
 
 - 读取并浏览 `.nii` / `.nii.gz` CT 体数据。
 - 支持 Axial、Sagittal、Coronal 三正交视图联动。
 - 支持窗宽窗位、切片切换、缩放、overlay / split / side / difference 对比。
+- `split` 分屏模式表示原图与分割 mask 的滑动对比，不是 Axial / Sagittal / Coronal 布局切换。
 - 点击非背景 label 后展示对应器官说明。
 - 通过本地 FastAPI 创建 nnUNetv2 推理任务，并通过 SSE 获取进度。
 - 推理完成后下载 NIfTI 分割结果并回填 GUI。
@@ -143,6 +145,30 @@ nnunetv2_files/amos_0117(2).nii.gz
 
 这些记录只代表 AMOS 0117 的本地验收，不代表更多外部病例已经完成泛化验证。
 
+FLARE22 Tr 0009 非 AMOS 在线推理补充：
+
+| 项目 | 结果 |
+|---|---|
+| job id | `86b0153d0a73` |
+| mode | `real-nnunetv2` |
+| cached_result | `false` |
+| profile | `quality` |
+| duration_seconds | `237.323` |
+| result_size_bytes | `120761` |
+| 后端自动验证 | 关闭，`validation_available=false` |
+| 离线 remap mean Dice | `0.893127` |
+| 离线 remap min Dice | `0.673730`，最低标签为十二指肠 |
+
+该记录只能作为非 AMOS、按器官名重映射后的对照证据；FLARE22 label ID 与当前 AMOS22 checkpoint 不一致，不能写成 AMOS 原生自动验证。
+
+## 三视图拖动体验
+
+- 横断面拖动通常只改变 `x/y` 坐标，固定 `z` 切片不变，因此主要表现为十字线移动。
+- 矢状面和冠状面拖动会连续改变 `z` 坐标，Axial 面板和辅助预览需要切换切片，渲染压力更高。
+- 当前版本会记录是否正在拖动三视图；拖动期间三张视图仍实时变化，但使用 `interactive` 轻量切片预览降低每帧渲染成本。
+- 松开鼠标后，当前坐标会自动恢复 `full` 完整质量切片渲染，最终查看质量不下降。
+- 右侧 axial 预览和底部缩略图只在拖动空闲后同步，避免快速拖动时抢占主线程。
+
 ## API 概览
 
 - `GET /api/health`：后端和模型状态，含 worker、设备、推理参数。
@@ -175,6 +201,6 @@ python tools/perf_no_cache_persistent.py --inference-profile fast --disable-tta 
 ## 当前限制
 
 - `confidenceThreshold` 仍是质控提示，不会真实作用于多标签概率图。
-- fast profile 会牺牲一部分 nnUNetv2 默认质量设置。AMOS 0117 对照中 fast 明显更快，但 validation 为 `review`，不能作为正式报告结果。
+- `fast` profile 会牺牲一部分 nnUNetv2 默认质量设置。AMOS 0117 对照中 fast 明显更快，但 validation 为 `review`，不能作为正式报告结果。
 - 单个新病例的首次未缓存推理仍可能达到分钟级到十几分钟级。
-- 当前真实验收主要围绕 AMOS 0117；新增病例后应分别记录三正交显示、label 点击、推理耗时、资源快照和标准答案状态。
+- 当前已有 AMOS 0117 原生标签验收和 FLARE22 Tr 0009 非 AMOS 推理补充；新增病例后仍应分别记录三正交显示、label 点击、推理耗时、资源快照和标准答案状态。

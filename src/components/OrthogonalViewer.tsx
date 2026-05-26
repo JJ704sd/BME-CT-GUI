@@ -13,7 +13,7 @@ import {
   slicePointToVoxelCoord
 } from "../imaging/voxelMapping";
 import type { NiftiVolumeLike } from "../imaging/sliceRenderer";
-import { getLabelAtVoxel, getVoxelValue, renderNiftiSliceToDataUrl } from "../imaging/sliceRenderer";
+import { getLabelAtVoxel, getVoxelValue, renderNiftiSliceToDataUrl, type NiftiRenderQuality } from "../imaging/sliceRenderer";
 import { shouldUpdateVoxelCoord } from "../viewerLogic";
 
 type CompareMode = "split" | "overlay" | "side" | "difference";
@@ -48,9 +48,10 @@ function stepCoord(orientation: Orientation, coord: VoxelCoord, delta: number, v
   return { ...coord, z: Math.max(0, Math.min(volume.slices - 1, coord.z + delta)) };
 }
 
-function useRafCoalescedCoord(coord: VoxelCoord) {
+function useRafCoalescedCoord(coord: VoxelCoord, orientation: Orientation, volume: NiftiVolumeLike) {
   const [renderCoord, setRenderCoord] = useState(coord);
   const latestCoordRef = useRef(coord);
+  const latestSliceKeyRef = useRef(getSliceRenderKey(orientation, coord, volume));
   const frameRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -60,9 +61,12 @@ function useRafCoalescedCoord(coord: VoxelCoord) {
     frameRef.current = requestAnimationFrame(() => {
       frameRef.current = null;
       const latestCoord = latestCoordRef.current;
+      const latestSliceKey = getSliceRenderKey(orientation, latestCoord, volume);
+      if (latestSliceKey === latestSliceKeyRef.current) return;
+      latestSliceKeyRef.current = latestSliceKey;
       setRenderCoord((current) => shouldUpdateVoxelCoord(current, latestCoord) ? latestCoord : current);
     });
-  }, [coord.x, coord.y, coord.z]);
+  }, [coord.x, coord.y, coord.z, orientation, volume]);
 
   useEffect(() => () => {
     if (frameRef.current !== null) {
@@ -73,22 +77,31 @@ function useRafCoalescedCoord(coord: VoxelCoord) {
   return renderCoord;
 }
 
-function Panel(props: OrthogonalViewerProps & { orientation: Orientation; title: string; subtitle: string }) {
+function Panel(props: OrthogonalViewerProps & {
+  orientation: Orientation;
+  title: string;
+  subtitle: string;
+  activePointerOrientation: Orientation | null;
+  interactiveRenderMode: boolean;
+  onPointerActivity: (orientation: Orientation) => void;
+  onPointerRelease: () => void;
+}) {
   const dimensions = getOrientationDimensions(props.orientation, props.sourceVolume);
   const displayAspect = getOrientationDisplayAspect(props.orientation, props.sourceVolume);
   const displayRatio = getOrientationDisplayRatio(props.orientation, props.sourceVolume);
   const stageRef = useRef<HTMLDivElement>(null);
   const [stageRatio, setStageRatio] = useState(displayRatio);
-  const renderCoord = useRafCoalescedCoord(props.coord);
+  const renderCoord = useRafCoalescedCoord(props.coord, props.orientation, props.sourceVolume);
+  const renderQuality: NiftiRenderQuality = props.interactiveRenderMode ? "interactive" : "full";
   const sourceSliceKey = getSliceRenderKey(props.orientation, renderCoord, props.sourceVolume);
   const maskSliceKey = props.maskVolume ? getSliceRenderKey(props.orientation, renderCoord, props.maskVolume) : "";
   const sourceSrc = useMemo(
-    () => renderNiftiSliceToDataUrl(props.sourceVolume, renderCoord, "intensity", props.orientation),
-    [props.sourceVolume, props.orientation, sourceSliceKey]
+    () => renderNiftiSliceToDataUrl(props.sourceVolume, renderCoord, "intensity", props.orientation, undefined, renderQuality),
+    [props.sourceVolume, props.orientation, sourceSliceKey, renderQuality]
   );
   const maskSrc = useMemo(
-    () => props.maskVolume ? renderNiftiSliceToDataUrl(props.maskVolume, renderCoord, "mask", props.orientation, props.visibleLabels) : "",
-    [props.maskVolume, props.orientation, props.visibleLabels, maskSliceKey]
+    () => props.maskVolume ? renderNiftiSliceToDataUrl(props.maskVolume, renderCoord, "mask", props.orientation, props.visibleLabels, renderQuality) : "",
+    [props.maskVolume, props.orientation, props.visibleLabels, maskSliceKey, renderQuality]
   );
   useLayoutEffect(() => {
     const stage = stageRef.current;
@@ -112,6 +125,7 @@ function Panel(props: OrthogonalViewerProps & { orientation: Orientation; title:
   function updateCoordFromPointer(event: PointerEvent<HTMLDivElement>, pickOrgan: boolean) {
     event.preventDefault();
     event.stopPropagation();
+    props.onPointerActivity(props.orientation);
     if (pickOrgan && !event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.setPointerCapture(event.pointerId);
     }
@@ -152,11 +166,13 @@ function Panel(props: OrthogonalViewerProps & { orientation: Orientation; title:
           if (event.currentTarget.hasPointerCapture(event.pointerId)) {
             event.currentTarget.releasePointerCapture(event.pointerId);
           }
+          props.onPointerRelease();
         }}
         onPointerCancel={(event) => {
           if (event.currentTarget.hasPointerCapture(event.pointerId)) {
             event.currentTarget.releasePointerCapture(event.pointerId);
           }
+          props.onPointerRelease();
         }}
         onWheel={handleWheel}
       >
@@ -172,6 +188,7 @@ function Panel(props: OrthogonalViewerProps & { orientation: Orientation; title:
 }
 
 export function OrthogonalViewer(props: OrthogonalViewerProps) {
+  const [activePointerOrientation, setActivePointerOrientation] = useState<Orientation | null>(null);
   const label = props.maskVolume ? getLabelAtVoxel(props.maskVolume, props.coord) : 0;
   const labelName = props.labels.find((item) => item.label === label)?.nameZh ?? (label > 0 ? `Label ${label}` : "背景");
   const hu = Math.round(getVoxelValue(props.sourceVolume, props.coord));
@@ -179,7 +196,17 @@ export function OrthogonalViewer(props: OrthogonalViewerProps) {
   return (
     <div className="orthogonal-viewer">
       <div className="orthogonal-grid">
-        {panels.map((panel) => <Panel key={panel.orientation} {...props} {...panel} />)}
+        {panels.map((panel) => (
+          <Panel
+            key={panel.orientation}
+            {...props}
+            {...panel}
+            activePointerOrientation={activePointerOrientation}
+            interactiveRenderMode={activePointerOrientation !== null}
+            onPointerActivity={setActivePointerOrientation}
+            onPointerRelease={() => setActivePointerOrientation(null)}
+          />
+        ))}
       </div>
       <div className="voxel-readout">
         <span>Voxel ({props.coord.x}, {props.coord.y}, {props.coord.z})</span>

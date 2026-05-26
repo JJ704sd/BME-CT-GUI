@@ -16,8 +16,50 @@ export type DisplayVoxelCoord = {
   z: number;
 };
 
+export type SelectedSliceSyncSource = "slice" | "voxel";
+
 export function shouldUpdateVoxelCoord(current: DisplayVoxelCoord, next: DisplayVoxelCoord) {
   return current.x !== next.x || current.y !== next.y || current.z !== next.z;
+}
+
+function clampIndex(value: number, maxExclusive: number) {
+  return Math.max(0, Math.min(Math.max(0, maxExclusive - 1), Math.round(value)));
+}
+
+export function getVoxelCoordForSelectedSliceSync(
+  current: DisplayVoxelCoord,
+  selectedSlice: number,
+  volume: Pick<DisplayGridVolume, "columns" | "rows" | "slices">,
+  source: SelectedSliceSyncSource
+) {
+  return {
+    x: clampIndex(current.x, volume.columns),
+    y: clampIndex(current.y, volume.rows),
+    z: source === "voxel"
+      ? clampIndex(current.z, volume.slices)
+      : clampIndex(selectedSlice - 1, volume.slices)
+  };
+}
+
+export function getVoxelCoordDragCommit(
+  current: DisplayVoxelCoord,
+  next: DisplayVoxelCoord,
+  volume: Pick<DisplayGridVolume, "columns" | "rows" | "slices">
+) {
+  const coord = {
+    x: clampIndex(next.x, volume.columns),
+    y: clampIndex(next.y, volume.rows),
+    z: clampIndex(next.z, volume.slices)
+  };
+
+  if (!shouldUpdateVoxelCoord(current, coord)) {
+    return null;
+  }
+
+  return {
+    coord,
+    selectedSlice: getSelectedSliceForVoxelCoord(coord, volume.slices)
+  };
 }
 
 export function volumesShareDisplayGrid(source: DisplayGridVolume, result: DisplayGridVolume) {

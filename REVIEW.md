@@ -1810,6 +1810,84 @@ FLARE22 label ID 与当前 AMOS22 checkpoint 不一致：
 - `npm test`：通过。
 - `npm run build`：通过。
 
+## 三十六、2026-05-26 矢状/冠状拖动回跳修复
+
+### 36.1 现象和根因
+
+用户继续反馈在矢状面或冠状面拖动时，CT 图像仍会出现卡顿和三视图来回切换。复核后确认这不是矢状/冠状坐标映射方向错误，而是 `voxelCoord` 和主页面 `selectedSlice` 的双向同步存在延迟回写：
+
+- 矢状面或冠状面拖动会快速更新 `voxelCoord.z`。
+- `selectedSlice` 为了降低右侧 axial 预览和底部缩略图重绘频率，会通过 `requestAnimationFrame` 延迟同步。
+- 旧逻辑在 `selectedSlice` 变化后又反向把 `selectedSlice - 1` 写回 `voxelCoord.z`。
+- 快速拖动时，旧 `selectedSlice` 会覆盖更新后的 z 坐标，表现为切片回跳、三视图来回切换和可见卡顿。
+
+### 36.2 本轮修复
+
+- `src/viewerLogic.ts` 新增 `SelectedSliceSyncSource` 和 `getVoxelCoordForSelectedSliceSync()`。
+- `src/main.tsx` 新增 `selectedSliceSyncSourceRef`，区分 selectedSlice 更新来源。
+- 当 selectedSlice 是由三视图拖动同步而来时，只校正坐标边界，不再反向覆盖当前 `voxelCoord.z`。
+- 当用户主动拖动切片滑块或点击底部切片时，仍然按 `selectedSlice - 1` 正常更新 z 坐标。
+- `tests/imagingLogic.test.ts` 增加回归测试，覆盖“矢状/冠状拖动不能被旧 selectedSlice 拉回”的场景。
+
+### 36.3 验证
+
+- `node tests/imagingLogic.test.ts`：通过。
+- `npm test`：通过。
+- `npm run build`：通过。
+- `git diff --check`：通过。
+
+## 三十七、2026-05-26 三视图拖动卡顿二次修复
+
+### 37.1 现象和根因
+
+用户在上一轮回跳修复后继续反馈：拖动三视图时仍有卡顿，尤其在矢状面/冠状面快速移动时，CT 图像跟随有延迟。复查后确认上一轮只修复了 `selectedSlice` 延迟回写导致的 z 坐标回跳，但 `handleVoxelCoordChange()` 仍会在每个 `pointermove` 上立即提交 React 状态。这样会让 `App` 父组件、三视图读数、右侧 axial 预览和底部切片状态按指针事件频率重渲染；当新切片未命中缓存时，还会同步执行 NIfTI 像素遍历和 `canvas.toDataURL()`，主线程容易被占满。
+
+### 37.2 本轮修复
+
+- `src/viewerLogic.ts` 新增 `getVoxelCoordDragCommit()`，把拖动坐标的边界裁剪、去重和 axial 切片推导抽成可测试纯函数。
+- `src/main.tsx` 新增 `voxelCoordRef`、`pendingVoxelCoordRef` 和 `voxelCoordFrameRef`，拖动时只记录最新坐标，每个 `requestAnimationFrame` 最多提交一次 React 状态。
+- `voxelCoord` 与由拖动派生的 `selectedSlice` 在同一个 rAF 提交周期内更新，避免父组件在单个指针事件流中被多次同步刷新。
+- 若用户在下一帧前把光标移回原坐标，会清空待提交坐标，避免提交过时中间帧。
+- 保留上一轮 `selectedSliceSyncSourceRef` 逻辑，确保 voxel 驱动同步不会反向覆盖最新 z 坐标；滑块/底部切片点击仍按 slice 驱动更新 z。
+
+### 37.3 验证
+
+- `node tests/imagingLogic.test.ts`：先失败后通过，新增覆盖拖动坐标合并提交、边界裁剪、selected slice 推导和禁止同步提交 `setVoxelCoord(clampedCoord)`。
+- `npm test`：通过，包含浏览器布局/三视图相关 smoke。
+- `npm run build`：通过。
+- `git diff --check`：通过。
+- 本轮仅改变前端交互渲染节奏，不改变 nnUNetv2 推理、validation、Dice/IoU/Hausdorff 指标或 FLARE22 taxonomy remap。
+
+## 三十八、2026-05-26 矢状/冠状拖动卡顿三次修复
+
+### 38.1 现象和根因
+
+用户继续反馈：拖动矢状面和冠状面查看切片时仍有卡顿，而拖动横断面不明显。复查后确认差异来自交互轴不同：
+
+- 横断面拖动主要改变 `x/y`，横断面固定的 `z` 切片不变，通常只需要移动十字线。
+- 矢状面/冠状面拖动会改变 `z`，其它面板中的 Axial 切片需要连续变化，容易触发同步切片栅格化。
+- 上一轮已合并父组件 `voxelCoord` 更新，但矢状/冠状拖动仍会让三张视图连续切片渲染；如果继续使用完整分辨率 data URL，每帧成本仍偏高。
+
+### 38.2 本轮修复
+
+- `src/components/OrthogonalViewer.tsx` 新增 `activePointerOrientation`，记录当前是否处于拖动状态。
+- 拖动期间三张视图仍按帧实时更新，不冻结非当前面板；切片渲染改用 `interactive` 轻量质量，降低每帧像素遍历和 data URL 生成成本。
+- 鼠标释放后同一坐标自动切回 `full` 完整质量渲染，保证最终查看质量不下降。
+- `useRafCoalescedCoord()` 继续用 `latestSliceKeyRef` 判断固定切片是否变化；固定切片未变化时不触发图像状态更新。
+- `src/main.tsx` 将 voxel 拖动派生的 `selectedSlice` 辅助预览同步改为空闲后执行，避免右侧 axial 预览和底部缩略图在矢状/冠状拖动中抢占主线程。
+- `src/imaging/sliceRenderer.ts` 新增 `NiftiRenderQuality`，`interactive` 模式按较低采样密度生成实时预览，`full` 模式保留完整分辨率。
+
+### 38.3 文档审核
+
+- 已审核 `SEGMENTATION_EXPERIMENT_COMPARISON.md`、`SEGMENTATION_METRICS_SUMMARY.md`、`REVIEW.md`、`README.md`、`ACCEPTANCE.md`、`CODE_MODULE_GUIDE.md`。
+- 文档主体保持中文；保留必要英文术语、路径、命令、profile 名称和指标名。
+- 本轮为前端渲染调度修复，不改变任何推理实验数值、自动 validation 规则或 FLARE22 remap 解释边界。
+
+### 38.4 验证
+
+- `node tests/imagingLogic.test.ts`：先失败后通过，覆盖拖动面板识别、三视图实时轻量渲染、固定切片 key 去重和辅助切片预览空闲同步。
+- `npm test`：通过。
+
 ---
 
 *文档版本：2026-05-26*
