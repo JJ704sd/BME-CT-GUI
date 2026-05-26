@@ -39,15 +39,14 @@ import {
   ZoomIn
 } from "lucide-react";
 import demoCtImage from "./assets/demo-abdomen-ct.png";
-import demoChestCtImage from "./assets/demo-chest-ct.png";
-import demoPancreasCtImage from "./assets/demo-pancreas-ct.png";
 import { OrthogonalViewer } from "./components/OrthogonalViewer";
 import { buildLabelLookup, defaultOrganLabels, getOrganDetail } from "./data/organDetails";
 import { cancelInferenceJob, createInferenceJob, downloadInferenceResult, fetchModelLabels, getInferenceResultMeta, getInferenceStatusCopy, getPhaseTimingSummary, getResourceSnapshotCopy, parseInferenceEvent, type InferenceOptions, type InferenceProfile, type InferenceStatus, type PhaseTimings, type ResourceSnapshot, type ValidationSummary } from "./inference/inferenceClient";
+import { renderNiftiSliceToDataUrl as renderOrientedNiftiSliceToDataUrl } from "./imaging/sliceRenderer";
 import type { VoxelCoord } from "./imaging/voxelMapping";
 import { buildOrganLayersFromLabels, formatOrganScore, getMeanOrganDice, type OrganLayer as Organ, type OrganLayerQuality as QualityState } from "./organLayerLogic";
 import { DEFAULT_REFERENCE_CASES, getReferenceCaseOriginalUrl, normalizeReferenceCases, type ReferenceCase } from "./referenceCases";
-import { buildCustomCaseId, getAlignmentCaptionCopy, getCustomCasePanelCopy, getDisplayAspectRatio, getRegistrationStatus, getSelectedSliceForVoxelCoord, getSplitPositionFromClientX, getStableSliceWindowStart, volumesShareDisplayGrid } from "./viewerLogic";
+import { buildCustomCaseId, getAlignmentCaptionCopy, getCustomCasePanelCopy, getDisplayAspectRatio, getRegistrationStatus, getSelectedSliceForVoxelCoord, getSplitPositionFromClientX, getStableSliceWindowStart, shouldUpdateVoxelCoord, volumesShareDisplayGrid } from "./viewerLogic";
 import "./styles.css";
 
 const API_ENDPOINT = "http://127.0.0.1:8000";
@@ -95,12 +94,14 @@ type CaseItem = {
   sex: string;
   age: number;
   phase: string;
+  caseSummary?: string;
   slices: number;
   target: string;
   demoImage: string;
   imageName: string;
   imageMeta: string;
   organs: Organ[];
+  referenceCaseId?: string;
   custom?: boolean;
   sourceImage?: LoadedImage;
   resultImage?: LoadedImage | null;
@@ -147,42 +148,36 @@ const organSets = {
   ] satisfies Organ[]
 };
 
+const realCaseOrgans = buildOrganLayersFromLabels(defaultOrganLabels, []);
+
 const cases: CaseItem[] = [
   {
-    id: "Case_FLARE_024",
-    sex: "男",
-    age: 62,
-    phase: "Portal Venous",
-    slices: 320,
-    target: "腹部消化器官",
+    id: "AMOS_0117",
+    sex: "本地",
+    age: 0,
+    phase: "AMOS22",
+    caseSummary: "本地 AMOS22 · 有标准答案 · 质量验收基线",
+    slices: 103,
+    target: "腹部 15 标签器官",
     demoImage: demoCtImage,
-    imageName: "demo-abdomen-ct.png",
-    imageMeta: "腹部增强 CT · 多器官演示",
-    organs: organSets.abdomen
+    imageName: "amos_0117(3).nii.gz",
+    imageMeta: "AMOS22 CT · 768x768x103 · 0.507812 x 0.507812 x 5.0 mm",
+    organs: realCaseOrgans,
+    referenceCaseId: "amos_0117"
   },
   {
-    id: "Case_LUNG_112",
-    sex: "女",
-    age: 54,
-    phase: "Chest CT",
-    slices: 384,
-    target: "肺叶与气管树",
-    demoImage: demoChestCtImage,
-    imageName: "demo-chest-ct.png",
-    imageMeta: "胸部 CT · 肺叶与气管树演示",
-    organs: organSets.lung
-  },
-  {
-    id: "Case_PANC_038",
-    sex: "男",
-    age: 68,
-    phase: "Pancreatic",
-    slices: 286,
-    target: "胰腺与周围器官",
-    demoImage: demoPancreasCtImage,
-    imageName: "demo-pancreas-ct.png",
-    imageMeta: "胰腺期 CT · 消化器官演示",
-    organs: organSets.pancreas
+    id: "FLARE22_Tr_0009",
+    sex: "本地",
+    age: 0,
+    phase: "FLARE22",
+    caseSummary: "本地 FLARE22 · manual-only · 已完成 quality 推理",
+    slices: 87,
+    target: "腹部 13 标签器官",
+    demoImage: demoCtImage,
+    imageName: "FLARE22_Tr_0009_0000.nii.gz",
+    imageMeta: "FLARE22 CT · 512x512x87 · 0.806641 x 0.806641 x 2.5 mm",
+    organs: realCaseOrgans,
+    referenceCaseId: "flare22_tr_0009"
   }
 ];
 
@@ -363,6 +358,11 @@ function renderNiftiSliceToDataUrl(volume: NiftiVolume, sliceIndex: number, mode
   return canvas.toDataURL("image/png");
 }
 
+function renderCachedAxialNiftiSliceToDataUrl(volume: NiftiVolume, sliceIndex: number, mode: NiftiRenderMode = "intensity") {
+  const safeSliceIndex = clampSliceIndex(sliceIndex, volume.slices);
+  return renderOrientedNiftiSliceToDataUrl(volume, { x: 0, y: 0, z: safeSliceIndex }, mode, "axial");
+}
+
 function getImageDimensions(src: string) {
   return new Promise<string>((resolve, reject) => {
     const image = new Image();
@@ -479,6 +479,8 @@ function App() {
   const [comparePosition, setComparePosition] = useState(52);
   const [isDraggingSplit, setIsDraggingSplit] = useState(false);
   const splitDragActiveRef = useRef(false);
+  const pendingSelectedSliceRef = useRef<number | null>(null);
+  const selectedSliceFrameRef = useRef<number | null>(null);
   const [compareMode, setCompareMode] = useState<CompareMode>("split");
   const [measureMode, setMeasureMode] = useState(false);
   const [heatmapVisible, setHeatmapVisible] = useState(true);
@@ -563,11 +565,11 @@ function App() {
   const imageBrightness = Math.max(0.7, Math.min(1.16, 0.92 + (windowLevel - 40) / 1800));
 
   const loadedDisplaySrc = useMemo(
-    () => loadedImage.volume ? renderNiftiSliceToDataUrl(loadedImage.volume, currentSliceIndex, "intensity") : loadedImage.src,
+    () => loadedImage.volume ? renderCachedAxialNiftiSliceToDataUrl(loadedImage.volume, currentSliceIndex, "intensity") : loadedImage.src,
     [currentSliceIndex, loadedImage]
   );
   const resultDisplaySrc = useMemo(
-    () => resultImage?.volume ? renderNiftiSliceToDataUrl(resultImage.volume, currentSliceIndex, "mask") : resultImage?.src,
+    () => resultImage?.volume ? renderCachedAxialNiftiSliceToDataUrl(resultImage.volume, currentSliceIndex, "mask") : resultImage?.src,
     [currentSliceIndex, resultImage]
   );
   const displayAspectRatio = useMemo(() => getDisplayAspectRatio(loadedImage), [loadedImage]);
@@ -584,7 +586,7 @@ function App() {
       const slice = start + index;
       return {
         slice,
-        src: loadedImage.volume ? renderNiftiSliceToDataUrl(loadedImage.volume, slice - 1, "intensity") : loadedDisplaySrc
+        src: loadedImage.volume ? renderCachedAxialNiftiSliceToDataUrl(loadedImage.volume, slice - 1, "intensity") : loadedDisplaySrc
       };
     });
   }, [currentTotalSlices, footerSliceStart, loadedImage]);
@@ -628,6 +630,24 @@ function App() {
     measurements.length > 0 ? `已记录 ${measurements.length} 个测量点` : "尚未添加测量点"
   ];
 
+  function scheduleSelectedSlice(nextSlice: number) {
+    pendingSelectedSliceRef.current = Math.max(1, Math.min(currentTotalSlices, Math.round(nextSlice)));
+    if (selectedSliceFrameRef.current !== null) return;
+
+    selectedSliceFrameRef.current = requestAnimationFrame(() => {
+      selectedSliceFrameRef.current = null;
+      const pendingSlice = pendingSelectedSliceRef.current;
+      if (pendingSlice === null) return;
+      setSelectedSlice((slice) => (slice === pendingSlice ? slice : pendingSlice));
+    });
+  }
+
+  useEffect(() => () => {
+    if (selectedSliceFrameRef.current !== null) {
+      cancelAnimationFrame(selectedSliceFrameRef.current);
+    }
+  }, []);
+
   useEffect(() => {
     if (!loadedImage.volume) return;
     setVoxelCoord((coord) => ({
@@ -646,7 +666,9 @@ function App() {
   }, [currentTotalSlices, selectedSlice]);
 
   useEffect(() => {
-    setSelectedSlice((slice) => loadedImage.volume ? Math.max(1, Math.min(currentTotalSlices, voxelCoord.z + 1)) : slice);
+    if (loadedImage.volume) {
+      scheduleSelectedSlice(voxelCoord.z + 1);
+    }
   }, [voxelCoord.z, loadedImage.volume, currentTotalSlices]);
 
   useEffect(() => {
@@ -701,8 +723,9 @@ function App() {
       y: Math.max(0, Math.min(loadedImage.volume.rows - 1, nextCoord.y)),
       z: Math.max(0, Math.min(loadedImage.volume.slices - 1, nextCoord.z))
     };
+    if (!shouldUpdateVoxelCoord(voxelCoord, clampedCoord)) return;
     setVoxelCoord(clampedCoord);
-    setSelectedSlice(getSelectedSliceForVoxelCoord(clampedCoord, loadedImage.volume.slices));
+    scheduleSelectedSlice(getSelectedSliceForVoxelCoord(clampedCoord, loadedImage.volume.slices));
   }
 
   function updateSplitPositionFromPointer(event: PointerEvent<HTMLDivElement>) {
@@ -838,7 +861,7 @@ function App() {
         ? "快速预览结果（需人工复核）"
         : job.cached_result ? "缓存推理结果" : job.mode === "debug-label-fallback" ? "调试结果" : "真实推理结果";
       setResultImage({
-        src: renderNiftiSliceToDataUrl(resultVol, sliceIndex, "mask"),
+        src: renderCachedAxialNiftiSliceToDataUrl(resultVol, sliceIndex, "mask"),
         name: `${sourceImage.name.replace(/\.nii(\.gz)?$/i, "")}_seg.nii.gz`,
         kind: "NIfTI",
         meta: getInferenceResultMeta(job.mode, `${resultVol.columns}x${resultVol.rows}x${resultVol.slices}`, inferenceOptions),
@@ -892,7 +915,7 @@ function App() {
     setZoom(1);
     setWindowLevel(40);
     setWindowWidth(360);
-    setSelectedSlice(Math.min(currentTotalSlices, loadedImage.volume ? Math.floor(currentTotalSlices / 2) + 1 : selectedCase.id.includes("LUNG") ? 188 : 151));
+    setSelectedSlice(Math.min(currentTotalSlices, Math.floor(currentTotalSlices / 2) + 1));
     setToast("视图已重置");
   }
 
@@ -902,23 +925,32 @@ function App() {
     setLogs((items) => [`窗宽窗位切换：${preset.label} · WL ${preset.level} / WW ${preset.width}`, ...items].slice(0, 8));
   }
 
-  function selectCase(nextCase: CaseItem) {
+  async function selectCase(nextCase: CaseItem) {
     setSelectedCase(nextCase);
     setShowCaseMenu(false);
     const nextSource = nextCase.sourceImage ?? { src: nextCase.demoImage, name: nextCase.imageName, kind: "Demo" as const, meta: nextCase.imageMeta };
     const nextResult = nextCase.resultImage ?? null;
     const nextSlice = nextSource.sliceIndex ?? Math.floor((nextSource.volume?.slices ?? nextCase.slices) / 2);
-    setSelectedSlice(nextCase.custom ? nextSlice + 1 : nextCase.id.includes("LUNG") ? 188 : 151);
-    setViewMode(nextCase.custom ? "CT" : nextCase.id.includes("LUNG") ? "CT" : "Mask");
+    const displaySlice = Math.max(1, nextSlice + 1);
+    setSelectedSlice(displaySlice);
+    setViewMode("CT");
     setLoadedImage(nextSource);
     setResultImage(nextResult);
     setResultInferenceOptions(null);
     setValidationSummary(null);
     setOrgans(nextCase.organs);
     setSelectedOrganId(nextCase.organs[0].id);
-    setMeasurements([{ id: 1, label: "M1", x: 51.8, y: 52.4, hu: 48, diameter: "18.6 mm", slice: nextCase.id.includes("LUNG") ? 188 : 151 }]);
+    setMeasurements([{ id: 1, label: "M1", x: 51.8, y: 52.4, hu: 48, diameter: "18.6 mm", slice: displaySlice }]);
     setLogs((items) => [`病例切换：${nextCase.id} · ${nextCase.target}`, ...items].slice(0, 8));
-    setLastImport(`演示病例就绪：${nextCase.id}`);
+    setLastImport(`${nextCase.custom ? "自定义" : "本地"}病例就绪：${nextCase.id}`);
+    if (nextCase.referenceCaseId) {
+      setSelectedReferenceCaseId(nextCase.referenceCaseId);
+      const referenceCase = referenceCases.find((item) => item.id === nextCase.referenceCaseId)
+        ?? DEFAULT_REFERENCE_CASES.find((item) => item.id === nextCase.referenceCaseId);
+      if (referenceCase?.hasOriginal) {
+        await loadReferenceCase(referenceCase);
+      }
+    }
   }
 
   function createCustomCaseFromCurrent() {
@@ -944,7 +976,7 @@ function App() {
       resultImage
     };
     setCustomCases((items) => [...items, nextCase]);
-    selectCase(nextCase);
+    void selectCase(nextCase);
     setToast(`已新建自定义病例 ${id}`);
   }
 
@@ -961,7 +993,7 @@ function App() {
     const deletedCase = customCases.find((caseItem) => caseItem.id === caseId);
     if (!deletedCase) return;
     setCustomCases((items) => items.filter((caseItem) => caseItem.id !== caseId));
-    if (selectedCase.id === caseId) selectCase(cases[0]);
+    if (selectedCase.id === caseId) void selectCase(cases[0]);
     revokeCaseAssets(deletedCase);
     setToast(`已删除自定义病例 ${caseId}`);
   }
@@ -1009,7 +1041,7 @@ function App() {
       const sliceIndex = Math.floor(volume.slices / 2);
       const dimensions = `${volume.columns}x${volume.rows}x${volume.slices}`;
       return {
-        src: renderNiftiSliceToDataUrl(volume, sliceIndex),
+        src: renderCachedAxialNiftiSliceToDataUrl(volume, sliceIndex),
         name: file.name,
         kind: "NIfTI",
         meta: `${dimensions} 路 ${volume.datatype} 路 ${volume.spacing}`,
@@ -1224,9 +1256,9 @@ function App() {
               <div className="case-menu">
                 {allCases.map((caseItem) => (
                   <div key={caseItem.id} className={caseItem.custom ? "case-row custom-case-row" : "case-row"}>
-                    <button className={selectedCase.id === caseItem.id ? "case-option active" : "case-option"} onClick={() => selectCase(caseItem)}>
+                    <button className={selectedCase.id === caseItem.id ? "case-option active" : "case-option"} onClick={() => void selectCase(caseItem)}>
                       <strong>{caseItem.id}</strong>
-                      <span>{caseItem.sex} · {caseItem.age || "-"} 岁 · {caseItem.phase}</span>
+                      <span>{caseItem.caseSummary ?? `${caseItem.sex} · ${caseItem.age || "-"} 岁 · ${caseItem.phase}`}</span>
                       <small>{caseItem.target} · {caseItem.slices} 层</small>
                     </button>
                     {caseItem.custom ? (

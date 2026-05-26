@@ -1,6 +1,6 @@
 # 三大目标验收包
 
-本文档用于把当前 GUI 的三个目标从“功能接近完成”推进到“可复现验收”。当前本地可见真实 NIfTI 资源仍以 AMOS 0117 为主，未发现可直接登记的非 AMOS CT 文件；因此非 AMOS 病例先通过 `reference_cases.example.json` 给出注册方式，不能把占位配置当成模型泛化验证结论。
+本文档用于把当前 GUI 的三个目标从“功能接近完成”推进到“可复现验收”。当前证据包含 AMOS 0117 原生标签验证，以及 FLARE22 Tr 0009 的非 AMOS 在线推理和离线 taxonomy-remap 指标。FLARE22 本地 label 文件存在，但标签 ID 与当前 AMOS22 checkpoint 不一致，因此后端自动验证保持关闭，不能把它写成 AMOS 原生 Dice 验收。
 
 ## 目标 1：CT 可浏览、三正交可联动
 
@@ -268,3 +268,87 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\checkpoint_best.
 - perf 工具本身还有收尾缺陷：timeout 后 summary 需要等待 `persistent_worker_lock`，而后台推理线程也持有该锁等待 worker complete，因此 summary 只能在 worker 返回后落盘；warm 的 `job_summary.json` 和 `validation_summary.json` 没有被后端完整写出，需要用已落盘 NIfTI 单独补 metrics。
 
 注意：新权重质量指标明显改善，但本次冷启动常驻 worker 的首次推理耗时不应被写成加速成功。当前已经验证的在线加速收益是缓存回填；常驻 worker 是否能改善连续未缓存病例，需要在同一后端进程内执行第二个不同输入或禁用缓存的 warm-worker 对照测试。
+
+## 2026-05-26 FLARE22 Tr 0009 在线推理记录
+
+本轮新增本地 FLARE22 Tr 0009 病例，并通过私有 registry 暴露给 `/api/samples`。该 registry 位于被忽略的 `nnunetv2_files/reference_cases.local.json`，不提交真实 NIfTI 数据。
+
+病例元信息：
+
+| 项目 | 结果 |
+|---|---|
+| case id | `flare22_tr_0009` |
+| dataset | `FLARE22` |
+| original | `FLARE22_Tr_0009_0000.nii.gz` |
+| label | `FLARE22_Tr_0009.nii.gz`，仅离线使用 |
+| dimensions | `512 / 512 / 87` |
+| spacing | `0.806641 / 0.806641 / 2.5 mm` |
+| original dtype | `float32` |
+| label values | `0..13` |
+| `/api/samples` | `has_original=true`, `has_label=false`, `validation_available=false` |
+
+标签边界：
+
+- FLARE22 label 定义为 `1=liver`, `2=right_kidney`, `3=spleen`, `4=pancreas`, `5=aorta`, `6=inferior_vena_cava`, `7=right_adrenal_gland`, `8=left_adrenal_gland`, `9=gallbladder`, `10=esophagus`, `11=stomach`, `12=duodenum`, `13=left_kidney`。
+- 当前 checkpoint 是 `Dataset001_AMOS22`，label ID 顺序不同且包含 `14=bladder`, `15=prostate_or_uterus`。
+- 因此后端自动 validation 保持关闭；任何数值指标必须明确说明是离线 taxonomy remap 对照。
+
+未缓存 `quality` 在线推理记录：
+
+| 项目 | 结果 |
+|---|---|
+| job id | `86b0153d0a73` |
+| mode | `real-nnunetv2` |
+| cached_result | `false` |
+| profile | `quality` |
+| device | `cuda` |
+| checkpoint_sha256 | `45021cef5f37868f8e76f4c372b5d911eef259db6d38943779ba25318c37e6c7` |
+| duration_seconds | `237.323` |
+| phase_timings | `prepare_runtime_model=0.003`, `persistent_worker=237.119`, `collect_result=0.001` |
+| result_status | `200` |
+| result_bytes | `120761` |
+| resource_latest | RTX 4060 Laptop GPU, `1804 / 8188 MiB`, `18%`, disk free `105865117696 bytes` |
+| output | `.test-output\flare22-tr-0009-quality-20260526\86b0153d0a73.nii.gz` |
+
+离线 FLARE→AMOS taxonomy-remapped 指标：
+
+| 指标 | 值 |
+|---|---:|
+| mean Dice | `0.893127` |
+| min Dice | `0.673730` |
+| foreground Dice | `0.949908` |
+| mean IoU | `0.815941` |
+| min IoU | `0.507989` |
+| foreground IoU | `0.904594` |
+| Pixel/Voxel Accuracy | `0.991879` |
+| mean Hausdorff Distance | `12.595149 mm` |
+| max Hausdorff Distance | `38.043429 mm` |
+| weakest label | `duodenum`, Dice `0.673730` |
+
+## 2026-05-26 GUI 交互性能与代码交接
+
+范围：
+
+- 缓解三正交 CT 视图中快速移动光标时的可见卡帧和图像滞后。
+- 新增 `CODE_MODULE_GUIDE.md`，作为后续代码讲解和交接的模块级说明书。
+
+验收证据：
+
+| 检查项 | 结果 |
+|---|---|
+| 三视图指针烟测 | Edge/Playwright 成功加载 `.orthogonal-viewer`，识别到 `3` 个视图面板，并完成快速拖动，无控制台错误。 |
+| 图像渲染烟测 | 拖动后所有 `.ortho-canvas img` 都有非空 `src`，且 natural dimensions 不为 0。 |
+| 回归验证 | 本轮已通过 `node tests/imagingLogic.test.ts`、`node tests/acceptanceDocs.test.ts`、`npm test` 和 `npm run build`。 |
+
+行为边界：
+
+- 十字线移动优先保持即时反馈。
+- 较重的切片栅格化通过 `requestAnimationFrame` 合并调度，快速拖动时中间帧可能被跳过，但最终会渲染最新坐标。
+- 三正交视图中的 `分屏` 仅在存在 mask 结果时显示分割线；滑杆控制左侧分割结果叠加区域的比例。
+- 本改动不改变 nnUNetv2 推理、validation、Dice/IoU/Hausdorff 指标或 label taxonomy 处理。
+
+结论：
+
+- FLARE22 Tr 0009 的后端在线推理链路通过，结果可下载，且未命中历史缓存。
+- 该病例不是 AMOS 原生标签验收；自动 Dice 验证被正确关闭。
+- Remapped 指标显示总体可用，但 duodenum 低于 `0.70`，pancreas/esophagus 约 `0.81`，正式报告仍需人工复核三正交视图和局部边界。

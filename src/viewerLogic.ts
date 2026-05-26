@@ -16,6 +16,10 @@ export type DisplayVoxelCoord = {
   z: number;
 };
 
+export function shouldUpdateVoxelCoord(current: DisplayVoxelCoord, next: DisplayVoxelCoord) {
+  return current.x !== next.x || current.y !== next.y || current.z !== next.z;
+}
+
 export function volumesShareDisplayGrid(source: DisplayGridVolume, result: DisplayGridVolume) {
   return source.columns === result.columns
     && source.rows === result.rows

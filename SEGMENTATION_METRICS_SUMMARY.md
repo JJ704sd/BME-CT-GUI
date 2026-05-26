@@ -75,7 +75,7 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\amos_0117(2).nii
 - Quality JSON: `.test-output\segmentation-metrics-quality-profile-20260525-1433\quality-profile-amos0117-segmentation-metrics.json`
 - Quality Markdown: `.test-output\segmentation-metrics-quality-profile-20260525-1433\quality-profile-amos0117-segmentation-metrics.md`
 
-## Latest Aggregate Metrics
+## Current AMOS Baseline Aggregate Metrics
 
 | Metric | Value |
 |---|---:|
@@ -121,6 +121,57 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\amos_0117(2).nii
 - label `14/15` 的小体积假阳性只在本轮 fast profile 中出现；如要过滤，应作为独立 `postprocess` 实验记录，不能混同模型原始输出。
 - 2026-05-25 后续实现已把 `quality/fast` 做成每次 job 的显式产品选择。`inference_options` 会随创建响应、job state、SSE complete 事件和 `job_summary.json` 保存；本节指标仍只代表上表两次原始模型输出，没有新增后处理分数。
 
+## FLARE22 Tr 0009 Taxonomy-remapped Comparison
+
+2026-05-26 新增 FLARE22 Tr 0009 后执行一次 `quality` 在线推理。该病例的原始 FLARE22 label ID 顺序与当前 AMOS22 checkpoint 不一致，因此后端自动 validation 保持关闭，`/api/samples` 中 `validation_available=false`。下表指标来自离线 remap：先按器官名把 FLARE22 label 映射到 AMOS22 checkpoint label ID，再运行指标脚本，仅作为非 AMOS 对照证据。
+
+运行输出：
+
+- Job summary: `.test-output\flare22-tr-0009-quality-20260526\job_summary.json`
+- Prediction: `.test-output\flare22-tr-0009-quality-20260526\86b0153d0a73.nii.gz`
+- Remapped reference: `.test-output\flare22-tr-0009-quality-20260526\FLARE22_Tr_0009_label_remapped_to_amos_ids.nii.gz`
+- Remap metadata: `.test-output\flare22-tr-0009-quality-20260526\flare_to_amos_label_remap.json`
+- Metrics JSON: `.test-output\flare22-tr-0009-quality-20260526\metrics-remapped\flare22-tr-0009-quality-remapped-segmentation-metrics.json`
+- Metrics Markdown: `.test-output\flare22-tr-0009-quality-20260526\metrics-remapped\flare22-tr-0009-quality-remapped-segmentation-metrics.md`
+
+推理记录：
+
+| Metric | Value |
+|---|---:|
+| job id | `86b0153d0a73` |
+| mode | `real-nnunetv2` |
+| cached_result | `false` |
+| profile | `quality` |
+| duration_seconds | `237.323` |
+| phase_timings | `prepare_runtime_model=0.003`, `persistent_worker=237.119`, `collect_result=0.001` |
+| result_size_bytes | `120761` |
+| GPU at completion | `NVIDIA GeForce RTX 4060 Laptop GPU`, `1804 / 8188 MiB`, `18%` |
+
+Remapped aggregate metrics:
+
+| Metric | Value |
+|---|---:|
+| mean Dice | `0.893127` |
+| min Dice | `0.673730` |
+| foreground Dice | `0.949908` |
+| mean IoU | `0.815941` |
+| min IoU | `0.507989` |
+| foreground IoU | `0.904594` |
+| Voxel Accuracy | `0.991879` |
+| Pixel Accuracy | `0.991879` |
+| mean Hausdorff Distance | `12.595149 mm` |
+| max Hausdorff Distance | `38.043429 mm` |
+| label 14 prediction_voxels | `0` |
+| label 15 prediction_voxels | `0` |
+
+Lowest per-label values in this remapped comparison were `duodenum` Dice `0.673730`, `pancreas` Dice `0.806389`, and `esophagus` Dice `0.808989`; the highest Dice values were `liver=0.968961`, `spleen=0.965952`, and `gall_bladder=0.949364`.
+
+Interpretation boundary:
+
+- This is not backend automatic validation and must not be mixed with AMOS 0117 native-label metrics.
+- The remap is valid only as an organ-name alignment check for the 13 FLARE22 organs shared with the AMOS22 checkpoint.
+- FLARE22 has no bladder or prostate/uterus labels in this case; labels `14/15` remain absent and had `0` predicted voxels in this `quality` run.
+
 Checkpoint metadata：
 
 | Field | Value |
@@ -129,7 +180,7 @@ Checkpoint metadata：
 | modified_time | `2026-05-24T10:04:22+00:00` |
 | sha256 | `45021cef5f37868f8e76f4c372b5d911eef259db6d38943779ba25318c37e6c7` |
 
-## Latest Per-label Metrics
+## Current AMOS Baseline Per-label Metrics
 
 | Label | Name | Dice | IoU | Hausdorff Distance (mm) |
 |---:|---|---:|---:|---:|
@@ -150,6 +201,15 @@ Checkpoint metadata：
 | 15 | 前列腺/子宫 | `N/A` | `N/A` | `N/A` |
 
 ## Notes
+
+### 2026-05-26 GUI 运行时渲染说明
+
+本轮 GUI 交互性能优化不改变本指标汇总中的任何数值。代码改动只影响前端渲染节奏：
+
+- `src/components/OrthogonalViewer.tsx` 使用 `requestAnimationFrame` 合并高频切片图像更新。
+- `src/main.tsx` 按动画帧调度 axial 预览切片更新，并让右侧预览和底部缩略图复用共享切片缓存渲染器。
+- 十字线反馈仍保持即时；较重的 `canvas.toDataURL()` 切片栅格化在快速移动光标时减少同步触发。
+- 本轮没有改变 nnUNetv2 推理、validation、Dice/IoU/Hausdorff 计算，也没有改变 FLARE22 taxonomy-remap 指标。
 
 - 本文档记录的是 AMOS 0117 参考病例上的指标，不代表所有外部 CT 都具备同等效果。
 - 没有标准标签的病例不能计算 Dice、IoU 或 Hausdorff Distance，只能记录推理耗时、资源快照和人工复核结论。

@@ -1,5 +1,5 @@
 import type { CSSProperties, PointerEvent, WheelEvent } from "react";
-import { useDeferredValue, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { OrganLabel } from "../data/organDetails";
 import type { Orientation, VoxelCoord } from "../imaging/voxelMapping";
 import {
@@ -14,6 +14,7 @@ import {
 } from "../imaging/voxelMapping";
 import type { NiftiVolumeLike } from "../imaging/sliceRenderer";
 import { getLabelAtVoxel, getVoxelValue, renderNiftiSliceToDataUrl } from "../imaging/sliceRenderer";
+import { shouldUpdateVoxelCoord } from "../viewerLogic";
 
 type CompareMode = "split" | "overlay" | "side" | "difference";
 
@@ -47,21 +48,46 @@ function stepCoord(orientation: Orientation, coord: VoxelCoord, delta: number, v
   return { ...coord, z: Math.max(0, Math.min(volume.slices - 1, coord.z + delta)) };
 }
 
+function useRafCoalescedCoord(coord: VoxelCoord) {
+  const [renderCoord, setRenderCoord] = useState(coord);
+  const latestCoordRef = useRef(coord);
+  const frameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    latestCoordRef.current = coord;
+    if (frameRef.current !== null) return;
+
+    frameRef.current = requestAnimationFrame(() => {
+      frameRef.current = null;
+      const latestCoord = latestCoordRef.current;
+      setRenderCoord((current) => shouldUpdateVoxelCoord(current, latestCoord) ? latestCoord : current);
+    });
+  }, [coord.x, coord.y, coord.z]);
+
+  useEffect(() => () => {
+    if (frameRef.current !== null) {
+      cancelAnimationFrame(frameRef.current);
+    }
+  }, []);
+
+  return renderCoord;
+}
+
 function Panel(props: OrthogonalViewerProps & { orientation: Orientation; title: string; subtitle: string }) {
   const dimensions = getOrientationDimensions(props.orientation, props.sourceVolume);
   const displayAspect = getOrientationDisplayAspect(props.orientation, props.sourceVolume);
   const displayRatio = getOrientationDisplayRatio(props.orientation, props.sourceVolume);
   const stageRef = useRef<HTMLDivElement>(null);
   const [stageRatio, setStageRatio] = useState(displayRatio);
-  const deferredCoord = useDeferredValue(props.coord);
-  const sourceSliceKey = getSliceRenderKey(props.orientation, deferredCoord, props.sourceVolume);
-  const maskSliceKey = props.maskVolume ? getSliceRenderKey(props.orientation, deferredCoord, props.maskVolume) : "";
+  const renderCoord = useRafCoalescedCoord(props.coord);
+  const sourceSliceKey = getSliceRenderKey(props.orientation, renderCoord, props.sourceVolume);
+  const maskSliceKey = props.maskVolume ? getSliceRenderKey(props.orientation, renderCoord, props.maskVolume) : "";
   const sourceSrc = useMemo(
-    () => renderNiftiSliceToDataUrl(props.sourceVolume, deferredCoord, "intensity", props.orientation),
+    () => renderNiftiSliceToDataUrl(props.sourceVolume, renderCoord, "intensity", props.orientation),
     [props.sourceVolume, props.orientation, sourceSliceKey]
   );
   const maskSrc = useMemo(
-    () => props.maskVolume ? renderNiftiSliceToDataUrl(props.maskVolume, deferredCoord, "mask", props.orientation, props.visibleLabels) : "",
+    () => props.maskVolume ? renderNiftiSliceToDataUrl(props.maskVolume, renderCoord, "mask", props.orientation, props.visibleLabels) : "",
     [props.maskVolume, props.orientation, props.visibleLabels, maskSliceKey]
   );
   useLayoutEffect(() => {
@@ -94,7 +120,9 @@ function Panel(props: OrthogonalViewerProps & { orientation: Orientation; title:
     const point = clientPointToSlicePoint(event.clientX, event.clientY, rect, dimensions, displayRatio);
     if (!point) return;
     const nextCoord = slicePointToVoxelCoord(props.orientation, point, props.coord, props.sourceVolume);
-    props.onCoordChange(nextCoord);
+    if (shouldUpdateVoxelCoord(props.coord, nextCoord)) {
+      props.onCoordChange(nextCoord);
+    }
     if (pickOrgan && props.maskVolume) {
       const label = getLabelAtVoxel(props.maskVolume, nextCoord);
       if (label > 0) props.onOrganPick(label, nextCoord);
@@ -114,7 +142,7 @@ function Panel(props: OrthogonalViewerProps & { orientation: Orientation; title:
         <span>{props.subtitle} · {slice}/{sliceTotal}</span>
       </div>
       <div
-        className={`ortho-canvas compare-${props.compareMode}`}
+        className={`ortho-canvas compare-${props.compareMode} ${props.maskVolume ? "has-mask" : "no-mask"}`}
         style={{ "--slice-aspect": displayAspect, "--slice-pixel-aspect": `${displayRatio} / 1`, "--mask-opacity": props.opacity / 100 } as CSSProperties}
         onPointerDown={(event) => updateCoordFromPointer(event, true)}
         onPointerMove={(event) => {

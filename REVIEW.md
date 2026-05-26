@@ -2,7 +2,7 @@
 
 > 基于 `segmentation-gui-prototype` 当前代码、运行中的本地服务以及 `nnunetv2_files` 资源整理。
 > 目标是把这个原型收敛成一个可浏览 CT、可联动三正交视图、可点击器官说明、可连接本地分割后端的工作型 GUI。
-> 当前结论：前端已经具备三正交浏览和 13 类器官说明，后端已接入本地 nnUNetv2 model folder 与真实推理命令，并会在配置不完整时明确拒绝创建任务；真实大体积作业仍需在本机服务运行态下做耗时验证。
+> 当前结论：前端已经具备三正交浏览、13 类器官说明、真实病例入口和结果对比视图；后端已接入本地 nnUNetv2 model folder 与真实推理命令，并会在配置不完整时明确拒绝创建任务。AMOS 0117 已形成原生标签质量基线，FLARE22 Tr 0009 已完成未缓存 `quality` 在线推理和离线 taxonomy-remap 对照；FLARE22 的自动 Dice 验证仍按标签体系不兼容处理为关闭。
 
 ---
 
@@ -37,6 +37,9 @@
 | `amos_0117(2).nii.gz` | AMOS 0117 参考病例标准答案 |
 | `amos_0117_original.nii/` | 目录型解压参考病例，不是直接可读的单一文件 |
 | `amos_0117_label.nii/` | 目录型解压标准答案，不是直接可读的单一文件 |
+| `FLARE22_Tr_0009_0000.nii.gz` | FLARE22 Tr 0009 原始 CT，本轮用于在线推理补充 |
+| `FLARE22_Tr_0009.nii.gz` | FLARE22 Tr 0009 label，仅用于离线 taxonomy-remap 对照，不登记为后端自动验证 label |
+| `FLARE\` | FLARE challenge 说明和评估资料，本地资料目录 |
 
 这些资源可用于演示和调试，但不能自动等同于完整、可验证的 nnUNetv2 生产结果目录。
 
@@ -1688,7 +1691,126 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\.test-output\perf-quality-profi
 - 本轮没有新增真实推理 benchmark，因此不改变 32.9 的 fast/quality 数值结论。
 - `fast` 仍只能作为快速预览/演示路径；正式报告和质量结论仍以 `quality` 原始输出为准。
 
+## 三十四、2026-05-26 FLARE22 Tr 0009 非 AMOS 在线推理补充
+
+### 34.1 数据接入
+
+- 新增本地补充数据位于被忽略的 `nnunetv2_files/` 下：
+  - `FLARE\`：FLARE challenge 说明与评估脚本。
+  - `FLARE22_Tr_0009.nii.gz`：FLARE22 label。
+  - `FLARE22_Tr_0009_0000.nii.gz`：FLARE22 原图。
+- 私有 registry `nnunetv2_files/reference_cases.local.json` 已追加 `flare22_tr_0009`。
+- `/api/samples` 验证结果：`has_original=true`，`has_label=false`，`validation_available=false`。
+- 审核结论：`has_label=false` 是刻意行为，不是漏接 label。该 label 文件存在，但不能按当前 AMOS22 checkpoint 的 label ID 直接做后端自动 Dice/IoU/Hausdorff 验证。
+
+### 34.2 标签兼容性判断
+
+FLARE22 Tr 0009 的原图和 label 均为 `512 x 512 x 87`，spacing 为 `0.806641 x 0.806641 x 2.5 mm`，label 值为 `0..13`。
+
+FLARE22 label ID 与当前 AMOS22 checkpoint 不一致：
+
+| 标签源 | 关键差异 |
+|---|---|
+| FLARE22 | `1=liver`, `3=spleen`, `4=pancreas`, `13=left_kidney` |
+| AMOS22 checkpoint | `1=spleen`, `3=left_kidney`, `6=liver`, `10=pancreas`, `14/15=bladder/prostate_or_uterus` |
+
+因此本轮没有把 FLARE22 label 配进 registry，也没有让后端做自动 validation。后续所有 FLARE22 数值指标必须写成 taxonomy-remapped comparison。
+
+### 34.3 在线推理结果
+
+运行设置：
+
+| 项目 | 值 |
+|---|---|
+| case id | `flare22_tr_0009` |
+| job id | `86b0153d0a73` |
+| mode | `real-nnunetv2` |
+| cached_result | `false` |
+| inference_profile | `quality` |
+| tile_step_size | `0.5` |
+| disable_tta | `false` |
+| persistent worker | `enabled` |
+| device | `cuda` |
+
+运行结果：
+
+| 项目 | 结果 |
+|---|---:|
+| duration_seconds | `237.323` |
+| prepare_runtime_model | `0.003` |
+| persistent_worker | `237.119` |
+| collect_result | `0.001` |
+| result_size_bytes | `120761` |
+| GPU at completion | `1804 / 8188 MiB`, `18%` |
+| disk_free_bytes at completion | `105865117696` |
+
+输出文件：
+
+| 项目 | 路径 |
+|---|---|
+| job create | `.test-output\flare22-tr-0009-quality-20260526\job_create.json` |
+| job summary | `.test-output\flare22-tr-0009-quality-20260526\job_summary.json` |
+| prediction | `.test-output\flare22-tr-0009-quality-20260526\86b0153d0a73.nii.gz` |
+| remap metadata | `.test-output\flare22-tr-0009-quality-20260526\flare_to_amos_label_remap.json` |
+| remapped metrics JSON | `.test-output\flare22-tr-0009-quality-20260526\metrics-remapped\flare22-tr-0009-quality-remapped-segmentation-metrics.json` |
+| remapped metrics Markdown | `.test-output\flare22-tr-0009-quality-20260526\metrics-remapped\flare22-tr-0009-quality-remapped-segmentation-metrics.md` |
+
+### 34.4 Remapped 指标对照
+
+先按器官名把 FLARE22 label 映射到 AMOS22 checkpoint label ID，然后离线计算指标。该结果用于查看非 AMOS 表现，不等同于后端自动 validation。
+
+| 指标 | 值 |
+|---|---:|
+| mean Dice | `0.893127` |
+| min Dice | `0.673730` |
+| foreground Dice | `0.949908` |
+| mean IoU | `0.815941` |
+| min IoU | `0.507989` |
+| foreground IoU | `0.904594` |
+| Voxel/Pixel Accuracy | `0.991879` |
+| mean Hausdorff Distance | `12.595149 mm` |
+| max Hausdorff Distance | `38.043429 mm` |
+| label 14/15 prediction_voxels | `0 / 0` |
+
+最低 Dice 标签为 `duodenum=0.673730`，其次需要关注 `pancreas=0.806389` 和 `esophagus=0.808989`。这说明本例整体分割表现可用，但正式查看时仍应重点复核十二指肠、胰腺和食管边界。
+
+### 34.5 当前判断
+
+- 新增 FLARE22 Tr 0009 的在线推理链路已经跑通，且结果为真实未缓存 `quality` 推理。
+- 该病例可以作为非 AMOS acceptance evidence，但只能以 manual-only + remapped offline metrics 的形式记录。
+- GUI 已提供 FLARE22 Tr 0009 真实病例入口；后续若要形成正式人工验收截图，应继续记录 overlay / split / side / difference 的人工复核截图和边界意见。
+
+## 三十五、2026-05-26 三视图交互性能与分屏修复
+
+### 35.1 现象和根因
+
+用户反馈快速点击或移动光标时，三正交视图的图像更新会略有滞后。排查后确认主要原因是指针移动路径会触发 NIfTI 切片同步渲染：三视图切片、右侧 axial 预览和底部缩略图都可能在 React 更新中执行像素遍历和 `canvas.toDataURL()`。
+
+另一个相关交互缺口是：工具栏的 `分屏` 滑杆原本只在旧二维对比层有 CSS 裁剪逻辑；当前真实 NIfTI 的三正交视图虽然接收了 `compareMode="split"`，但 `.ortho-mask` 没有按 `--compare-position` 裁剪，所以用户在真实病例调试时难以体验到分屏效果。
+
+### 35.2 本轮修复
+
+- `src/components/OrthogonalViewer.tsx` 新增 `useRafCoalescedCoord()`，把高频切片图像重绘合并到 `requestAnimationFrame`。
+- 十字线继续使用即时 `coord`，保证光标反馈优先；图像重绘使用合并后的 `renderCoord`。
+- `src/main.tsx` 新增按帧合并的 `scheduleSelectedSlice()`，避免 pointer move 同步触发右侧预览和底部缩略图频繁重绘。
+- axial 预览改用 `src/imaging/sliceRenderer.ts` 的缓存渲染器。
+- `src/styles.css` 新增 `.compare-split.has-mask .ortho-mask` 裁剪规则和分割线；有 mask volume 时，分屏滑杆控制左侧分割结果叠加比例，右侧保留原始 CT。
+- `OrthogonalViewer` 现在区分 `has-mask` / `no-mask`，没有结果图时不显示假分割线。
+- 新增 `CODE_MODULE_GUIDE.md`，用于后续按模块讲解代码。
+
+### 35.3 分屏功能解释
+
+`分屏` 不是切换 Axial/Sagittal/Coronal 的布局，而是原图与分割结果的滑动对比模式。滑杆值为 `75%` 时，左侧约 75% 区域显示 mask 叠加，右侧约 25% 区域只显示 CT 原图。该功能只有在已经有分割结果 `maskVolume` 后才有可见效果；只加载原图时没有可对比对象。
+
+### 35.4 验证
+
+- `node tests/imagingLogic.test.ts`：通过，覆盖 rAF 合并渲染、坐标去重和三正交分屏裁剪 CSS。
+- `node tests/acceptanceDocs.test.ts`：通过，覆盖 `CODE_MODULE_GUIDE.md` 存在性和关键模块说明。
+- Edge/Playwright 三视图快速拖动烟测：通过，三视图图片非空白且无控制台错误。
+- `npm test`：通过。
+- `npm run build`：通过。
+
 ---
 
-*文档版本：2026-05-25*
+*文档版本：2026-05-26*
 *更新依据：当前 `src/main.tsx`、`src/components/OrthogonalViewer.tsx`、`src/imaging/voxelMapping.ts`、`src/imaging/sliceRenderer.ts`、`src/data/organDetails.ts`、`src/inference/inferenceClient.ts`、`server/main.py`、`server/persistent_nnunet_worker.py`、`server/requirements.txt`、`tools/perf_no_cache_persistent.py`、`README.md`、`ACCEPTANCE.md`、`SEGMENTATION_METRICS_SUMMARY.md`、`reference_cases.example.json`、`tests/*.test.ts` 与本地运行验证结果。*

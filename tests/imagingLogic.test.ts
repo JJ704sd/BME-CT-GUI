@@ -17,8 +17,11 @@ import { buildLabelLookup, defaultOrganLabels, getOrganDetail } from "../src/dat
 import { createInferenceJob, getInferenceResultMeta, getInferenceStatusCopy, getPhaseTimingSummary, getResourceSnapshotCopy, normalizeModelLabels, parseInferenceEvent } from "../src/inference/inferenceClient.ts";
 import { buildOrganLayersFromLabels } from "../src/organLayerLogic.ts";
 import { DEFAULT_REFERENCE_CASES, getReferenceCaseOriginalUrl, normalizeReferenceCases } from "../src/referenceCases.ts";
+import { shouldUpdateVoxelCoord } from "../src/viewerLogic.ts";
 
 const mainSource = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
+const orthogonalViewerSource = readFileSync(new URL("../src/components/OrthogonalViewer.tsx", import.meta.url), "utf8");
+const stylesSource = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
 
 for (const copy of ["载入 AMOS " + "样例", "本地 AMOS " + "样例", "AMOS CT " + "样例"]) {
   assert.equal(mainSource.includes(copy), false, `UI should not use AMOS-only copy: ${copy}`);
@@ -29,6 +32,17 @@ assert.equal(mainSource.includes("api/samples/amos_0117/original"), false, "UI s
 assert.equal(mainSource.includes("质量推理"), true, "UI should expose the default quality inference profile");
 assert.equal(mainSource.includes("快速预览"), true, "UI should expose the fast preview inference profile");
 assert.equal(mainSource.includes("需人工复核"), true, "UI should warn that fast preview results require review");
+for (const mockCaseId of ["Case_FLARE_024", "Case_LUNG_112", "Case_PANC_038"]) {
+  assert.equal(mainSource.includes(mockCaseId), false, `top case selector should not expose mock case ${mockCaseId}`);
+}
+for (const realCaseId of ["AMOS_0117", "FLARE22_Tr_0009"]) {
+  assert.equal(mainSource.includes(realCaseId), true, `top case selector should expose local real case ${realCaseId}`);
+}
+assert.equal(orthogonalViewerSource.includes("useRafCoalescedCoord"), true, "orthogonal slice images should coalesce fast cursor moves before rerendering");
+assert.equal(mainSource.includes("setSelectedSlice(getSelectedSliceForVoxelCoord"), false, "cursor movement should not synchronously rerender axial previews on every pointer event");
+assert.equal(stylesSource.includes(".compare-split.has-mask .ortho-mask"), true, "orthogonal split mode should clip the mask layer only when a mask exists");
+assert.equal(orthogonalViewerSource.includes("has-mask"), true, "orthogonal split mode should know when a mask volume is present");
+assert.equal(stylesSource.includes("var(--compare-position"), true, "orthogonal split mode should use the split slider position");
 
 assert.deepEqual(normalizeReferenceCases({
   samples: [
@@ -115,6 +129,8 @@ assert.equal(getSliceImageCacheKey("sagittal", coord, volume, "intensity"), getS
 assert.notEqual(getSliceImageCacheKey("sagittal", coord, volume, "intensity"), getSliceImageCacheKey("sagittal", { ...coord, x: 8 }, volume, "intensity"));
 assert.equal(getSliceImageCacheKey("axial", coord, volume, "mask", new Set([3, 1])), getSliceImageCacheKey("axial", coord, volume, "mask", new Set([1, 3])));
 assert.notEqual(getSliceImageCacheKey("axial", coord, volume, "mask", new Set([3, 1])), getSliceImageCacheKey("axial", coord, volume, "mask", new Set([1])));
+assert.equal(shouldUpdateVoxelCoord(coord, { ...coord }), false);
+assert.equal(shouldUpdateVoxelCoord(coord, { ...coord, z: coord.z + 1 }), true);
 
 assert.deepEqual(voxelCoordToSlicePoint("axial", coord, volume), { column: 4, row: 11 });
 assert.deepEqual(voxelCoordToSlicePoint("sagittal", coord, volume), { column: 11, row: 17 });
