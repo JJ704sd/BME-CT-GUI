@@ -1810,6 +1810,32 @@ FLARE22 label ID 与当前 AMOS22 checkpoint 不一致：
 - `npm test`：通过。
 - `npm run build`：通过。
 
+## 三十六、2026-05-26 矢状/冠状拖动回跳修复
+
+### 36.1 现象和根因
+
+用户继续反馈在矢状面或冠状面拖动时，CT 图像仍会出现卡顿和三视图来回切换。复核后确认这不是矢状/冠状坐标映射方向错误，而是 `voxelCoord` 和主页面 `selectedSlice` 的双向同步存在延迟回写：
+
+- 矢状面或冠状面拖动会快速更新 `voxelCoord.z`。
+- `selectedSlice` 为了降低右侧 axial 预览和底部缩略图重绘频率，会通过 `requestAnimationFrame` 延迟同步。
+- 旧逻辑在 `selectedSlice` 变化后又反向把 `selectedSlice - 1` 写回 `voxelCoord.z`。
+- 快速拖动时，旧 `selectedSlice` 会覆盖更新后的 z 坐标，表现为切片回跳、三视图来回切换和可见卡顿。
+
+### 36.2 本轮修复
+
+- `src/viewerLogic.ts` 新增 `SelectedSliceSyncSource` 和 `getVoxelCoordForSelectedSliceSync()`。
+- `src/main.tsx` 新增 `selectedSliceSyncSourceRef`，区分 selectedSlice 更新来源。
+- 当 selectedSlice 是由三视图拖动同步而来时，只校正坐标边界，不再反向覆盖当前 `voxelCoord.z`。
+- 当用户主动拖动切片滑块或点击底部切片时，仍然按 `selectedSlice - 1` 正常更新 z 坐标。
+- `tests/imagingLogic.test.ts` 增加回归测试，覆盖“矢状/冠状拖动不能被旧 selectedSlice 拉回”的场景。
+
+### 36.3 验证
+
+- `node tests/imagingLogic.test.ts`：通过。
+- `npm test`：通过。
+- `npm run build`：通过。
+- `git diff --check`：通过。
+
 ---
 
 *文档版本：2026-05-26*

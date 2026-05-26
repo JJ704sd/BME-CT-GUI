@@ -46,7 +46,7 @@ import { renderNiftiSliceToDataUrl as renderOrientedNiftiSliceToDataUrl } from "
 import type { VoxelCoord } from "./imaging/voxelMapping";
 import { buildOrganLayersFromLabels, formatOrganScore, getMeanOrganDice, type OrganLayer as Organ, type OrganLayerQuality as QualityState } from "./organLayerLogic";
 import { DEFAULT_REFERENCE_CASES, getReferenceCaseOriginalUrl, normalizeReferenceCases, type ReferenceCase } from "./referenceCases";
-import { buildCustomCaseId, getAlignmentCaptionCopy, getCustomCasePanelCopy, getDisplayAspectRatio, getRegistrationStatus, getSelectedSliceForVoxelCoord, getSplitPositionFromClientX, getStableSliceWindowStart, shouldUpdateVoxelCoord, volumesShareDisplayGrid } from "./viewerLogic";
+import { buildCustomCaseId, getAlignmentCaptionCopy, getCustomCasePanelCopy, getDisplayAspectRatio, getRegistrationStatus, getSelectedSliceForVoxelCoord, getSplitPositionFromClientX, getStableSliceWindowStart, getVoxelCoordForSelectedSliceSync, shouldUpdateVoxelCoord, volumesShareDisplayGrid, type SelectedSliceSyncSource } from "./viewerLogic";
 import "./styles.css";
 
 const API_ENDPOINT = "http://127.0.0.1:8000";
@@ -481,6 +481,7 @@ function App() {
   const splitDragActiveRef = useRef(false);
   const pendingSelectedSliceRef = useRef<number | null>(null);
   const selectedSliceFrameRef = useRef<number | null>(null);
+  const selectedSliceSyncSourceRef = useRef<SelectedSliceSyncSource>("slice");
   const [compareMode, setCompareMode] = useState<CompareMode>("split");
   const [measureMode, setMeasureMode] = useState(false);
   const [heatmapVisible, setHeatmapVisible] = useState(true);
@@ -638,7 +639,11 @@ function App() {
       selectedSliceFrameRef.current = null;
       const pendingSlice = pendingSelectedSliceRef.current;
       if (pendingSlice === null) return;
-      setSelectedSlice((slice) => (slice === pendingSlice ? slice : pendingSlice));
+      setSelectedSlice((slice) => {
+        if (slice === pendingSlice) return slice;
+        selectedSliceSyncSourceRef.current = "voxel";
+        return pendingSlice;
+      });
     });
   }
 
@@ -650,11 +655,12 @@ function App() {
 
   useEffect(() => {
     if (!loadedImage.volume) return;
-    setVoxelCoord((coord) => ({
-      x: Math.max(0, Math.min(loadedImage.volume!.columns - 1, coord.x)),
-      y: Math.max(0, Math.min(loadedImage.volume!.rows - 1, coord.y)),
-      z: Math.max(0, Math.min(loadedImage.volume!.slices - 1, selectedSlice - 1))
-    }));
+    const syncSource = selectedSliceSyncSourceRef.current;
+    selectedSliceSyncSourceRef.current = "slice";
+    setVoxelCoord((coord) => {
+      const nextCoord = getVoxelCoordForSelectedSliceSync(coord, selectedSlice, loadedImage.volume!, syncSource);
+      return shouldUpdateVoxelCoord(coord, nextCoord) ? nextCoord : coord;
+    });
   }, [loadedImage.volume, selectedSlice]);
 
   useEffect(() => {

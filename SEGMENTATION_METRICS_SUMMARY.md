@@ -209,6 +209,7 @@ Checkpoint 元数据：
 - `src/components/OrthogonalViewer.tsx` 使用 `requestAnimationFrame` 合并高频切片图像更新。
 - `src/main.tsx` 按动画帧调度 axial 预览切片更新，并让右侧预览和底部缩略图复用共享切片缓存渲染器。
 - 十字线反馈仍保持即时；较重的 `canvas.toDataURL()` 切片栅格化在快速移动光标时减少同步触发。
+- 矢状/冠状拖动回跳修复只改变前端 `voxelCoord` 与 `selectedSlice` 的同步方向，不改变任何分割结果或指标计算。
 - 本轮没有改变 nnUNetv2 推理、validation、Dice/IoU/Hausdorff 计算，也没有改变 FLARE22 taxonomy-remap 指标。
 
 - 本文档记录的是 AMOS 0117 参考病例上的指标，不代表所有外部 CT 都具备同等效果。

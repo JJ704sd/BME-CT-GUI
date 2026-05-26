@@ -17,7 +17,7 @@ import { buildLabelLookup, defaultOrganLabels, getOrganDetail } from "../src/dat
 import { createInferenceJob, getInferenceResultMeta, getInferenceStatusCopy, getPhaseTimingSummary, getResourceSnapshotCopy, normalizeModelLabels, parseInferenceEvent } from "../src/inference/inferenceClient.ts";
 import { buildOrganLayersFromLabels } from "../src/organLayerLogic.ts";
 import { DEFAULT_REFERENCE_CASES, getReferenceCaseOriginalUrl, normalizeReferenceCases } from "../src/referenceCases.ts";
-import { shouldUpdateVoxelCoord } from "../src/viewerLogic.ts";
+import { getVoxelCoordForSelectedSliceSync, shouldUpdateVoxelCoord } from "../src/viewerLogic.ts";
 
 const mainSource = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
 const orthogonalViewerSource = readFileSync(new URL("../src/components/OrthogonalViewer.tsx", import.meta.url), "utf8");
@@ -131,6 +131,16 @@ assert.equal(getSliceImageCacheKey("axial", coord, volume, "mask", new Set([3, 1
 assert.notEqual(getSliceImageCacheKey("axial", coord, volume, "mask", new Set([3, 1])), getSliceImageCacheKey("axial", coord, volume, "mask", new Set([1])));
 assert.equal(shouldUpdateVoxelCoord(coord, { ...coord }), false);
 assert.equal(shouldUpdateVoxelCoord(coord, { ...coord, z: coord.z + 1 }), true);
+assert.deepEqual(
+  getVoxelCoordForSelectedSliceSync({ x: 4, y: 8, z: 20 }, 13, volume, "voxel"),
+  { x: 4, y: 8, z: 20 },
+  "voxel-driven selected-slice sync should not rewind a newer sagittal/coronal drag z coordinate"
+);
+assert.deepEqual(
+  getVoxelCoordForSelectedSliceSync({ x: 4, y: 8, z: 20 }, 13, volume, "slice"),
+  { x: 4, y: 8, z: 12 },
+  "slider/footer selected-slice changes should still move the axial coordinate"
+);
 
 assert.deepEqual(voxelCoordToSlicePoint("axial", coord, volume), { column: 4, row: 11 });
 assert.deepEqual(voxelCoordToSlicePoint("sagittal", coord, volume), { column: 11, row: 17 });

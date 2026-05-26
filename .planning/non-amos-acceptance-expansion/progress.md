@@ -115,3 +115,17 @@
   - full `npm test` exited 0;
   - `npm run build` exited 0;
   - Git tracking check confirmed `nnunetv2_files/`, `.test-output/`, `server/work/`, and `nnunetv2_files/reference_cases.local.json` are not tracked.
+
+## 2026-05-26 Sagittal/Coronal Drag Rewind Fix
+
+- Follow-up issue: dragging in sagittal or coronal views could still show CT slice stutter and view back-and-forth switching.
+- Root cause: voxel-driven `selectedSlice` updates were delayed with `requestAnimationFrame`, then the selected-slice effect wrote the older `selectedSlice - 1` back into `voxelCoord.z`.
+- Implemented source-aware selected-slice sync:
+  - `voxel` source clamps coordinates but does not overwrite the newer z coordinate.
+  - `slice` source still lets slider/footer slice changes update z.
+- Added regression coverage in `tests/imagingLogic.test.ts`.
+- Verification completed:
+  - `node tests/imagingLogic.test.ts`
+  - `npm test`
+  - `npm run build`
+  - `git diff --check`

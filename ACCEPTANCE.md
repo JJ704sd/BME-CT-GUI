@@ -352,3 +352,24 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\checkpoint_best.
 - FLARE22 Tr 0009 的后端在线推理链路通过，结果可下载，且未命中历史缓存。
 - 该病例不是 AMOS 原生标签验收；自动 Dice 验证被正确关闭。
 - Remapped 指标显示总体可用，但 duodenum 低于 `0.70`，pancreas/esophagus 约 `0.81`，正式报告仍需人工复核三正交视图和局部边界。
+
+## 2026-05-26 矢状/冠状拖动回跳修复记录
+
+范围：
+
+- 修复矢状面或冠状面快速拖动时，旧 `selectedSlice` 延迟回写导致 `voxelCoord.z` 被拉回的问题。
+- 保持三视图拖动和主切片滑块两种交互路径可用。
+
+验收证据：
+
+| 检查项 | 结果 |
+|---|---|
+| 根因 | `voxelCoord.z` 与 `selectedSlice` 双向同步发生延迟回写，不是 nnUNetv2 推理或 NIfTI 标签体系问题。 |
+| 回归测试 | `tests/imagingLogic.test.ts` 覆盖 voxel 驱动同步不得回退 z 坐标、slice 驱动同步仍可更新 z 坐标。 |
+| 自动验证 | `node tests/imagingLogic.test.ts`、`npm test`、`npm run build` 均通过。 |
+
+行为边界：
+
+- 三视图拖动时，十字线和体素坐标以最新 `voxelCoord` 为准。
+- 右侧 axial 预览和底部缩略图仍按帧同步，但不再反向覆盖正在拖动的矢状/冠状坐标。
+- 本改动不改变 nnUNetv2 推理、validation、Dice/IoU/Hausdorff 指标或 FLARE22 taxonomy remap。
