@@ -1,8 +1,8 @@
-# Segmentation Metrics Summary
+# 分割指标汇总
 
 本文档用于登记训练权重对应的分割指标。每次更换或训练出新权重后，使用同一套输入、参考标签和命令生成 JSON 与 Markdown，便于横向比较。
 
-## Reusable Command
+## 可复用命令
 
 ```powershell
 python tools\segmentation_metrics_summary.py `
@@ -18,15 +18,15 @@ python tools\segmentation_metrics_summary.py `
 输出文件：
 
 - `<run-name>-segmentation-metrics.json`：结构化指标，适合脚本读取和后续对比。
-- `<run-name>-segmentation-metrics.md`：人工阅读版 summary。
+- `<run-name>-segmentation-metrics.md`：人工阅读版指标摘要。
 
 记录字段：
 
-- Dice：per-label、mean、min、foreground。
-- IoU：per-label、mean、min、foreground。
+- Dice：逐标签、平均值、最低值、前景值。
+- IoU：逐标签、平均值、最低值、前景值。
 - Voxel Accuracy / Pixel Accuracy：3D NIfTI 中两者均为体素逐点 exact-match accuracy。
 - Hausdorff Distance：按 NIfTI spacing 计算的对称 surface Hausdorff Distance，单位为 mm。
-- Checkpoint metadata：路径、文件大小、修改时间和 SHA256。
+- Checkpoint 元数据：路径、文件大小、修改时间和 SHA256。
 
 标签源要求：
 
@@ -34,7 +34,7 @@ python tools\segmentation_metrics_summary.py `
 - 不要混用旧的外部 `dataset.json`；如果标签集合不同，会导致 label 名称错位或漏记空标签。
 - 本轮 checkpoint 定义 15 个前景标签。AMOS 0117 的参考标签实际只出现 label `1..13`；如果预测也没有 label `14/15`，它们记录为 N/A。如果预测出现 label `14/15` 假阳性，则 Dice/IoU 为 `0` 并应纳入 fast/quality 对照判断。
 
-## Latest Run
+## 当前 AMOS 基线运行
 
 本轮新权重：
 
@@ -64,20 +64,20 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\amos_0117(2).nii
 - Prediction: `D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\.test-output\perf-no-cache-persistent-20260524-212332\work\685426290aa4\output\685426290aa4.nii.gz`
 - JSON: `D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\.test-output\segmentation-metrics-warm-timeout-20260524-2257\warm-timeout-amos0117-segmentation-metrics.json`
 - Markdown: `D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\.test-output\segmentation-metrics-warm-timeout-20260524-2257\warm-timeout-amos0117-segmentation-metrics.md`
-- Result SHA256: `5473EAFB22FA21B896F8511BE9E02FFD49D678DEE4B82E63681FDD99DA57D9C0`
+- 结果 SHA256：`5473EAFB22FA21B896F8511BE9E02FFD49D678DEE4B82E63681FDD99DA57D9C0`
 
 2026-05-25 fast/quality no-cache profile 对照输出：
 
-- Fast prediction: `.test-output\perf-fast-profile-20260525-1305\work\6802e01f1a73\output\6802e01f1a73.nii.gz`
-- Fast JSON: `.test-output\segmentation-metrics-fast-profile-20260525-1312\fast-profile-amos0117-segmentation-metrics.json`
-- Fast Markdown: `.test-output\segmentation-metrics-fast-profile-20260525-1312\fast-profile-amos0117-segmentation-metrics.md`
-- Quality prediction: `.test-output\perf-quality-profile-20260525-1330\work\b3c528cc9e20\output\b3c528cc9e20.nii.gz`
-- Quality JSON: `.test-output\segmentation-metrics-quality-profile-20260525-1433\quality-profile-amos0117-segmentation-metrics.json`
-- Quality Markdown: `.test-output\segmentation-metrics-quality-profile-20260525-1433\quality-profile-amos0117-segmentation-metrics.md`
+- 快速预览 prediction：`.test-output\perf-fast-profile-20260525-1305\work\6802e01f1a73\output\6802e01f1a73.nii.gz`
+- 快速预览 JSON：`.test-output\segmentation-metrics-fast-profile-20260525-1312\fast-profile-amos0117-segmentation-metrics.json`
+- 快速预览 Markdown：`.test-output\segmentation-metrics-fast-profile-20260525-1312\fast-profile-amos0117-segmentation-metrics.md`
+- 质量推理 prediction：`.test-output\perf-quality-profile-20260525-1330\work\b3c528cc9e20\output\b3c528cc9e20.nii.gz`
+- 质量推理 JSON：`.test-output\segmentation-metrics-quality-profile-20260525-1433\quality-profile-amos0117-segmentation-metrics.json`
+- 质量推理 Markdown：`.test-output\segmentation-metrics-quality-profile-20260525-1433\quality-profile-amos0117-segmentation-metrics.md`
 
-## Current AMOS Baseline Aggregate Metrics
+## 当前 AMOS 基线聚合指标
 
-| Metric | Value |
+| 指标 | 数值 |
 |---|---:|
 | mean Dice | `0.924791` |
 | min Dice | `0.846551` |
@@ -90,11 +90,11 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\amos_0117(2).nii
 | mean Hausdorff Distance | `7.716048 mm` |
 | max Hausdorff Distance | `16.562684 mm` |
 
-## Fast vs Quality No-cache Profile Comparison
+## 快速预览与质量推理无缓存对照
 
 同一 AMOS 0117 输入、同一 checkpoint、同一性能脚本，均禁用历史缓存：
 
-| Metric | Fast profile | Quality profile |
+| 指标 | 快速预览 profile | 质量推理 profile |
 |---|---:|---:|
 | job id | `6802e01f1a73` | `b3c528cc9e20` |
 | duration_seconds | `384.345` | `1360.398` |
@@ -118,25 +118,25 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\amos_0117(2).nii
 
 - `quality` 应作为默认/正式报告依据。
 - `fast` 可作为快速预览或演示模式，但必须标注“需复核”。
-- label `14/15` 的小体积假阳性只在本轮 fast profile 中出现；如要过滤，应作为独立 `postprocess` 实验记录，不能混同模型原始输出。
+- label `14/15` 的小体积假阳性只在本轮 `fast` profile 中出现；如要过滤，应作为独立 `postprocess` 实验记录，不能混同模型原始输出。
 - 2026-05-25 后续实现已把 `quality/fast` 做成每次 job 的显式产品选择。`inference_options` 会随创建响应、job state、SSE complete 事件和 `job_summary.json` 保存；本节指标仍只代表上表两次原始模型输出，没有新增后处理分数。
 
-## FLARE22 Tr 0009 Taxonomy-remapped Comparison
+## FLARE22 Tr 0009 标签体系重映射对照
 
 2026-05-26 新增 FLARE22 Tr 0009 后执行一次 `quality` 在线推理。该病例的原始 FLARE22 label ID 顺序与当前 AMOS22 checkpoint 不一致，因此后端自动 validation 保持关闭，`/api/samples` 中 `validation_available=false`。下表指标来自离线 remap：先按器官名把 FLARE22 label 映射到 AMOS22 checkpoint label ID，再运行指标脚本，仅作为非 AMOS 对照证据。
 
 运行输出：
 
-- Job summary: `.test-output\flare22-tr-0009-quality-20260526\job_summary.json`
-- Prediction: `.test-output\flare22-tr-0009-quality-20260526\86b0153d0a73.nii.gz`
-- Remapped reference: `.test-output\flare22-tr-0009-quality-20260526\FLARE22_Tr_0009_label_remapped_to_amos_ids.nii.gz`
-- Remap metadata: `.test-output\flare22-tr-0009-quality-20260526\flare_to_amos_label_remap.json`
-- Metrics JSON: `.test-output\flare22-tr-0009-quality-20260526\metrics-remapped\flare22-tr-0009-quality-remapped-segmentation-metrics.json`
-- Metrics Markdown: `.test-output\flare22-tr-0009-quality-20260526\metrics-remapped\flare22-tr-0009-quality-remapped-segmentation-metrics.md`
+- Job summary：`.test-output\flare22-tr-0009-quality-20260526\job_summary.json`
+- Prediction：`.test-output\flare22-tr-0009-quality-20260526\86b0153d0a73.nii.gz`
+- Remapped reference：`.test-output\flare22-tr-0009-quality-20260526\FLARE22_Tr_0009_label_remapped_to_amos_ids.nii.gz`
+- Remap metadata：`.test-output\flare22-tr-0009-quality-20260526\flare_to_amos_label_remap.json`
+- Metrics JSON：`.test-output\flare22-tr-0009-quality-20260526\metrics-remapped\flare22-tr-0009-quality-remapped-segmentation-metrics.json`
+- Metrics Markdown：`.test-output\flare22-tr-0009-quality-20260526\metrics-remapped\flare22-tr-0009-quality-remapped-segmentation-metrics.md`
 
 推理记录：
 
-| Metric | Value |
+| 指标 | 数值 |
 |---|---:|
 | job id | `86b0153d0a73` |
 | mode | `real-nnunetv2` |
@@ -147,9 +147,9 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\amos_0117(2).nii
 | result_size_bytes | `120761` |
 | GPU at completion | `NVIDIA GeForce RTX 4060 Laptop GPU`, `1804 / 8188 MiB`, `18%` |
 
-Remapped aggregate metrics:
+重映射后的聚合指标：
 
-| Metric | Value |
+| 指标 | 数值 |
 |---|---:|
 | mean Dice | `0.893127` |
 | min Dice | `0.673730` |
@@ -164,25 +164,25 @@ Remapped aggregate metrics:
 | label 14 prediction_voxels | `0` |
 | label 15 prediction_voxels | `0` |
 
-Lowest per-label values in this remapped comparison were `duodenum` Dice `0.673730`, `pancreas` Dice `0.806389`, and `esophagus` Dice `0.808989`; the highest Dice values were `liver=0.968961`, `spleen=0.965952`, and `gall_bladder=0.949364`.
+本次重映射对照中，逐标签最低值为 `duodenum` Dice `0.673730`、`pancreas` Dice `0.806389` 和 `esophagus` Dice `0.808989`；最高 Dice 为 `liver=0.968961`、`spleen=0.965952` 和 `gall_bladder=0.949364`。
 
-Interpretation boundary:
+解释边界：
 
-- This is not backend automatic validation and must not be mixed with AMOS 0117 native-label metrics.
-- The remap is valid only as an organ-name alignment check for the 13 FLARE22 organs shared with the AMOS22 checkpoint.
-- FLARE22 has no bladder or prostate/uterus labels in this case; labels `14/15` remain absent and had `0` predicted voxels in this `quality` run.
+- 这不是后端自动验证，不能与 AMOS 0117 原生标签指标混算。
+- 该 remap 只适合作为 FLARE22 与 AMOS22 checkpoint 共有 13 个器官的器官名对齐检查。
+- FLARE22 本例没有膀胱或前列腺/子宫标签；label `14/15` 仍为空，并且本次 `quality` 运行中对应预测体素为 `0`。
 
-Checkpoint metadata：
+Checkpoint 元数据：
 
-| Field | Value |
+| 字段 | 数值 |
 |---|---|
 | size_bytes | `1136119762` |
 | modified_time | `2026-05-24T10:04:22+00:00` |
 | sha256 | `45021cef5f37868f8e76f4c372b5d911eef259db6d38943779ba25318c37e6c7` |
 
-## Current AMOS Baseline Per-label Metrics
+## 当前 AMOS 基线逐标签指标
 
-| Label | Name | Dice | IoU | Hausdorff Distance (mm) |
+| 标签 | 名称 | Dice | IoU | Hausdorff Distance (mm) |
 |---:|---|---:|---:|---:|
 | 1 | 脾脏 | `0.985234` | `0.970898` | `5.025721` |
 | 2 | 右肾 | `0.982296` | `0.965208` | `7.090247` |
@@ -200,7 +200,7 @@ Checkpoint metadata：
 | 14 | 膀胱 | `N/A` | `N/A` | `N/A` |
 | 15 | 前列腺/子宫 | `N/A` | `N/A` | `N/A` |
 
-## Notes
+## 备注
 
 ### 2026-05-26 GUI 运行时渲染说明
 

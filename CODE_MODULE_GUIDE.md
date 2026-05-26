@@ -224,5 +224,5 @@ npm run build
 
 - 真实 NIfTI、checkpoint、推理输出和私有 registry 不提交。
 - `AMOS_0117` 是当前自动 validation 的主要原生标签案例。
-- `FLARE22_Tr_0009` 已完成真实 `quality` 在线推理，但 label taxonomy 与 AMOS22 checkpoint 不一致，所以只做 manual-only 和离线 taxonomy-remapped comparison。
+- `FLARE22_Tr_0009` 已完成真实 `quality` 在线推理，但标签体系与 AMOS22 checkpoint 不一致，所以只做人工复核和离线标签体系重映射对照。
 - 任何后续新增病例都应先判断 label taxonomy，再决定是否允许后端自动 validation。
