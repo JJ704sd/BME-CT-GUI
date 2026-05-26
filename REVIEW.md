@@ -1858,6 +1858,36 @@ FLARE22 label ID 与当前 AMOS22 checkpoint 不一致：
 - `git diff --check`：通过。
 - 本轮仅改变前端交互渲染节奏，不改变 nnUNetv2 推理、validation、Dice/IoU/Hausdorff 指标或 FLARE22 taxonomy remap。
 
+## 三十八、2026-05-26 矢状/冠状拖动卡顿三次修复
+
+### 38.1 现象和根因
+
+用户继续反馈：拖动矢状面和冠状面查看切片时仍有卡顿，而拖动横断面不明显。复查后确认差异来自交互轴不同：
+
+- 横断面拖动主要改变 `x/y`，横断面固定的 `z` 切片不变，通常只需要移动十字线。
+- 矢状面/冠状面拖动会改变 `z`，其它面板中的 Axial 切片需要连续变化，容易触发同步切片栅格化。
+- 上一轮已合并父组件 `voxelCoord` 更新，但矢状/冠状拖动仍会让三张视图连续切片渲染；如果继续使用完整分辨率 data URL，每帧成本仍偏高。
+
+### 38.2 本轮修复
+
+- `src/components/OrthogonalViewer.tsx` 新增 `activePointerOrientation`，记录当前是否处于拖动状态。
+- 拖动期间三张视图仍按帧实时更新，不冻结非当前面板；切片渲染改用 `interactive` 轻量质量，降低每帧像素遍历和 data URL 生成成本。
+- 鼠标释放后同一坐标自动切回 `full` 完整质量渲染，保证最终查看质量不下降。
+- `useRafCoalescedCoord()` 继续用 `latestSliceKeyRef` 判断固定切片是否变化；固定切片未变化时不触发图像状态更新。
+- `src/main.tsx` 将 voxel 拖动派生的 `selectedSlice` 辅助预览同步改为空闲后执行，避免右侧 axial 预览和底部缩略图在矢状/冠状拖动中抢占主线程。
+- `src/imaging/sliceRenderer.ts` 新增 `NiftiRenderQuality`，`interactive` 模式按较低采样密度生成实时预览，`full` 模式保留完整分辨率。
+
+### 38.3 文档审核
+
+- 已审核 `SEGMENTATION_EXPERIMENT_COMPARISON.md`、`SEGMENTATION_METRICS_SUMMARY.md`、`REVIEW.md`、`README.md`、`ACCEPTANCE.md`、`CODE_MODULE_GUIDE.md`。
+- 文档主体保持中文；保留必要英文术语、路径、命令、profile 名称和指标名。
+- 本轮为前端渲染调度修复，不改变任何推理实验数值、自动 validation 规则或 FLARE22 remap 解释边界。
+
+### 38.4 验证
+
+- `node tests/imagingLogic.test.ts`：先失败后通过，覆盖拖动面板识别、三视图实时轻量渲染、固定切片 key 去重和辅助切片预览空闲同步。
+- `npm test`：通过。
+
 ---
 
 *文档版本：2026-05-26*

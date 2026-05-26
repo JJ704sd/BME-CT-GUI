@@ -147,3 +147,22 @@
   - `npm run build`
   - `git diff --check`
 - 指标边界：本轮不改变 nnUNetv2 推理、validation、Dice/IoU/Hausdorff 或 FLARE22 taxonomy-remap 数据。
+
+## 2026-05-26 矢状/冠状拖动实时预览修复
+
+- 用户反馈：矢状面和冠状面拖动仍比横断面更卡，但仍希望保留三视图实时变化，而不是等待拖动结束后静态刷新。
+- 根因复查：
+  - 横断面拖动主要改变 `x/y`，固定 `z` 切片不变。
+  - 矢状/冠状拖动连续改变 `z`，会带动 Axial 面板和辅助 selected-slice 预览刷新。
+  - 完整质量 NIfTI 切片每帧都要做像素遍历和 `canvas.toDataURL()`，拖动时成本偏高。
+- 已实现：
+  - `src/imaging/sliceRenderer.ts` 新增 `NiftiRenderQuality`，支持 `interactive` 轻量实时预览和 `full` 完整质量。
+  - `src/components/OrthogonalViewer.tsx` 在拖动期间让三张视图都实时使用 `interactive` 渲染，释放后回到 `full`。
+  - `src/main.tsx` 保持 selected-slice 辅助预览空闲同步，避免右侧预览和底部缩略图抢占主线程。
+  - 6 个指定文档已复核并改为中文主体说明；必要英文仅保留为路径、命令、profile、指标名和代码符号。
+- 验证完成：
+  - `node tests/imagingLogic.test.ts`
+  - `npm test`
+  - `npm run build`
+  - `git diff --check`
+- 指标边界：本轮仍只改变 GUI 渲染节奏，不改变 nnUNetv2 推理、validation、Dice/IoU/Hausdorff 或 FLARE22 taxonomy-remap 数据。

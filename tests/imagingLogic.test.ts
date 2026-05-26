@@ -39,9 +39,15 @@ for (const realCaseId of ["AMOS_0117", "FLARE22_Tr_0009"]) {
   assert.equal(mainSource.includes(realCaseId), true, `top case selector should expose local real case ${realCaseId}`);
 }
 assert.equal(orthogonalViewerSource.includes("useRafCoalescedCoord"), true, "orthogonal slice images should coalesce fast cursor moves before rerendering");
+assert.equal(orthogonalViewerSource.includes("latestSliceKeyRef"), true, "orthogonal panels should skip image render state updates when their fixed slice key is unchanged");
+assert.equal(orthogonalViewerSource.includes("activePointerOrientation"), true, "orthogonal viewer should know which panel is being dragged");
+assert.equal(orthogonalViewerSource.includes("interactiveRenderMode"), true, "orthogonal viewer should keep all three views live with a lightweight drag render mode");
+assert.equal(orthogonalViewerSource.includes("deferImageUpdates"), false, "orthogonal panels should not freeze non-active views while dragging");
 assert.equal(mainSource.includes("setSelectedSlice(getSelectedSliceForVoxelCoord"), false, "cursor movement should not synchronously rerender axial previews on every pointer event");
 assert.equal(mainSource.includes("scheduleVoxelCoordChange"), true, "orthogonal cursor movement should coalesce voxel state updates before rerendering App");
 assert.equal(mainSource.includes("setVoxelCoord(clampedCoord);"), false, "orthogonal cursor movement should not commit voxel state synchronously on every pointer event");
+assert.equal(mainSource.includes("scheduleSelectedSliceAfterVoxelIdle"), true, "sagittal/coronal drags should defer expensive selected-slice preview sync until cursor movement idles");
+assert.equal(mainSource.includes("commitSelectedSliceFromVoxel(commit.selectedSlice);"), false, "coalesced voxel frames should not immediately rerender selected-slice previews");
 assert.equal(stylesSource.includes(".compare-split.has-mask .ortho-mask"), true, "orthogonal split mode should clip the mask layer only when a mask exists");
 assert.equal(orthogonalViewerSource.includes("has-mask"), true, "orthogonal split mode should know when a mask volume is present");
 assert.equal(stylesSource.includes("var(--compare-position"), true, "orthogonal split mode should use the split slider position");

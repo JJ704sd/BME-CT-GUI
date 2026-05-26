@@ -17,6 +17,7 @@ export type NiftiVolumeLike = {
 };
 
 export type NiftiRenderMode = "intensity" | "mask";
+export type NiftiRenderQuality = "full" | "interactive";
 
 const maskPalette = [
   [80, 232, 190],
@@ -120,25 +121,34 @@ export function renderNiftiSliceToDataUrl(
   coord: VoxelCoord,
   mode: NiftiRenderMode,
   orientation: Orientation,
-  visibleLabels?: Set<number>
+  visibleLabels?: Set<number>,
+  renderQuality: NiftiRenderQuality = "full"
 ) {
-  const cacheKey = getSliceImageCacheKey(orientation, coord, volume, mode, visibleLabels);
+  const cacheKey = `${getSliceImageCacheKey(orientation, coord, volume, mode, visibleLabels)}:${renderQuality}`;
   const cache = getVolumeRenderCache(volume);
   const cached = cache.get(cacheKey);
   if (cached) return cached;
 
   const dimensions = getOrientationDimensions(orientation, volume);
+  const renderDimensions = renderQuality === "interactive"
+    ? {
+      width: Math.min(dimensions.width, Math.max(48, Math.round(dimensions.width / 2))),
+      height: Math.min(dimensions.height, Math.max(48, Math.round(dimensions.height / 2)))
+    }
+    : dimensions;
   const fixedSlice = getSliceIndexForOrientation(orientation, clampVoxelCoord(coord, volume));
   const view = new DataView(volume.image);
-  const values = new Float32Array(dimensions.width * dimensions.height);
+  const values = new Float32Array(renderDimensions.width * renderDimensions.height);
   let min = Number.POSITIVE_INFINITY;
   let max = Number.NEGATIVE_INFINITY;
 
-  for (let row = 0; row < dimensions.height; row += 1) {
-    for (let column = 0; column < dimensions.width; column += 1) {
-      const sourceIndex = getSourceIndex(orientation, column, row, fixedSlice, volume);
+  for (let row = 0; row < renderDimensions.height; row += 1) {
+    const sourceRow = Math.min(dimensions.height - 1, Math.max(0, Math.round(((row + 0.5) * dimensions.height) / renderDimensions.height - 0.5)));
+    for (let column = 0; column < renderDimensions.width; column += 1) {
+      const sourceColumn = Math.min(dimensions.width - 1, Math.max(0, Math.round(((column + 0.5) * dimensions.width) / renderDimensions.width - 0.5)));
+      const sourceIndex = getSourceIndex(orientation, sourceColumn, sourceRow, fixedSlice, volume);
       const value = getNiftiValue(view, sourceIndex * volume.bytesPerVoxel, volume.datatypeCode, volume.littleEndian) * volume.slope + volume.intercept;
-      const displayIndex = column + row * dimensions.width;
+      const displayIndex = column + row * renderDimensions.width;
       values[displayIndex] = value;
       if (mode === "intensity" && Number.isFinite(value)) {
         min = Math.min(min, value);
@@ -153,11 +163,11 @@ export function renderNiftiSliceToDataUrl(
   }
 
   const canvas = document.createElement("canvas");
-  canvas.width = dimensions.width;
-  canvas.height = dimensions.height;
+  canvas.width = renderDimensions.width;
+  canvas.height = renderDimensions.height;
   const context = canvas.getContext("2d");
   if (!context) throw new Error("浏览器无法创建 Canvas 渲染上下文。");
-  const imageData = context.createImageData(dimensions.width, dimensions.height);
+  const imageData = context.createImageData(renderDimensions.width, renderDimensions.height);
 
   for (let index = 0; index < values.length; index += 1) {
     const pixelOffset = index * 4;
@@ -183,8 +193,8 @@ export function renderNiftiSliceToDataUrl(
   }
 
   context.putImageData(imageData, 0, 0);
-  const displaySize = getDisplayCanvasSize(dimensions, getOrientationDisplayRatio(orientation, volume));
-  if (displaySize.width === dimensions.width && displaySize.height === dimensions.height) {
+  const displaySize = getDisplayCanvasSize(renderDimensions, getOrientationDisplayRatio(orientation, volume));
+  if (displaySize.width === renderDimensions.width && displaySize.height === renderDimensions.height) {
     const dataUrl = canvas.toDataURL("image/png");
     return rememberRenderedSlice(cache, cacheKey, dataUrl);
   }

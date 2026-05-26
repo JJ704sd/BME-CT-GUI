@@ -394,3 +394,24 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\checkpoint_best.
 - 三视图拖动坐标每帧最多提交一次 React 状态，快速拖动时只保留最新待提交坐标。
 - 如果下一帧前回到原坐标，待提交中间坐标会被清空，不会再触发过时切片渲染。
 - 本改动只影响前端渲染调度，不改变 nnUNetv2 推理、validation、Dice/IoU/Hausdorff 指标或 FLARE22 taxonomy remap。
+
+## 2026-05-26 矢状/冠状拖动卡顿三次修复记录
+
+范围：
+
+- 修复矢状面、冠状面拖动时仍比横断面更容易卡顿的问题。
+- 保持三视图实时变化和十字线即时联动，同时降低拖动期间的图像重绘压力。
+
+验收证据：
+
+| 检查项 | 结果 |
+|---|---|
+| 根因 | 横断面拖动多为 `x/y` 变化，固定 `z` 切片不变；矢状/冠状拖动会连续改变 `z`，带动 Axial 面板和辅助预览刷新。 |
+| 交互修复 | `OrthogonalViewer` 拖动期间启用 `interactive` 轻量渲染，三张视图仍实时更新；释放后自动回到 `full` 完整质量。 |
+| 回归测试 | `tests/imagingLogic.test.ts` 覆盖 `activePointerOrientation`、`interactiveRenderMode`、`latestSliceKeyRef` 和空闲同步入口。 |
+
+行为边界：
+
+- 拖动过程中十字线和体素坐标仍以最新位置为准。
+- 三张视图在拖动过程中仍会实时变化；快速拖动时使用轻量预览图像，释放后恢复完整质量。
+- 本改动不改变 nnUNetv2 推理、validation、Dice/IoU/Hausdorff 指标或 FLARE22 taxonomy remap。

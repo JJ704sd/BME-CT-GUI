@@ -219,6 +219,7 @@ const runSteps = ["数据预处理", "器官候选区定位", "掩膜后处理",
 const baseLogs = ["演示病例已加载", "支持 PNG/JPG/WebP 与 .nii/.nii.gz 体数据", "侧栏支持导入、删除、质控与报告"];
 const FOOTER_SLICE_COUNT = 7;
 const INITIAL_VOXEL_COORD: VoxelCoord = { x: 256, y: 256, z: 150 };
+const VOXEL_SLICE_SYNC_IDLE_MS = 120;
 
 function toArrayBuffer(data: ArrayBufferLike) {
   if (data instanceof ArrayBuffer) return data;
@@ -483,6 +484,8 @@ function App() {
   const pendingSelectedSliceRef = useRef<number | null>(null);
   const selectedSliceFrameRef = useRef<number | null>(null);
   const selectedSliceSyncSourceRef = useRef<SelectedSliceSyncSource>("slice");
+  const pendingVoxelSelectedSliceRef = useRef<number | null>(null);
+  const voxelSelectedSliceTimerRef = useRef<number | null>(null);
   const voxelCoordRef = useRef<VoxelCoord>(INITIAL_VOXEL_COORD);
   const pendingVoxelCoordRef = useRef<VoxelCoord | null>(null);
   const voxelCoordFrameRef = useRef<number | null>(null);
@@ -657,6 +660,21 @@ function App() {
     });
   }
 
+  function scheduleSelectedSliceAfterVoxelIdle(nextSlice: number) {
+    pendingVoxelSelectedSliceRef.current = Math.max(1, Math.min(currentTotalSlices, Math.round(nextSlice)));
+    if (voxelSelectedSliceTimerRef.current !== null) {
+      window.clearTimeout(voxelSelectedSliceTimerRef.current);
+    }
+
+    voxelSelectedSliceTimerRef.current = window.setTimeout(() => {
+      voxelSelectedSliceTimerRef.current = null;
+      const pendingSlice = pendingVoxelSelectedSliceRef.current;
+      pendingVoxelSelectedSliceRef.current = null;
+      if (pendingSlice === null) return;
+      commitSelectedSliceFromVoxel(pendingSlice);
+    }, VOXEL_SLICE_SYNC_IDLE_MS);
+  }
+
   function scheduleVoxelCoordChange(nextCoord: VoxelCoord) {
     if (!loadedImage.volume) {
       if (!shouldUpdateVoxelCoord(voxelCoordRef.current, nextCoord)) return;
@@ -682,7 +700,7 @@ function App() {
       if (!commit) return;
       voxelCoordRef.current = commit.coord;
       setVoxelCoord(commit.coord);
-      commitSelectedSliceFromVoxel(commit.selectedSlice);
+      scheduleSelectedSliceAfterVoxelIdle(commit.selectedSlice);
     });
   }
 
@@ -692,6 +710,9 @@ function App() {
     }
     if (voxelCoordFrameRef.current !== null) {
       cancelAnimationFrame(voxelCoordFrameRef.current);
+    }
+    if (voxelSelectedSliceTimerRef.current !== null) {
+      window.clearTimeout(voxelSelectedSliceTimerRef.current);
     }
   }, []);
 
@@ -721,7 +742,7 @@ function App() {
     if (!loadedImage.volume) return;
     const nextSlice = getSelectedSliceForVoxelCoord(voxelCoord, loadedImage.volume.slices);
     if (nextSlice !== selectedSlice) {
-      scheduleSelectedSlice(nextSlice);
+      scheduleSelectedSliceAfterVoxelIdle(nextSlice);
     }
   }, [voxelCoord.z, loadedImage.volume, currentTotalSlices, selectedSlice]);
 
