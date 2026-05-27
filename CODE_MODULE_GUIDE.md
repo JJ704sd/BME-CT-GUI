@@ -21,7 +21,8 @@
 - 维护全局 UI 状态：当前模块、病例、体素坐标、切片、窗宽窗位、对比模式、推理状态、器官列表、报告状态。
 - 解析本地 `.nii` / `.nii.gz`：`parseNiftiVolume()` 读取 NIfTI header 和 image buffer，生成前端可用的 volume 对象。
 - 管理参考病例：通过 `/api/samples` 拉取本地 registry，把 `AMOS_0117`、`FLARE22_Tr_0009` 等真实病例显示到顶部病例选择器。
-- 管理在线推理：`handleRunSegmentation()` 调用 inference client 创建 job，监听进度，下载结果并回填到 GUI。
+- 管理在线推理：`startSegmentation()` 调用 inference client 创建 job，监听进度，下载结果并回填到 GUI。
+- 管理底部实时进度：`inferenceTimeline` 记录结构化阶段日志，`inferenceStartedAt` 驱动已耗时展示，`inferenceProgressCopy` 集中生成底部 progress rail 文案。
 - 管理 axial 预览：右侧文件卡片和底部切片时间轴使用 `renderCachedAxialNiftiSliceToDataUrl()`，复用 `src/imaging/sliceRenderer.ts` 的切片缓存，避免重复 canvas toDataURL。
 
 本轮性能相关改动：
@@ -35,6 +36,7 @@
 - `voxelCoord` 是三视图联动的核心状态。
 - `selectedSlice` 主要服务 axial 预览、滑条和底部时间轴。
 - 在线推理的结果不是图片，而是 NIfTI mask volume；GUI 回填后仍走同一套三视图渲染。
+- 底部 progress rail 只展示后端 SSE 阶段百分比，不伪造 nnUNetv2 内部细粒度进度。
 
 ## 3. 三正交视图：`src/components/OrthogonalViewer.tsx`
 
@@ -116,6 +118,7 @@
 - `quality` 是默认正式推理路径。
 - `fast` 只作为快速预览，界面和结果元信息都需要标记“需人工复核”。
 - `inference_options` 会进入 job state、SSE complete event 和缓存 key，避免 fast/quality 混用缓存。
+- 失败事件中的 `log_tail` 会被前端保留到结构化 timeline，便于从底部状态追溯后端错误摘要。
 
 ## 7. 器官与病例数据
 
@@ -144,8 +147,10 @@
 - 管理 job state：进度、阶段、错误、结果路径、validation、缓存信息、资源快照、日志尾部。
 - 准备 runtime model，把项目 checkpoint 接入 nnUNetv2 modelfolder 推理。
 - 根据 `inference_profile` 生成 effective options，例如 `quality` / `fast`、TTA、tile step、device。
+- 按当前模型 `dataset.json.file_ending` 规范化上传输入；当前权重要求 `.nii.gz`，因此 `.nii` 原图会被 gzip 成 nnUNetv2 可识别的 `_0000.nii.gz`。
 - 对有 compatible label 的病例执行自动 validation。
 - 对相同输入、相同 checkpoint、相同 options 的任务返回 `cached-real-nnunetv2`。
+- 取消运行中任务时，`request_job_cancel()` 会标记 `cancel_requested` 并终止当前子进程；前端通过“取消推理”调用 `/api/segment/jobs/{job_id}/cancel`。
 
 讲解重点：
 
@@ -179,10 +184,13 @@
 
 - `tests/viewerLogic.test.ts`：纯 UI 逻辑。
 - `tests/imagingLogic.test.ts`：坐标映射、切片 key、器官 label、推理事件解析，以及本轮性能优化的源码约束。
+- `tests/imagingLogic.test.ts` 同时约束底部实时进度 rail、结构化 `inferenceTimeline` 和失败 `log_tail` 保留。
 - `tests/acceptanceDocs.test.ts`：验收文档、指标文档、代码说明书的存在性和关键内容。
 - `tests/backendState.test.py`：后端 job state、cache key、registry、validation 等行为。
+- `tests/backendState.test.py` 覆盖 `.nii` 上传规范化为模型需要的 `.nii.gz`、运行中 job 取消、子进程 terminate 和取消事件记录。
 - `tests/segmentationMetrics.test.py`：指标脚本输出。
 - `tests/browserLayout.test.ts` / `tests/layoutRegression.test.ts`：三视图布局和响应式约束。
+- `tests/browserLayout.test.ts` 覆盖底部实时进度 rail 的桌面/移动布局，避免压缩三视图或产生横向溢出。
 - `tests/perfTool.test.ts`：性能工具 dry-run 基础行为。
 
 常用验证命令：

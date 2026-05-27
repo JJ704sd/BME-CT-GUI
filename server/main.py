@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import json
 import os
 import hashlib
@@ -797,6 +798,33 @@ def load_checkpoint_init_args() -> dict[str, Any] | None:
   return load_checkpoint_init_args_cached(str(checkpoint_source), stat.st_size, stat.st_mtime_ns)
 
 
+def get_model_file_ending(checkpoint_args: dict[str, Any] | None = None) -> str:
+  dataset_json = checkpoint_args.get("dataset_json") if checkpoint_args else None
+  if isinstance(dataset_json, dict):
+    ending = dataset_json.get("file_ending")
+    if isinstance(ending, str) and ending.lower() in {".nii", ".nii.gz"}:
+      return ending.lower()
+  if FLARE_DATASET_JSON.exists():
+    try:
+      ending = json.loads(FLARE_DATASET_JSON.read_text(encoding="utf-8")).get("file_ending")
+      if isinstance(ending, str) and ending.lower() in {".nii", ".nii.gz"}:
+        return ending.lower()
+    except (OSError, json.JSONDecodeError):
+      pass
+  return ".nii.gz"
+
+
+def copy_upload_to_nnunet_input(upload: UploadFile, target_path: Path, target_file_ending: str) -> None:
+  source_name = (upload.filename or "").lower()
+  if target_file_ending == ".nii.gz" and not source_name.endswith(".nii.gz"):
+    with target_path.open("wb") as raw_target:
+      with gzip.GzipFile(fileobj=raw_target, mode="wb", mtime=0) as gz_target:
+        shutil.copyfileobj(upload.file, gz_target)
+    return
+  with target_path.open("wb") as target:
+    shutil.copyfileobj(upload.file, target)
+
+
 def prepare_runtime_model_dir() -> Path:
   checkpoint_source = get_checkpoint_source()
   if checkpoint_source == FLARE_CHECKPOINT:
@@ -883,6 +911,7 @@ def get_model_state() -> dict[str, Any]:
     "predict_device": get_predict_device(),
     "checkpoint_dataset_name": checkpoint_plans.get("dataset_name") if isinstance(checkpoint_plans, dict) else None,
     "checkpoint_configuration": checkpoint_args.get("configuration") if checkpoint_args else None,
+    "model_file_ending": get_model_file_ending(checkpoint_args),
     "labels_source": "checkpoint" if checkpoint_args and checkpoint_args.get("dataset_json") else "dataset.json" if FLARE_DATASET_JSON.exists() else "fallback",
     "confidence_threshold_effective": False,
     "persistent_worker_enabled": persistent_worker_enabled(),
@@ -1507,10 +1536,9 @@ async def create_job(
   job_dir = WORK_DIR / job_id
   input_dir = job_dir / "input"
   input_dir.mkdir(parents=True, exist_ok=True)
-  suffix = ".nii.gz" if file.filename.lower().endswith(".nii.gz") else ".nii"
-  input_path = input_dir / f"{job_id}_0000{suffix}"
-  with input_path.open("wb") as target:
-    shutil.copyfileobj(file.file, target)
+  input_file_ending = str(model_state.get("model_file_ending") or ".nii.gz")
+  input_path = input_dir / f"{job_id}_0000{input_file_ending}"
+  copy_upload_to_nnunet_input(file, input_path, input_file_ending)
   input_sha = file_sha256(input_path)
   cache_key = build_prediction_cache_key(input_sha, model_state)
   job = Job(

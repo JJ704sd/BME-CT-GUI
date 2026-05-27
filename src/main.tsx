@@ -58,6 +58,14 @@ type CompareMode = "split" | "overlay" | "side" | "difference";
 type UploadRole = "source" | "result";
 type RemovalTarget = "source" | "result" | "session";
 type NiftiRenderMode = "intensity" | "mask";
+type InferenceTimelineEntry = {
+  id: string;
+  type: "info" | "progress" | "complete" | "error" | "cancelled";
+  progress?: number;
+  stage: string;
+  message?: string;
+  at: number;
+};
 
 type NiftiVolume = {
   image: ArrayBuffer;
@@ -397,6 +405,15 @@ function formatSeconds(value: number | undefined) {
   return minutes > 0 ? `${minutes}分${seconds}秒` : `${seconds}秒`;
 }
 
+function formatClockTime(timestamp: number) {
+  return new Date(timestamp).toLocaleTimeString("zh-CN", {
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  });
+}
+
 function formatBytes(value: number | undefined) {
   if (typeof value !== "number" || !Number.isFinite(value)) return "待生成";
   if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(2)} MB`;
@@ -507,6 +524,9 @@ function App() {
   const [logs, setLogs] = useState(baseLogs);
   const [toast, setToast] = useState("演示病例已加载");
   const [inferenceStatus, setInferenceStatus] = useState<InferenceStatus>({ status: "idle" });
+  const [inferenceTimeline, setInferenceTimeline] = useState<InferenceTimelineEntry[]>([]);
+  const [inferenceStartedAt, setInferenceStartedAt] = useState<number | null>(null);
+  const [elapsedNow, setElapsedNow] = useState(() => Date.now());
   const [validationSummary, setValidationSummary] = useState<ValidationSummary | null>(null);
   const [sampleLoadState, setSampleLoadState] = useState<{ status: "idle" | "loading" | "ready" | "failed"; message: string }>({ status: "idle", message: "等待载入内置参考病例" });
   const [referenceCases, setReferenceCases] = useState<ReferenceCase[]>(DEFAULT_REFERENCE_CASES);
@@ -563,6 +583,100 @@ function App() {
   const inferenceResultSizeCopy = inferenceStatus.status === "succeeded" ? formatBytes(inferenceStatus.result_size_bytes) : "待生成";
   const inferenceResourceCopy = inferenceStatus.status === "succeeded" ? getResourceSnapshotCopy(inferenceStatus.resource_latest) : "待记录";
   const inferencePhaseTimingCopy = inferenceStatus.status === "succeeded" ? getPhaseTimingSummary(inferenceStatus.phase_timings) : "待记录";
+  const inferenceProgressCopy = useMemo(() => {
+    const clampedProgress = Math.max(0, Math.min(100, Math.round(
+      inferenceStatus.status === "running"
+        ? inferenceStatus.progress
+        : inferenceStatus.status === "succeeded"
+          ? 100
+          : progress
+    )));
+    const jobId = inferenceStatus.status === "running" || inferenceStatus.status === "succeeded" || inferenceStatus.status === "cancelled" || inferenceStatus.status === "failed"
+      ? inferenceStatus.jobId
+      : activeJobIdRef.current ?? undefined;
+    const activeProfile = inferenceStatus.status === "succeeded" && inferenceStatus.inference_options?.profile
+      ? inferenceStatus.inference_options.profile
+      : selectedInferenceProfile;
+    const profileCopy = activeProfile === "fast" ? "快速预览 · 需人工复核" : "质量推理";
+    const elapsedSeconds = inferenceStatus.status === "succeeded"
+      ? inferenceStatus.duration_seconds
+      : inferenceStartedAt
+        ? (elapsedNow - inferenceStartedAt) / 1000
+        : undefined;
+    const latestTimeline = inferenceTimeline[0];
+    if (inferenceStatus.status === "submitting") {
+      return {
+        title: "正在提交任务",
+        stage: latestTimeline?.message ?? "正在创建本地 nnUNetv2 job",
+        percent: clampedProgress,
+        percentCopy: `${clampedProgress}%`,
+        jobCopy: jobId ? `Job ${jobId}` : "Job 待创建",
+        profileCopy,
+        elapsedCopy: "待开始",
+        tone: "running"
+      };
+    }
+    if (inferenceStatus.status === "running") {
+      return {
+        title: "推理运行中",
+        stage: inferenceStatus.stage,
+        percent: clampedProgress,
+        percentCopy: `${clampedProgress}%`,
+        jobCopy: jobId ? `Job ${jobId}` : "Job 待创建",
+        profileCopy,
+        elapsedCopy: elapsedSeconds === undefined ? "待记录" : formatSeconds(elapsedSeconds),
+        tone: "running"
+      };
+    }
+    if (inferenceStatus.status === "succeeded") {
+      return {
+        title: "推理完成",
+        stage: getInferenceStatusCopy(inferenceStatus),
+        percent: 100,
+        percentCopy: "100%",
+        jobCopy: jobId ? `Job ${jobId}` : "Job 已结束",
+        profileCopy,
+        elapsedCopy: elapsedSeconds === undefined ? "待记录" : formatSeconds(elapsedSeconds),
+        tone: "complete"
+      };
+    }
+    if (inferenceStatus.status === "failed") {
+      const firstLine = inferenceStatus.message.split(/\r?\n/).find(Boolean) ?? "推理失败";
+      return {
+        title: "推理失败",
+        stage: firstLine,
+        percent: clampedProgress,
+        percentCopy: `${clampedProgress}%`,
+        jobCopy: jobId ? `Job ${jobId}` : "Job 未完成",
+        profileCopy,
+        elapsedCopy: elapsedSeconds === undefined ? "待记录" : formatSeconds(elapsedSeconds),
+        tone: "error"
+      };
+    }
+    if (inferenceStatus.status === "cancelled") {
+      return {
+        title: "已取消",
+        stage: "推理任务已取消",
+        percent: clampedProgress,
+        percentCopy: `${clampedProgress}%`,
+        jobCopy: jobId ? `Job ${jobId}` : "Job 已取消",
+        profileCopy,
+        elapsedCopy: elapsedSeconds === undefined ? "待记录" : formatSeconds(elapsedSeconds),
+        tone: "cancelled"
+      };
+    }
+    const idleProgress = inferenceTimeline.length ? clampedProgress : 0;
+    return {
+      title: "等待在线推理",
+      stage: latestTimeline?.message ?? "选择原图后可运行本地 nnUNetv2 推理",
+      percent: idleProgress,
+      percentCopy: idleProgress > 0 ? `${idleProgress}%` : "0%",
+      jobCopy: "Job 待创建",
+      profileCopy,
+      elapsedCopy: "待记录",
+      tone: "idle"
+    };
+  }, [elapsedNow, inferenceStartedAt, inferenceStatus, inferenceTimeline, progress, selectedInferenceProfile]);
   const hasLocalSource = loadedImage.kind !== "Demo";
   const hasImportedFiles = hasLocalSource || Boolean(resultImage);
   const customCasePanelCopy = useMemo(
@@ -751,6 +865,13 @@ function App() {
   }, [inferenceStatus]);
 
   useEffect(() => {
+    if (runState !== "running" || inferenceStartedAt === null) return;
+    setElapsedNow(Date.now());
+    const timer = window.setInterval(() => setElapsedNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [inferenceStartedAt, runState]);
+
+  useEffect(() => {
     void fetchModelLabels(API_ENDPOINT)
       .then((labels) => {
         if (labels.length) {
@@ -835,6 +956,15 @@ function App() {
     setSelectedOrganId((current) => labels.some((label) => label.id === current) ? current : labels[0]?.id ?? current);
   }
 
+  function appendInferenceTimelineEntry(entry: Omit<InferenceTimelineEntry, "id" | "at"> & { at?: number }) {
+    const at = entry.at ?? Date.now();
+    setInferenceTimeline((items) => [{
+      ...entry,
+      at,
+      id: `${at}-${entry.type}-${entry.progress ?? "na"}-${items.length}`
+    }, ...items].slice(0, 8));
+  }
+
   async function startSegmentation(sourceOverride?: LoadedImage) {
     let sourceImage = sourceOverride ?? loadedImage;
     if (!sourceImage.volume || !sourceImage.file) {
@@ -853,6 +983,17 @@ function App() {
     setValidationSummary(null);
     setResultInferenceOptions(null);
     activeJobIdRef.current = null;
+    const submitAt = Date.now();
+    setInferenceStartedAt(null);
+    setElapsedNow(submitAt);
+    setInferenceTimeline([{
+      id: `${submitAt}-info-submit`,
+      type: "info",
+      progress: 0,
+      stage: "提交任务",
+      message: `提交本地 nnUNetv2 任务：${selectedModel.name} · ${selectedInferenceProfileOption.label}`,
+      at: submitAt
+    }]);
     setInferenceStatus({ status: "submitting" });
     setLogs([`提交本地 nnUNetv2 任务：${selectedModel.name} · ${selectedInferenceProfileOption.label}`, `质控提示阈值 ${confidenceThreshold}% · 后处理 ${Object.values(postprocessConfig).filter(Boolean).length}/3`, ...baseLogs]);
 
@@ -866,6 +1007,16 @@ function App() {
       });
       activeJobIdRef.current = job.job_id;
       let inferenceOptions = job.inference_options;
+      const startedAt = Date.now();
+      setInferenceStartedAt(startedAt);
+      setElapsedNow(startedAt);
+      appendInferenceTimelineEntry({
+        type: "progress",
+        progress: 1,
+        stage: job.cached_result ? "命中历史缓存，正在回填结果" : job.mode === "debug-label-fallback" ? "使用本地标签调试回退" : "后端真实推理已启动",
+        message: job.cached_result ? "命中历史缓存，等待结果回填" : `后端 job 已创建：${job.job_id}`,
+        at: startedAt
+      });
       setInferenceStatus({
         status: "running",
         jobId: job.job_id,
@@ -883,12 +1034,24 @@ function App() {
           try {
             const parsed = parseInferenceEvent(`data: ${event.data}`);
             if (parsed.type === "error") {
+              const logTailSummary = parsed.log_tail?.split(/\r?\n/).filter(Boolean).slice(-2).join(" / ");
+              appendInferenceTimelineEntry({
+                type: "error",
+                stage: parsed.message,
+                message: logTailSummary ? `${parsed.message} · ${logTailSummary}` : parsed.message
+              });
               events.close();
               reject(new Error(parsed.log_tail ? `${parsed.message}\n${parsed.log_tail}` : parsed.message));
               return;
             }
             setProgress(parsed.progress);
             setInferenceStatus({ status: "running", jobId: job.job_id, progress: parsed.progress, stage: parsed.stage });
+            appendInferenceTimelineEntry({
+              type: parsed.type === "complete" ? "complete" : "progress",
+              progress: parsed.progress,
+              stage: parsed.stage,
+              message: parsed.type === "complete" ? "阶段事件完成，正在下载分割结果" : parsed.stage
+            });
             setLogs((items) => [`${parsed.stage} · ${parsed.progress}%`, ...items].slice(0, 8));
             if (parsed.type === "complete") {
               const validation = parsed.validation;
@@ -942,19 +1105,31 @@ function App() {
       setResultInferenceOptions(inferenceOptions ?? null);
       setProgress(100);
       setRunState("complete");
+      setElapsedNow(Date.now());
       setInferenceStatus({ status: "succeeded", jobId: job.job_id, mode: job.mode, duration_seconds: durationSeconds, result_size_bytes: resultSizeBytes, resource_latest: resourceLatest, phase_timings: phaseTimings, inference_options: inferenceOptions });
       activeJobIdRef.current = null;
       setLastImport(`${resultKindLabel}就绪：${job.job_id}`);
+      appendInferenceTimelineEntry({
+        type: "complete",
+        progress: 100,
+        stage: "结果已回填三视图",
+        message: `分割结果已加载 · ${formatSeconds(durationSeconds)} · ${formatBytes(resultSizeBytes)}`
+      });
       setLogs((items) => [`分割结果已加载到三正交视图 · ${formatSeconds(durationSeconds)} · ${formatBytes(resultSizeBytes)}`, ...items].slice(0, 8));
     } catch (error) {
       const message = error instanceof Error ? error.message : "推理失败";
       setRunState("idle");
-      setProgress(0);
+      setElapsedNow(Date.now());
       if (message.includes("取消")) {
         setInferenceStatus({ status: "cancelled", jobId: activeJobIdRef.current ?? undefined });
       } else {
         setInferenceStatus({ status: "failed", message, jobId: activeJobIdRef.current ?? undefined });
       }
+      appendInferenceTimelineEntry({
+        type: message.includes("取消") ? "cancelled" : "error",
+        stage: message.includes("取消") ? "推理已取消" : "推理失败",
+        message: message.split(/\r?\n/).filter(Boolean).slice(0, 2).join(" · ") || message
+      });
       activeJobIdRef.current = null;
       setLogs((items) => [`${message.includes("取消") ? "推理已取消" : "推理失败"}：${message}`, ...items].slice(0, 8));
     }
@@ -969,12 +1144,22 @@ function App() {
     try {
       await cancelInferenceJob("http://127.0.0.1:8000", jobId);
       setRunState("idle");
-      setProgress(0);
+      setElapsedNow(Date.now());
       setInferenceStatus({ status: "cancelled", jobId });
+      appendInferenceTimelineEntry({
+        type: "cancelled",
+        stage: "推理已取消",
+        message: `已请求取消推理任务：${jobId}`
+      });
       setLogs((items) => [`已请求取消推理任务：${jobId}`, ...items].slice(0, 8));
     } catch (error) {
       const message = error instanceof Error ? error.message : "取消推理任务失败";
       setInferenceStatus({ status: "failed", message, jobId });
+      appendInferenceTimelineEntry({
+        type: "error",
+        stage: "取消失败",
+        message
+      });
       setLogs((items) => [`取消失败：${message}`, ...items].slice(0, 8));
     }
   }
@@ -1746,8 +1931,41 @@ function App() {
         <footer className="bottom-console">
           <div className="console-head">
             <h2><ListChecks size={18} />切片与流程日志</h2>
-            <span><Activity size={14} />{runState === "running" ? "推理运行中" : "在线演示模式"}</span>
+            <span><Activity size={14} />{inferenceProgressCopy.title}</span>
           </div>
+          <section className={`inference-progress-rail is-${inferenceProgressCopy.tone}`} aria-label="实时推理进度">
+            <div className="inference-progress-main">
+              <div className="inference-progress-top">
+                <strong>{inferenceProgressCopy.stage}</strong>
+                <span>{inferenceProgressCopy.percentCopy}</span>
+              </div>
+              <div className="inference-progress-track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={inferenceProgressCopy.percent}>
+                <span style={{ width: `${inferenceProgressCopy.percent}%` }} />
+              </div>
+              <div className="inference-progress-meta">
+                <span>{inferenceProgressCopy.jobCopy}</span>
+                <span>{inferenceProgressCopy.profileCopy}</span>
+                <span>耗时 {inferenceProgressCopy.elapsedCopy}</span>
+                <span>SSE 阶段事件</span>
+              </div>
+            </div>
+            <ol className="inference-timeline" aria-label="推理阶段日志">
+              {(inferenceTimeline.length ? inferenceTimeline : [{
+                id: "timeline-idle",
+                type: "info" as const,
+                progress: 0,
+                stage: "等待在线推理",
+                message: "尚未收到后端阶段事件",
+                at: Date.now()
+              }]).slice(0, 3).map((entry) => (
+                <li key={entry.id} data-kind={entry.type}>
+                  <span>{entry.progress === undefined ? entry.type === "error" ? "ERR" : entry.type === "cancelled" ? "STOP" : "INFO" : `${entry.progress}%`}</span>
+                  <p>{entry.message ?? entry.stage}</p>
+                  <time>{formatClockTime(entry.at)}</time>
+                </li>
+              ))}
+            </ol>
+          </section>
           <div className="footer-slices" aria-label="底部切片时间轴">
             {footerSlicePreviews.map(({ slice, src }) => (
               <button className={selectedSlice === slice ? "footer-slice active" : "footer-slice"} key={slice} onClick={() => setSelectedSlice(slice)}>

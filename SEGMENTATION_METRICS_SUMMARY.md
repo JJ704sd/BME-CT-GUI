@@ -33,6 +33,7 @@ python tools\segmentation_metrics_summary.py `
 - 优先使用本次推理生成的 `validation_summary.json`，因为它来自 checkpoint 内嵌的 `dataset_json`，能保留当前权重的完整标签定义。
 - 不要混用旧的外部 `dataset.json`；如果标签集合不同，会导致 label 名称错位或漏记空标签。
 - 本轮 checkpoint 定义 15 个前景标签。AMOS 0117 的参考标签实际只出现 label `1..13`；如果预测也没有 label `14/15`，它们记录为 N/A。如果预测出现 label `14/15` 假阳性，则 Dice/IoU 为 `0` 并应纳入 fast/quality 对照判断。
+- 2026-05-26 后端新增输入后缀规范化，确保 `.nii` 上传会按当前模型 `file_ending=.nii.gz` 进入 nnUNetv2；该工程修复不改变本文件既有指标数值。
 
 ## 当前 AMOS 基线运行
 
