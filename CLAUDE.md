@@ -17,7 +17,7 @@ npm run preview                # 预览生产构建
 # 后端开发
 python -m uvicorn server.main:app --host 127.0.0.1 --port 8000
 # 环境变量（可选）：
-#   SEGMENTATION_DEVICE=cuda|cpu
+#   SEGMENTATION_DEVICE=cuda|cpu|mps  (默认 cuda)
 #   SEGMENTATION_PERSISTENT_WORKER=1
 #   SEGMENTATION_PREPROCESS_WORKERS=2
 #   SEGMENTATION_EXPORT_WORKERS=2
@@ -50,6 +50,7 @@ python tools/segmentation_metrics_summary.py --prediction <pred.nii.gz> --refere
 - **`organLayerLogic.ts`**：label 列表 → UI 器官层，合并 validation 分数。
 - **`referenceCases.ts`**：归一化 `/api/samples` 返回值。
 - **`viewerLogic.ts`**：纯 UI 逻辑 — 坐标去重、拖动提交合并、切片同步方向判断。
+- **`styles.css`**：全局单文件样式，包含三正交布局、分屏裁剪、底部进度 rail 和响应式约束。
 
 ### 后端（`server/`）
 
@@ -86,6 +87,15 @@ python tools/segmentation_metrics_summary.py --prediction <pred.nii.gz> --refere
 | `tests/segmentationMetrics.test.py` | 指标脚本输出 | `python` |
 
 前端测试用 `node:assert/strict`，不依赖 Jest/Vitest。后端测试用 `unittest.mock.patch` + FastAPI `TestClient`。
+
+### 工具脚本（`tools/`）
+
+- `tools/segmentation_metrics_summary.py`：离线计算 Dice/IoU/Accuracy/Hausdorff，输出 JSON + Markdown。
+- `tools/perf_no_cache_persistent.py`：无缓存推理性能对照，支持 `--inference-profile`、`--dry-run`。
+
+### Python 依赖
+
+后端依赖见 `server/requirements.txt`：`fastapi`、`uvicorn`、`python-multipart`、`numpy`、`nibabel`。
 
 ## 重要约束
 

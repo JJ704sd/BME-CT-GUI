@@ -21,7 +21,8 @@
 - 维护全局 UI 状态：当前模块、病例、体素坐标、切片、窗宽窗位、对比模式、推理状态、器官列表、报告状态。
 - 解析本地 `.nii` / `.nii.gz`：`parseNiftiVolume()` 读取 NIfTI header 和 image buffer，生成前端可用的 volume 对象。
 - 管理参考病例：通过 `/api/samples` 拉取本地 registry，把 `AMOS_0117`、`FLARE22_Tr_0009` 等真实病例显示到顶部病例选择器。
-- 管理在线推理：`startSegmentation()` 调用 inference client 创建 job，监听进度，下载结果并回填到 GUI。
+- 管理标签文件：`labelFile` 状态存储用户上传的标签 NIfTI，通过"标签 CT 导入"按钮或拖拽区域选择。`processVisualizationFile()` 中 `role === "label"` 分支处理标签文件。推理前若 `labelFile` 为 null 会 toast 提醒。
+- 管理在线推理：`startSegmentation()` 调用 inference client 创建 job，监听进度，下载结果并回填到 GUI。标签文件通过 FormData 的 `label_file` 字段传给后端。
 - 管理底部实时进度：`inferenceTimeline` 记录结构化阶段日志，`inferenceStartedAt` 驱动已耗时展示，`inferenceProgressCopy` 集中生成底部 progress rail 文案。
 - 管理 axial 预览：右侧文件卡片和底部切片时间轴使用 `renderCachedAxialNiftiSliceToDataUrl()`，复用 `src/imaging/sliceRenderer.ts` 的切片缓存，避免重复 canvas toDataURL。
 
@@ -107,7 +108,7 @@
 
 主要职责：
 
-- `createInferenceJob()`：提交源图、模型、profile、后处理配置。
+- `createInferenceJob()`：提交源图、模型、profile、后处理配置。可选附带 `label_file` 用于在线 Dice 验证。
 - `parseInferenceEvent()`：解析 SSE 进度、完成、失败事件。
 - `downloadInferenceResult()`：下载后端生成的 NIfTI mask。
 - `fetchModelLabels()`：获取 checkpoint label 定义，保证前端器官列表和模型一致。
@@ -244,5 +245,5 @@ npm run build
 
 - 真实 NIfTI、checkpoint、推理输出和私有 registry 不提交。
 - `AMOS_0117` 是当前自动 validation 的主要原生标签案例。
-- `FLARE22_Tr_0009` 已完成真实 `quality` 在线推理，但标签体系与 AMOS22 checkpoint 不一致，所以只做人工复核和离线标签体系重映射对照。
+- `FLARE22_Tr_0009` 已完成真实 `quality` 在线推理，且标签文件传输链路已打通（job `bf20f0ec4456`），但因 taxonomy 错位导致在线 Dice 无意义。离线 remap 后 mean_dice=0.893。
 - 任何后续新增病例都应先判断 label taxonomy，再决定是否允许后端自动 validation。

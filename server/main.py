@@ -159,6 +159,7 @@ class Job:
   process_log_path: Path | None = None
   resource_snapshots: list[dict[str, Any]] = field(default_factory=list)
   resource_log_path: Path | None = None
+  label_path: Path | None = None
   cancel_requested: bool = False
   process: subprocess.Popen[str] | None = field(default=None, repr=False, compare=False)
   events: list[dict[str, Any]] = field(default_factory=list)
@@ -568,6 +569,7 @@ def build_job_summary(job: Job) -> dict[str, Any]:
     "resource_latest": resource_latest,
     "resource_log_path": str(job.resource_log_path) if job.resource_log_path else None,
     "cancel_requested": job.cancel_requested,
+    "label_path": str(job.label_path) if job.label_path else None,
     "validation": job.validation,
   }
 
@@ -897,6 +899,31 @@ def validate_against_debug_label(prediction_path: Path) -> dict[str, Any]:
   prediction = np.asanyarray(nib.load(str(prediction_path)).dataobj)
   reference = np.asanyarray(nib.load(str(reference_path)).dataobj)
   return compute_label_metrics(prediction, reference, read_labels())
+
+
+def validate_against_custom_label(prediction_path: Path, label_path: Path, labels: list[dict[str, Any]], sample_id: str = "custom") -> dict[str, Any]:
+  try:
+    import nibabel as nib
+    import numpy as np
+  except Exception as exc:
+    return unavailable_validation(f"当前 Python 环境缺少 NIfTI 验证依赖：{exc}")
+  try:
+    prediction = np.asanyarray(nib.load(str(prediction_path)).dataobj)
+    reference = np.asanyarray(nib.load(str(label_path)).dataobj)
+  except Exception as exc:
+    return unavailable_validation(f"无法加载预测结果或标签文件：{exc}")
+  if prediction.shape != reference.shape:
+    return unavailable_validation(f"预测结果尺寸 {prediction.shape} 与标签尺寸 {reference.shape} 不一致，无法计算 Dice。")
+  checkpoint_labels = {int(item["label"]) for item in labels}
+  reference_labels = set(np.unique(reference).astype(int)) - {0}
+  if not reference_labels.intersection(checkpoint_labels):
+    return {
+      **unavailable_validation("标签 ID 与当前 checkpoint 定义不匹配，需要离线 taxonomy remap。"),
+      "taxonomy_match": False,
+    }
+  result = compute_label_metrics(prediction, reference, labels, sample_id=sample_id)
+  result["taxonomy_match"] = True
+  return result
 
 
 def model_ready() -> bool:
@@ -1330,7 +1357,9 @@ def complete_cached_job(job: Job, input_path: Path, cache: dict[str, Any]) -> No
   output_dir = input_path.parent.parent / "output"
   result_path = copy_cached_result(cache, output_dir, job.id)
   validation = cache.get("validation")
-  if validation is None and is_debug_original_upload(input_path):
+  if validation is None and job.label_path and job.label_path.exists():
+    validation = validate_against_custom_label(result_path, job.label_path, read_labels())
+  elif validation is None and is_debug_original_upload(input_path):
     validation = validate_against_debug_label(result_path)
   if validation is not None:
     write_validation_summary(output_dir, validation)
@@ -1460,7 +1489,13 @@ def run_real_job(job_id: str, input_path: Path) -> None:
     result_path = candidates[0]
     finish_job_phase(job, "collect_result")
     validation = None
-    if is_debug_original_upload(input_path):
+    if job.label_path and job.label_path.exists():
+      push_event(job, {"type": "progress", "progress": 96, "stage": "使用用户提供的标签验证推理结果"})
+      start_job_phase(job, "validation")
+      validation = validate_against_custom_label(result_path, job.label_path, read_labels())
+      write_validation_summary(output_dir, validation)
+      finish_job_phase(job, "validation")
+    elif is_debug_original_upload(input_path):
       push_event(job, {"type": "progress", "progress": 96, "stage": "使用 AMOS 标准答案验证推理结果"})
       start_job_phase(job, "validation")
       validation = validate_against_debug_label(result_path)
@@ -1580,11 +1615,13 @@ def sample_label(sample_id: str) -> FileResponse:
 @app.post("/api/segment/jobs")
 async def create_job(
   file: UploadFile = File(...),
+  label_file: UploadFile | None = File(None),
   model_id: str = Form("abdomen"),
   confidence_threshold: str = Form("72"),
   postprocess: str = Form("{}"),
   inference_profile: str | None = Form(None),
 ) -> dict[str, Any]:
+  print(f"[create_job] received file={file.filename}, label_file={label_file.filename if label_file else None}", flush=True)
   if not file.filename or not file.filename.lower().endswith((".nii", ".nii.gz")):
     raise HTTPException(status_code=400, detail="请上传 .nii 或 .nii.gz 格式的 CT 原图。")
   model_state = get_model_state()
@@ -1603,6 +1640,13 @@ async def create_job(
   input_file_ending = str(model_state.get("model_file_ending") or ".nii.gz")
   input_path = input_dir / f"{job_id}_0000{input_file_ending}"
   copy_upload_to_nnunet_input(file, input_path, input_file_ending)
+  custom_label_path = None
+  if label_file is not None and label_file.filename:
+    label_dir = job_dir / "label"
+    label_dir.mkdir(parents=True, exist_ok=True)
+    label_target = label_dir / f"{job_id}_label.nii.gz"
+    copy_upload_to_nnunet_input(label_file, label_target, ".nii.gz")
+    custom_label_path = label_target
   input_sha = file_sha256(input_path)
   cache_key = build_prediction_cache_key(input_sha, model_state)
   job = Job(
@@ -1612,6 +1656,7 @@ async def create_job(
     checkpoint_sha256=get_checkpoint_sha256(),
     cache_key=cache_key,
     inference_options=inference_options,
+    label_path=custom_label_path,
   )
   with jobs_lock:
     jobs[job_id] = job

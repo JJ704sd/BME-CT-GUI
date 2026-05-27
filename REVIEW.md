@@ -1987,7 +1987,68 @@ FLARE22 label ID 与当前 AMOS22 checkpoint 不一致：
 - 心跳失败（包括资源快照获取失败）完全隔离，不会影响推理执行。
 - 本轮不改变 nnUNetv2 推理参数、validation 规则或历史实验指标。
 
+## 42. 标签文件传输修复与在线 validation 链路打通
+
+### 42.1 背景
+
+用户通过 GUI 上传标签 NIfTI 文件后运行推理，后端 `label_path` 始终为 `null`，validation 未执行。同一时期还发现 FLARE22 在线验证 mean_dice=0.073 的根因是 AMOS22 checkpoint 标签 ID 与 FLARE22 标签 ID 语义完全不同（taxonomy 错位），而非模型质量问题。
+
+### 42.2 本轮实现
+
+1. **前端 `UploadRole` 类型扩展**
+   - `src/main.tsx` 将 `UploadRole` 从 `"source" | "result"` 扩展为 `"source" | "result" | "label"`。
+   - `processVisualizationFile()` 增加 `role === "label"` 分支，设置 `labelFile` 状态并显示 toast。
+
+2. **数据操作面板新增标签拖放区域**
+   - 新增"标签 CT 导入"按钮，支持拖拽和点击选择 NIfTI 标签文件。
+   - 标签文件选择后显示文件名，未选择时显示"NIfTI 标签文件 · 用于自动 Dice 验证"。
+
+3. **推理前提醒**
+   - `startSegmentation()` 中 `labelFile` 为 null 时，显示 toast 提示"未选择标签 CT，推理完成后不会自动计算 Dice"。
+
+4. **前后端调试日志**
+   - 前端 `console.log` 记录 `labelFile` 的 name 和 size。
+   - `src/inference/inferenceClient.ts` 记录 `label_file` 是否 append 到 FormData。
+   - 后端 `server/main.py` 的 `create_job()` 记录接收到的 `file.filename` 和 `label_file.filename`。
+
+5. **后端重启修复**
+   - 添加调试日志并重启后端服务后，`label_path` 从 `null` 变为非空，标签文件正确保存到 `job_dir / "label" / f"{job_id}_label.nii.gz"`。
+
+### 42.3 taxonomy 错位发现
+
+- AMOS22 checkpoint 的 label ID 与 FLARE22 标签 ID 语义完全不同：
+  - AMOS22: 1=脾脏, 2=右肾, 3=左肾, 4=胆囊, 5=食管, 6=肝脏, 7=胃, 8=主动脉, 9=下腔静脉, 10=胰腺, 11=右肾上腺, 12=左肾上腺, 13=十二指肠
+  - FLARE22: 1=肝脏, 2=右肾, 3=脾脏, 4=胰腺, 5=主动脉, 6=下腔静脉, 7=右肾上腺, 8=左肾上腺, 9=胆囊, 10=食管, 11=胃, 12=十二指肠, 13=左肾
+- 只有 label 2（右肾）两边语义一致，Dice=0.945。其余 ID 语义错位，Dice≈0。
+- `taxonomy_match: True` 的误判：`validate_against_custom_label()` 只检查了标签 ID 集合是否有交集，未做语义级匹配。
+- 离线 remap 后真实 mean_dice=0.893。
+
+### 42.4 在线验证成功数据
+
+job `bf20f0ec4456`（FLARE22 Tr 0009 + 标签上传）：
+
+| 指标 | 值 |
+|---|---|
+| 标签文件 | 131 KB（gzip），正确保存到 job 目录 |
+| mean_dice | 0.073（taxonomy 错位导致） |
+| 前景 Dice | 0.950 |
+| label 2（右肾）Dice | 0.945 |
+| 验证状态 | review |
+
+### 42.5 验证
+
+- `npm test`：通过。
+- `npm run build`：通过。
+- 标签文件传输链路：job `bf20f0ec4456` 的 `label_path` 非空，validation 执行成功。
+
+### 42.6 行为边界
+
+- 标签文件传输 bug 的根因可能是后端服务未重启导致的代码变更未生效，而非纯粹的前端逻辑错误。
+- taxonomy 错位是独立问题，需要 Phase 1（自动 remap）才能解决。
+- 保留 `console.log` 调试日志两周，观察标签传输是否再次出现 null。
+- 本轮不改变 nnUNetv2 推理参数或 validation 规则。
+
 ---
 
 *文档版本：2026-05-27*
-*更新依据：当前 `src/main.tsx`、`src/components/OrthogonalViewer.tsx`、`src/imaging/voxelMapping.ts`、`src/imaging/sliceRenderer.ts`、`src/data/organDetails.ts`、`src/inference/inferenceClient.ts`、`server/main.py`、`server/persistent_nnunet_worker.py`、`server/requirements.txt`、`tools/perf_no_cache_persistent.py`、`README.md`、`ACCEPTANCE.md`、`SEGMENTATION_METRICS_SUMMARY.md`、`reference_cases.example.json`、`tests/*.test.ts` 与本地运行验证结果。*
+*更新依据：当前 `src/main.tsx`、`src/components/OrthogonalViewer.tsx`、`src/imaging/voxelMapping.ts`、`src/imaging/sliceRenderer.ts`、`src/data/organDetails.ts`、`src/inference/inferenceClient.ts`、`server/main.py`、`server/persistent_nnunet_worker.py`、`server/requirements.txt`、`tools/perf_no_cache_persistent.py`、`README.md`、`ACCEPTANCE.md`、`SEGMENTATION_METRICS_SUMMARY.md`、`SEGMENTATION_EXPERIMENT_COMPARISON.md`、`SEGMENTATION_RECENT_ROUNDS.md`、`reference_cases.example.json`、`tests/*.test.ts` 与本地运行验证结果。*

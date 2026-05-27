@@ -27,7 +27,7 @@
 - 后端会按当前模型 `dataset.json.file_ending` 规范化输入文件名；当前模型要求 `.nii.gz`，所以 `.nii` 上传会转为 nnUNet 可识别的 `_0000.nii.gz` 输入。
 - 推理运行中可点击”取消推理”，后端会请求终止当前 nnUNetv2 子进程并通过 SSE 回写取消状态。
 - 长时间推理期间后端会定期发送心跳事件（间隔 10 秒），前端底部进度 rail 更新已耗时和资源快照，避免界面显示停滞。
-- 对带标准答案的参考病例计算 per-label Dice、mean Dice、min Dice 和 foreground Dice。
+- 支持通过"标签 CT 导入"按钮或拖拽上传标签 NIfTI 文件，推理完成后自动执行在线 Dice 验证。当标签 ID 与当前 checkpoint 不一致时（如 FLARE22 vs AMOS22），在线验证结果会因 taxonomy 错位而失真，需离线 remap 后才有参考价值。
 - 持久化 job summary、阶段耗时、结果大小、资源快照和 nnUNetv2 日志尾部。
 - 支持同输入、同 checkpoint、同推理配置的历史结果缓存回填：`cached-real-nnunetv2`。
 
@@ -166,6 +166,24 @@ FLARE22 Tr 0009 非 AMOS 在线推理补充：
 
 该记录只能作为非 AMOS、按器官名重映射后的对照证据；FLARE22 label ID 与当前 AMOS22 checkpoint 不一致，不能写成 AMOS 原生自动验证。
 
+FLARE22 Tr 0009 + 标签上传在线验证：
+
+| 项目 | 结果 |
+|---|---|
+| job id | `bf20f0ec4456` |
+| mode | `real-nnunetv2` |
+| cached_result | `false` |
+| profile | `quality` |
+| duration_seconds | `222.6` |
+| 标签文件 | 已上传（131 KB），`label_path` 非空 |
+| validation status | `review` |
+| mean_dice | `0.073`（taxonomy 错位） |
+| 前景 Dice | `0.950` |
+| label 2（右肾）Dice | `0.945` |
+| 结论 | 标签传输链路修复成功；Dice 极低是 FLARE22 与 AMOS22 标签 ID 语义错位导致，非模型质量问题。离线 remap 后 mean_dice=0.893。 |
+
+该记录验证了标签文件在线传输和 validation 链路可用；但 taxonomy 错位问题需自动 remap 才能得到有意义的在线指标。
+
 ## 三视图拖动体验
 
 - 横断面拖动通常只改变 `x/y` 坐标，固定 `z` 切片不变，因此主要表现为十字线移动。
@@ -217,4 +235,4 @@ python tools/perf_no_cache_persistent.py --inference-profile fast --disable-tta 
 - `fast` profile 会牺牲一部分 nnUNetv2 默认质量设置。AMOS 0117 对照中 fast 明显更快，但 validation 为 `review`，不能作为正式报告结果。
 - 单个新病例的首次未缓存推理仍可能达到分钟级到十几分钟级。
 - 浏览器本身不能启动 Python/FastAPI 后端进程；在线推理前需要本地后端已在 `127.0.0.1:8000` 运行。
-- 当前已有 AMOS 0117 原生标签验收和 FLARE22 Tr 0009 非 AMOS 推理补充；新增病例后仍应分别记录三正交显示、label 点击、推理耗时、资源快照和标准答案状态。
+- 当前已有 AMOS 0117 原生标签验收和 FLARE22 Tr 0009 非 AMOS 推理补充（含标签上传在线验证）；新增病例后仍应分别记录三正交显示、label 点击、推理耗时、资源快照和标准答案状态。

@@ -8,6 +8,7 @@ export type ValidationSummary = {
   foreground_dice?: number | null;
   accepted?: boolean;
   message?: string;
+  taxonomy_match?: boolean;
   thresholds?: {
     mean_dice?: number;
     min_label_dice?: number;
@@ -90,6 +91,7 @@ function normalizeValidation(payload: unknown): ValidationSummary | undefined {
     }
   }
   if (typeof raw.accepted === "boolean") summary.accepted = raw.accepted;
+  if (typeof raw.taxonomy_match === "boolean") summary.taxonomy_match = raw.taxonomy_match;
   if (raw.message !== undefined) summary.message = String(raw.message);
   if (raw.thresholds && typeof raw.thresholds === "object") {
     const thresholds = raw.thresholds as Record<string, unknown>;
@@ -303,10 +305,16 @@ export async function fetchModelLabels(endpoint: string): Promise<OrganLabel[]> 
 export async function createInferenceJob(
   endpoint: string,
   file: File,
-  options: { modelId: string; confidenceThreshold: number; postprocess: Record<string, boolean>; inferenceProfile?: InferenceProfile }
+  options: { modelId: string; confidenceThreshold: number; postprocess: Record<string, boolean>; inferenceProfile?: InferenceProfile; labelFile?: File }
 ) {
   const formData = new FormData();
   formData.append("file", file, file.name);
+  if (options.labelFile) {
+    formData.append("label_file", options.labelFile, options.labelFile.name);
+    console.log("[createInferenceJob] label_file appended:", options.labelFile.name, options.labelFile.size);
+  } else {
+    console.log("[createInferenceJob] no labelFile provided");
+  }
   formData.append("model_id", options.modelId);
   formData.append("confidence_threshold", String(options.confidenceThreshold));
   formData.append("postprocess", JSON.stringify(options.postprocess));

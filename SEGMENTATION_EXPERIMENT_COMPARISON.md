@@ -14,6 +14,7 @@
 - `.test-output\segmentation-metrics-quality-profile-20260525-1433\quality-profile-amos0117-segmentation-metrics.md`
 - `.test-output\flare22-tr-0009-quality-20260526\metrics-remapped\flare22-tr-0009-quality-remapped-segmentation-metrics.md`
 - `.test-output\*\job_summary.json`：用于核对运行时间、状态、缓存和验证元数据。
+- `SEGMENTATION_RECENT_ROUNDS.md`：近三轮在线推理的滚动记录，包含标签上传验证轮次。
 
 说明：
 
@@ -36,6 +37,7 @@
 | 快速预览 | `fast` profile：关闭 TTA、较大 tile step，优先速度 | 排查演示/预览模式；不要作为正式质量结论，注意 label 14/15 假阳性 | `perf-fast-profile-20260525-1305`, job `6802e01f1a73` |
 | 正式质量 | `quality` profile：开启 TTA、较稳的正式推理配置 | 正式报告、验收截图、基准对比优先使用这一列 | `perf-quality-profile-20260525-1330`, job `b3c528cc9e20` |
 | 跨数据集 FLARE | FLARE22 病例按器官名 remap 到 AMOS 标签后的离线对照 | 排查模型在非 AMOS 数据上的泛化趋势；不能直接和 AMOS 原生验证混算 | `flare22-tr-0009-quality-20260526`, job `86b0153d0a73` |
+| FLARE+标签在线 | 标签文件传输修复后，FLARE22 在线 validation 链路首次打通 | 验证标签文件传输和在线 validation 可用；taxonomy 错位导致 Dice 无意义 | job `bf20f0ec4456` |
 
 ## 实验总览
 
@@ -50,6 +52,7 @@
 | 快速预览 | `6802e01f1a73` | AMOS 0117 | fast, TTA off | review | false | 384.345 | 0.777243 | 0.000000 | 0.972898 | 0.713592 | 0.998068 | 10.282058 |
 | 正式质量 | `b3c528cc9e20` | AMOS 0117 | quality, TTA on | passed | false | 1360.398 | 0.924780 | 0.846569 | 0.980317 | 0.865088 | 0.998578 | 7.716048 |
 | 跨数据集 FLARE | `86b0153d0a73` | FLARE22 Tr 0009 | quality，离线 remap | 仅作对照 | false | 237.323 | 0.893127 | 0.673730 | 0.949908 | 0.815941 | 0.991879 | 12.595149 |
+| FLARE+标签在线 | `bf20f0ec4456` | FLARE22 Tr 0009 | quality，taxonomy 错位 | review | false | 222.6 | 0.073 | 0.000 | 0.950 | N/A | N/A | N/A |
 
 ## 逐标签 Dice 对比
 
@@ -225,6 +228,30 @@
 | 14 | 膀胱 | N/A | N/A | N/A | 0 | 0 |
 | 15 | 前列腺/子宫 | N/A | N/A | N/A | 0 | 0 |
 
+## FLARE22 Tr 0009 + 标签上传在线验证详情
+
+运行：标签文件传输修复后首次在线验证，job `bf20f0ec4456`
+
+| 标签 | 器官 | Dice | 说明 |
+|---:|---|---:|---|
+| 1 | 脾脏 vs 肝脏 | 0.000000 | 语义错位 |
+| 2 | 右肾 vs 右肾 | 0.945249 | 恰好一致 |
+| 3 | 左肾 vs 脾脏 | 0.000000 | 语义错位 |
+| 4 | 胆囊 vs 右肾上腺 | 0.000000 | 语义错位 |
+| 5 | 食管 vs 左肾上腺 | 0.000000 | 语义错位 |
+| 6 | 肝脏 vs 胆囊 | 0.000635 | 语义错位 |
+| 7 | 胃 vs 食管 | 0.000000 | 语义错位 |
+| 8 | 主动脉 vs 胃 | 0.000000 | 语义错位 |
+| 9 | 下腔静脉 vs 主动脉 | 0.000000 | 语义错位 |
+| 10 | 胰腺 vs 下腔静脉 | 0.000000 | 语义错位 |
+| 11 | 右肾上腺 vs 胰腺 | 0.000000 | 语义错位 |
+| 12 | 左肾上腺 vs 十二指肠 | 0.000000 | 语义错位 |
+| 13 | 十二指肠 vs 左肾 | 0.000000 | 语义错位 |
+| 14 | 膀胱 | N/A | 该例无此标签 |
+| 15 | 前列腺/子宫 | N/A | 该例无此标签 |
+
+结论：标签文件传输链路修复成功，validation 正常执行。Dice 极低是 AMOS22 checkpoint 与 FLARE22 标签 ID 语义错位导致，非模型质量问题。`taxonomy_match: True` 是误判——只检查了 ID 集合交集，未做语义级匹配。离线 remap 后真实 mean_dice=0.893。
+
 ## 结论解读
 
 - 新 checkpoint 是历史结果中的主要提升点。AMOS 最弱标签从旧模型胃 Dice 约 `0.556` 提升到新权重和正式质量配置中的约 `0.8465`。
@@ -246,6 +273,13 @@
 - `quality`、`fast`、FLARE22 remap 的对比口径继续沿用上方说明：正式 AMOS 报告看 `quality`，快速预览需复核，FLARE22 只作为跨数据集器官名重映射证据。
 - 文档主体已复核为中文；保留 Dice、IoU、HD、profile、job id、checkpoint 等必要技术字段。
 
+## 2026-05-27 标签上传验证审核记录
+
+- 新增 `bf20f0ec4456`（FLARE+标签在线）到实验总览表和逐标签 Dice 对比表。
+- 该轮在线验证 mean_dice=0.073 是 taxonomy 错位导致，非模型质量问题；离线 remap 后真实值 0.893。
+- `quality`、`fast`、FLARE22 remap 的对比口径继续沿用上方说明。
+- 新增 `SEGMENTATION_RECENT_ROUNDS.md` 作为近三轮在线推理的滚动记录数据源。
+
 ## 推荐基线
 
 | 用途 | 推荐运行 | 原因 |
@@ -254,3 +288,4 @@
 | 历史模型对比 | 旧模型常驻 vs `quality` profile | 展示旧模型/旧流程到当前质量基线的主要提升。 |
 | 演示/快速预览 | `fast` profile `6802e01f1a73` | 明显更快，但必须标注为需复核。 |
 | 跨数据集证据 | FLARE22 remap `86b0153d0a73` | 适合做外部器官名对齐检查，不能用于 AMOS 原生分数声明。 |
+| 标签传输验证 | FLARE+标签在线 `bf20f0ec4456` | 标签文件在线传输和 validation 链路可用；taxonomy 错位需自动 remap。 |

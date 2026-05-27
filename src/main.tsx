@@ -55,7 +55,7 @@ type ViewMode = "CT" | "Mask" | "3D";
 type RunState = "idle" | "running" | "complete";
 type ModuleId = "项目" | "数据" | "分割" | "评估" | "报告";
 type CompareMode = "split" | "overlay" | "side" | "difference";
-type UploadRole = "source" | "result";
+type UploadRole = "source" | "result" | "label";
 type RemovalTarget = "source" | "result" | "session";
 type NiftiRenderMode = "intensity" | "mask";
 type InferenceTimelineEntry = {
@@ -421,9 +421,10 @@ function formatBytes(value: number | undefined) {
   return `${value} B`;
 }
 
-function getValidationStatusCopy(validation: ValidationSummary | null) {
-  if (!validation) return "等待标准答案验证";
-  if (validation.status === "passed") return "标准答案通过";
+function getValidationStatusCopy(validation: ValidationSummary | null, hasLabelFile: boolean) {
+  if (!validation) return hasLabelFile ? "等待验证结果" : "未提供标签 CT";
+  if (validation.taxonomy_match === false) return "标签 ID 不匹配";
+  if (validation.status === "passed") return "验证通过";
   if (validation.status === "review") return "建议人工复核";
   return "无法自动验证";
 }
@@ -476,6 +477,8 @@ function OrganDetailCard({ organId, label, coord, onClose }: { organId: string; 
 function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const resultFileInputRef = useRef<HTMLInputElement>(null);
+  const labelFileInputRef = useRef<HTMLInputElement>(null);
+  const [labelFile, setLabelFile] = useState<File | null>(null);
   const autoLoadAttemptedRef = useRef(false);
   const activeJobIdRef = useRef<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("Mask");
@@ -577,8 +580,8 @@ function App() {
   const scoredMeanDice = getMeanOrganDice(organs);
   const averageDice = scoredMeanDice === null ? "待验证" : scoredMeanDice.toFixed(3);
   const displayedAverageDice = validationSummary?.mean_dice != null ? formatDiceMetric(validationSummary.mean_dice) : averageDice;
-  const validationStatusCopy = getValidationStatusCopy(validationSummary);
-  const validationMessage = validationSummary?.message ?? "载入内置参考病例并运行分割后，将自动用标准答案计算 Dice。";
+  const validationStatusCopy = getValidationStatusCopy(validationSummary, Boolean(labelFile));
+  const validationMessage = validationSummary?.message ?? (labelFile ? "推理完成后将自动用标签 CT 计算 Dice。" : "导入标签 CT 或载入参考病例后，可自动计算 Dice。");
   const inferenceDurationCopy = inferenceStatus.status === "succeeded" ? formatSeconds(inferenceStatus.duration_seconds) : "待记录";
   const inferenceResultSizeCopy = inferenceStatus.status === "succeeded" ? formatBytes(inferenceStatus.result_size_bytes) : "待生成";
   const inferenceResourceCopy = inferenceStatus.status === "succeeded" ? getResourceSnapshotCopy(inferenceStatus.resource_latest) : "待记录";
@@ -996,14 +999,19 @@ function App() {
     }]);
     setInferenceStatus({ status: "submitting" });
     setLogs([`提交本地 nnUNetv2 任务：${selectedModel.name} · ${selectedInferenceProfileOption.label}`, `质控提示阈值 ${confidenceThreshold}% · 后处理 ${Object.values(postprocessConfig).filter(Boolean).length}/3`, ...baseLogs]);
+    if (!labelFile) {
+      setToast("未选择标签 CT，推理完成后不会自动计算 Dice。可通过「标签 CT 导入」补充。");
+    }
 
     try {
       const endpoint = API_ENDPOINT;
+      console.log("[inference] labelFile:", labelFile?.name ?? null, "size:", labelFile?.size ?? 0);
       const job = await createInferenceJob(endpoint, sourceImage.file!, {
         modelId: selectedModelId,
         confidenceThreshold,
         postprocess: postprocessConfig,
-        inferenceProfile: selectedInferenceProfile
+        inferenceProfile: selectedInferenceProfile,
+        labelFile: labelFile ?? undefined,
       });
       activeJobIdRef.current = job.job_id;
       let inferenceOptions = job.inference_options;
@@ -1331,6 +1339,11 @@ function App() {
   }
 
   async function processVisualizationFile(file: File, role: UploadRole) {
+    if (role === "label") {
+      setLabelFile(file);
+      setToast(`标签文件已选择：${file.name}`);
+      return;
+    }
     const image = await loadVisualizationFile(file);
     if (role === "source") {
       setLoadedImage(image);
@@ -1412,6 +1425,14 @@ function App() {
     } finally {
       event.target.value = "";
     }
+  }
+
+  function handleLabelFileSelected(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setLabelFile(file);
+    setToast(`标签文件已选择：${file.name}`);
+    event.target.value = "";
   }
 
   function handleDrag(event: DragEvent<HTMLElement>, role: UploadRole | null) {
@@ -1500,6 +1521,7 @@ function App() {
       <section className="main-stage">
         <input ref={fileInputRef} type="file" hidden accept=".nii,.nii.gz,.png,.jpg,.jpeg,.webp,image/*" onChange={handleFileSelected} />
         <input ref={resultFileInputRef} type="file" hidden accept=".nii,.nii.gz,.png,.jpg,.jpeg,.webp,image/*" onChange={handleResultFileSelected} />
+        <input ref={labelFileInputRef} type="file" hidden accept=".nii,.nii.gz" onChange={handleLabelFileSelected} />
 
         <header className="topbar">
           <div>
@@ -1538,6 +1560,7 @@ function App() {
           <div className="top-actions">
             <button className="ghost-button" onClick={() => fileInputRef.current?.click()}><Upload size={17} />导入 CT 原图</button>
             <button className="ghost-button" onClick={() => resultFileInputRef.current?.click()}><Upload size={17} />导入分割结果</button>
+            <button className="ghost-button" onClick={() => labelFileInputRef.current?.click()}><Upload size={17} />{labelFile ? `标签：${labelFile.name.slice(0, 12)}` : "导入标签 CT"}</button>
             <button className="ghost-button" onClick={() => void loadReferenceCase()}><Database size={17} />载入参考病例</button>
             <button className="primary-button" onClick={() => runState === "running" ? void cancelSegmentation() : void startSegmentation()} disabled={inferenceStatus.status === "submitting"}>
               {runState === "running" ? <Pause size={17} /> : <Play size={17} />}
@@ -1762,6 +1785,9 @@ function App() {
                     <button className={dragTarget === "result" ? "drop-zone active" : "drop-zone"} onClick={() => resultFileInputRef.current?.click()} onDragEnter={(event) => handleDrag(event, "result")} onDragOver={(event) => handleDrag(event, "result")} onDragLeave={(event) => handleDrag(event, null)} onDrop={(event) => handleDrop(event, "result")}>
                       <FileStack size={18} /><strong>结果图导入</strong><span>掩膜 / 叠加图 / NIfTI 标签</span>
                     </button>
+                    <button className={dragTarget === "label" ? "drop-zone active" : "drop-zone"} onClick={() => labelFileInputRef.current?.click()} onDragEnter={(event) => handleDrag(event, "label")} onDragOver={(event) => handleDrag(event, "label")} onDragLeave={(event) => handleDrag(event, null)} onDrop={(event) => handleDrop(event, "label")}>
+                      <Upload size={18} /><strong>标签 CT 导入</strong><span>{labelFile ? labelFile.name : "NIfTI 标签文件 · 用于自动 Dice 验证"}</span>
+                    </button>
                   </div>
                   <div className="readiness-card"><div><span>实时载入状态</span><strong>{lastImport}</strong></div><BadgeCheck size={19} /></div>
                   <div className="custom-case-card">
@@ -1857,7 +1883,7 @@ function App() {
                   </div>
                   <div className={`validation-card ${validationSummary?.status ?? "pending"}`}>
                     <div>
-                      <span>标准答案验证</span>
+                      <span>标签验证</span>
                       <strong>{validationStatusCopy}</strong>
                       <small>{validationMessage}</small>
                     </div>
@@ -1883,13 +1909,13 @@ function App() {
                   <h2><BarChart3 size={18} />质量评估</h2>
                   <Metric label="平均 Dice" value={displayedAverageDice} />
                   <Metric label="最低 Dice" value={formatDiceMetric(validationSummary?.min_dice)} />
-                  <Metric label="标准答案" value={validationStatusCopy} />
+                  <Metric label="前景 Dice" value={formatDiceMetric(validationSummary?.foreground_dice)} />
+                  <Metric label="标签验证" value={validationStatusCopy} />
                   <Metric label="推理模式" value={resultProfileCopy} />
                   <Metric label="推理耗时" value={inferenceDurationCopy} />
                   <Metric label="瓶颈阶段" value={inferencePhaseTimingCopy} />
                   <Metric label="结果大小" value={inferenceResultSizeCopy} />
                   <Metric label="资源快照" value={inferenceResourceCopy} />
-                  <Metric label="平均 NSD" value="0.887" />
                   <Metric label="待复核器官" value={`${reviewCount}`} />
                   <Metric label="配准状态" value={volumeRegistration} />
                 </section>

@@ -1,6 +1,6 @@
 # 三大目标验收包
 
-本文档用于把当前 GUI 的三个目标从“功能接近完成”推进到“可复现验收”。当前证据包含 AMOS 0117 原生标签验证，以及 FLARE22 Tr 0009 的非 AMOS 在线推理和离线 taxonomy-remap 指标。FLARE22 本地 label 文件存在，但标签 ID 与当前 AMOS22 checkpoint 不一致，因此后端自动验证保持关闭，不能把它写成 AMOS 原生 Dice 验收。
+本文档用于把当前 GUI 的三个目标从”功能接近完成”推进到”可复现验收”。当前证据包含 AMOS 0117 原生标签验证，以及 FLARE22 Tr 0009 的非 AMOS 在线推理和离线 taxonomy-remap 指标。2026-05-27 标签文件传输修复后，FLARE22 在线 validation 链路已打通（job `bf20f0ec4456`），但因 taxonomy 错位导致在线 Dice 无意义，需自动 remap 后才能得到有意义的跨数据集指标。
 
 ## 目标 1：CT 可浏览、三正交可联动
 
@@ -464,3 +464,30 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\checkpoint_best.
 
 - 该修复只解决 nnUNetv2 输入识别问题，不改变模型权重、推理参数或指标计算。
 - 浏览器不能自动启动 Python 后端；在线推理前仍需 FastAPI 服务在 `127.0.0.1:8000` 运行。
+
+## 2026-05-27 标签文件传输修复与在线验证链路
+
+范围：
+
+- 修复标签文件上传后后端 `label_path` 为 `null` 的问题。
+- 打通从 GUI 标签文件上传到后端在线 Dice 验证的完整链路。
+- 记录 FLARE22 与 AMOS22 taxonomy 错位的根因发现。
+
+验收证据：
+
+| 检查项 | 结果 |
+|---|---|
+| 根因 | `UploadRole` 类型不包含 `"label"`，拖拽不支持标签文件；后端服务需重启以加载新增调试日志代码。 |
+| 前端修复 | `UploadRole` 扩展为 `"source" | "result" | "label"`；`processVisualizationFile()` 增加 label 分支；数据操作面板新增"标签 CT 导入"拖放区域。 |
+| 后端修复 | `create_job()` 增加调试日志 `print(f"[create_job] received file=..., label_file=...")`，重启后标签文件正常传输。 |
+| 在线验证 | job `bf20f0ec4456`：`label_path` 非空，validation 执行成功，标签文件 131 KB 正确保存。 |
+| taxonomy 错位 | FLARE22 label ID 与 AMOS22 checkpoint 语义完全不同，仅 label 2（右肾）一致 Dice=0.945，其余错位 Dice≈0。 |
+| 离线 remap | 器官名重映射后 mean_dice=0.893, min_dice=0.674, fg_dice=0.950。 |
+| 自动验证 | `npm test`、`npm run build` 均通过。 |
+
+行为边界：
+
+- 标签文件传输 bug 的根因可能是后端服务未重启导致代码变更未生效。
+- `taxonomy_match: True` 只检查了 ID 集合交集，未做语义级匹配，这是一个已知误判。
+- 在线验证 mean_dice=0.073 是 taxonomy 错位导致，非模型质量问题；离线 remap 后真实值为 0.893。
+- 后续需实现自动 taxonomy remap（Phase 1），才能让在线验证对跨数据集有意义。
