@@ -38,6 +38,8 @@ assert.equal(mainSource.includes("inferenceStartedAt"), true, "front-end should 
 assert.equal(mainSource.includes("inference-progress-rail"), true, "bottom console should render a structured inference progress rail");
 assert.equal(mainSource.includes("inference-progress-track"), true, "bottom console should render a real progressbar track from SSE progress");
 assert.equal(mainSource.includes("parsed.log_tail"), true, "failed SSE events should preserve backend log_tail for review");
+assert.equal(mainSource.includes("parsed.heartbeat"), true, "SSE handler should distinguish heartbeat events from normal progress");
+assert.equal(mainSource.includes("setInferenceStartedAt"), true, "heartbeat events should sync frontend elapsed timer with backend reality");
 assert.equal(mainSource.includes("const idleProgress = inferenceTimeline.length ? clampedProgress : 0"), true, "waiting progress rail should not show the previous 100% baseline before any inference event");
 for (const mockCaseId of ["Case_FLARE_024", "Case_LUNG_112", "Case_PANC_038"]) {
   assert.equal(mainSource.includes(mockCaseId), false, `top case selector should not expose mock case ${mockCaseId}`);
@@ -283,6 +285,63 @@ assert.deepEqual(parseInferenceEvent('data: {"type":"complete","progress":100,"s
     not_on_device: false
   }
 });
+assert.deepEqual(parseInferenceEvent('data: {"type":"progress","progress":20,"stage":"常驻 nnUNetv2 worker 推理中","heartbeat":true,"elapsed_seconds":45.123}\n\n'), {
+  type: "progress",
+  progress: 20,
+  stage: "常驻 nnUNetv2 worker 推理中",
+  heartbeat: true,
+  elapsed_seconds: 45.123
+});
+assert.deepEqual(parseInferenceEvent('data: {"type":"progress","progress":20,"stage":"nnUNetv2 命令运行中"}\n\n'), {
+  type: "progress",
+  progress: 20,
+  stage: "nnUNetv2 命令运行中"
+});
+
+{
+  const e2eEvents = [
+    'data: {"type":"progress","progress":8,"stage":"任务已提交到本地 nnUNetv2"}\n\n',
+    'data: {"type":"progress","progress":14,"stage":"已准备项目指定训练权重"}\n\n',
+    'data: {"type":"progress","progress":20,"stage":"常驻 nnUNetv2 worker 推理中"}\n\n',
+    'data: {"type":"progress","progress":20,"stage":"常驻 nnUNetv2 worker 推理中","heartbeat":true,"elapsed_seconds":30.5}\n\n',
+    'data: {"type":"progress","progress":20,"stage":"常驻 nnUNetv2 worker 推理中","heartbeat":true,"elapsed_seconds":61.0}\n\n',
+    'data: {"type":"progress","progress":90,"stage":"整理 nnUNetv2 输出"}\n\n',
+    'data: {"type":"complete","progress":100,"stage":"真实 nnUNetv2 推理结果已生成","duration_seconds":120.5,"result_size_bytes":141569,"phase_timings":{"persistent_worker":118.2,"collect_result":0.3},"resource_latest":{"phase":"completed","gpu":{"name":"RTX 4060","memory_used_mib":7500,"memory_total_mib":8192}}}\n\n',
+  ];
+  const parsed = e2eEvents.map((raw) => parseInferenceEvent(raw));
+  const nonHeartbeatProgress = parsed.filter((e) => e.type === "progress" && !e.heartbeat);
+  const heartbeats = parsed.filter((e) => e.type === "progress" && e.heartbeat);
+  const complete = parsed.filter((e) => e.type === "complete");
+
+  assert.equal(nonHeartbeatProgress.length, 4, "E2E should have 4 non-heartbeat progress events");
+  assert.equal(heartbeats.length, 2, "E2E should have 2 heartbeat events");
+  assert.equal(complete.length, 1, "E2E should have 1 complete event");
+  assert.equal(heartbeats[0].elapsed_seconds, 30.5, "first heartbeat should report elapsed_seconds");
+  assert.equal(complete[0].duration_seconds, 120.5, "complete event should report duration");
+  assert.equal(complete[0].result_size_bytes, 141569, "complete event should report result size");
+  assert.equal(complete[0].phase_timings?.persistent_worker, 118.2, "complete event should include phase timings");
+  assert.equal(complete[0].resource_latest?.gpu?.name, "RTX 4060", "complete event should include resource snapshot");
+
+  const statusFlow = parsed.map((e) => {
+    if (e.type === "error") return "failed";
+    if (e.type === "complete") return "succeeded";
+    return "running";
+  });
+  assert.deepEqual(statusFlow, ["running", "running", "running", "running", "running", "running", "succeeded"]);
+}
+
+{
+  const failEvents = [
+    'data: {"type":"progress","progress":20,"stage":"推理中"}\n\n',
+    'data: {"type":"error","message":"CUDA out of memory","log_tail":"RuntimeError: CUDA out of memory"}\n\n',
+  ];
+  const parsed = failEvents.map((raw) => parseInferenceEvent(raw));
+  assert.equal(parsed[0].type, "progress");
+  assert.equal(parsed[1].type, "error");
+  assert.equal(parsed[1].message, "CUDA out of memory");
+  assert.equal(parsed[1].log_tail, "RuntimeError: CUDA out of memory");
+}
+
 assert.equal(getInferenceStatusCopy({ status: "running", progress: 45, stage: "推理中" }), "推理中 · 45%");
 assert.equal(getInferenceStatusCopy({ status: "succeeded", mode: "real-nnunetv2", duration_seconds: 386.42 }), "真实 nnUNetv2 推理完成 · 6分26秒");
 assert.equal(getInferenceStatusCopy({ status: "succeeded", mode: "cached-real-nnunetv2", duration_seconds: 0.38 }), "缓存推理结果回填完成 · 0秒");

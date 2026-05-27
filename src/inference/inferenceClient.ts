@@ -52,7 +52,7 @@ export type InferenceOptions = {
 };
 
 export type InferenceEvent =
-  | { type: "progress"; progress: number; stage: string }
+  | { type: "progress"; progress: number; stage: string; heartbeat?: boolean; elapsed_seconds?: number }
   | { type: "complete"; progress: number; stage: string; duration_seconds?: number; result_size_bytes?: number; validation?: ValidationSummary; resource_latest?: ResourceSnapshot; phase_timings?: PhaseTimings; inference_options?: InferenceOptions }
   | { type: "error"; message: string; log_tail?: string; resource_latest?: ResourceSnapshot };
 
@@ -183,6 +183,10 @@ export function parseInferenceEvent(raw: string): InferenceEvent {
     progress: Math.max(0, Math.min(100, Number(parsed.progress ?? 0))),
     stage: String(parsed.stage ?? "推理中")
   };
+  if (event.type === "progress") {
+    if (parsed.heartbeat === true) event.heartbeat = true;
+    if (Number.isFinite(Number(parsed.elapsed_seconds))) event.elapsed_seconds = Number(parsed.elapsed_seconds);
+  }
   if (event.type === "complete") {
     if (Number.isFinite(Number(parsed.duration_seconds))) event.duration_seconds = Number(parsed.duration_seconds);
     if (Number.isFinite(Number(parsed.result_size_bytes))) event.result_size_bytes = Number(parsed.result_size_bytes);

@@ -1046,13 +1046,20 @@ function App() {
             }
             setProgress(parsed.progress);
             setInferenceStatus({ status: "running", jobId: job.job_id, progress: parsed.progress, stage: parsed.stage });
-            appendInferenceTimelineEntry({
-              type: parsed.type === "complete" ? "complete" : "progress",
-              progress: parsed.progress,
-              stage: parsed.stage,
-              message: parsed.type === "complete" ? "阶段事件完成，正在下载分割结果" : parsed.stage
-            });
-            setLogs((items) => [`${parsed.stage} · ${parsed.progress}%`, ...items].slice(0, 8));
+            if (parsed.type === "progress" && parsed.heartbeat) {
+              if (Number.isFinite(parsed.elapsed_seconds)) {
+                setInferenceStartedAt(Date.now() - (parsed.elapsed_seconds as number) * 1000);
+              }
+              setLogs((items) => [`后端运行中 · ${parsed.stage} · ${parsed.progress}%`, ...items].slice(0, 8));
+            } else {
+              appendInferenceTimelineEntry({
+                type: parsed.type === "complete" ? "complete" : "progress",
+                progress: parsed.progress,
+                stage: parsed.stage,
+                message: parsed.type === "complete" ? "阶段事件完成，正在下载分割结果" : parsed.stage
+              });
+              setLogs((items) => [`${parsed.stage} · ${parsed.progress}%`, ...items].slice(0, 8));
+            }
             if (parsed.type === "complete") {
               const validation = parsed.validation;
               if (validation) {

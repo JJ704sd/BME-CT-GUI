@@ -850,6 +850,188 @@ def test_job_state_can_read_persisted_summary_after_restart():
     assert result_response.content == b"persisted-result"
 
 
+def test_e2e_inference_flow_create_events_result():
+    """端到端推理流程：创建 job → 执行推理 → 验证事件序列 → 下载结果"""
+    server = load_server_module()
+    temp_root = make_test_output_dir("e2e-inference-flow")
+    job_id = "e2e0001"
+    input_dir = temp_root / job_id / "input"
+    output_dir = temp_root / job_id / "output"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    input_path = input_dir / f"{job_id}_0000.nii.gz"
+    input_path.write_bytes(b"fake-nifti-input")
+
+    def fake_worker(job, input_dir_arg, output_dir_arg, model_dir_arg):
+        (output_dir_arg / f"{job_id}.nii.gz").write_bytes(b"e2e-segmentation-result")
+        return subprocess.CompletedProcess(
+            args=["persistent-worker"], returncode=0,
+            stdout="worker complete", stderr=""
+        )
+
+    with server.jobs_lock:
+        server.jobs[job_id] = server.Job(id=job_id, cache_key="e2e-cache-key")
+
+    with patch.object(server, "WORK_DIR", temp_root), \
+         patch.object(server, "prepare_runtime_model_dir", return_value=Path("runtime-model")), \
+         patch.object(server, "persistent_worker_enabled", return_value=True), \
+         patch.object(server, "run_persistent_worker_prediction", side_effect=fake_worker), \
+         patch.object(server, "is_debug_original_upload", return_value=False):
+        server.run_real_job(job_id, input_path)
+
+    job = server.jobs[job_id]
+    summary = server.build_job_summary(job)
+
+    assert summary["status"] == "succeeded"
+    assert summary["result_ready"] is True
+    assert summary["result_size_bytes"] == len(b"e2e-segmentation-result")
+    assert summary["duration_seconds"] is not None and summary["duration_seconds"] >= 0
+    assert summary["phase_timings"]["persistent_worker"] >= 0
+    assert summary["phase_timings"]["collect_result"] >= 0
+
+    event_types = [e["type"] for e in job.events]
+    assert event_types[0] == "progress"
+    assert event_types[-1] == "complete"
+    assert "error" not in event_types
+
+    progress_stages = [e["stage"] for e in job.events if e["type"] == "progress"]
+    assert any("nnUNetv2" in s for s in progress_stages)
+    assert any("推理" in s for s in progress_stages)
+
+    complete_event = job.events[-1]
+    assert complete_event["progress"] == 100
+    assert complete_event["duration_seconds"] is not None
+    assert complete_event["result_size_bytes"] == len(b"e2e-segmentation-result")
+    assert "resource_latest" in complete_event
+
+
+def test_e2e_inference_flow_via_api_endpoints():
+    """通过 TestClient 走完整 API 链路：POST 创建 → GET 状态 → GET 结果"""
+    server = load_server_module()
+    temp_root = make_test_output_dir("e2e-api-flow")
+    cached_job_id = "e2e-api-0001"
+    cached_output = temp_root / cached_job_id / "output"
+    cached_output.mkdir(parents=True, exist_ok=True)
+    cached_result = cached_output / f"{cached_job_id}.nii.gz"
+    cached_result.write_bytes(b"e2e-api-result")
+    (cached_output / "job_summary.json").write_text(json.dumps({
+        "job_id": cached_job_id,
+        "status": "succeeded",
+        "progress": 100,
+        "stage": "历史推理结果已生成",
+        "mode": "real-nnunetv2",
+        "result_ready": True,
+        "result_path": str(cached_result),
+        "result_size_bytes": cached_result.stat().st_size,
+        "cache_key": "e2e-api-cache-key",
+        "validation": {"status": "passed", "message": "达标"},
+    }, ensure_ascii=False), encoding="utf-8")
+
+    with patch.object(server, "WORK_DIR", temp_root), \
+         patch.object(server, "get_model_state", return_value={
+             "ready": True, "status": "ready", "mode": "real-nnunetv2", "missing": [],
+         }), \
+         patch.object(server, "build_prediction_cache_key", return_value="e2e-api-cache-key"):
+        client = TestClient(server.app)
+        create_response = client.post(
+            "/api/segment/jobs",
+            files={"file": ("case_0000.nii.gz", b"e2e-input", "application/octet-stream")},
+            data={"model_id": "abdomen"},
+        )
+        body = create_response.json()
+        job_id = body["job_id"]
+
+        state_response = client.get(f"/api/segment/jobs/{job_id}")
+        state = state_response.json()
+
+        result_response = client.get(f"/api/segment/jobs/{job_id}/result")
+
+    assert create_response.status_code == 200
+    assert body["cached_result"] is True
+    assert body["mode"] == "cached-real-nnunetv2"
+
+    assert state_response.status_code == 200
+    assert state["status"] == "succeeded"
+    assert state["result_ready"] is True
+    assert state["validation"]["status"] == "passed"
+
+    assert result_response.status_code == 200
+    assert result_response.content == b"e2e-api-result"
+
+    job = server.jobs[job_id]
+    event_types = [e["type"] for e in job.events]
+    assert event_types[-1] == "complete"
+    assert job.events[-1]["cached_result"] is True
+
+
+def test_e2e_inference_failure_flow():
+    """端到端失败流程：推理抛异常 → job 状态变为 failed → 错误事件记录"""
+    server = load_server_module()
+    temp_root = make_test_output_dir("e2e-failure-flow")
+    job_id = "e2e-fail-0001"
+    input_dir = temp_root / job_id / "input"
+    output_dir = temp_root / job_id / "output"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    input_path = input_dir / f"{job_id}_0000.nii.gz"
+    input_path.write_bytes(b"fake-input")
+
+    def failing_worker(job, input_dir_arg, output_dir_arg, model_dir_arg):
+        raise RuntimeError("CUDA out of memory")
+
+    with server.jobs_lock:
+        server.jobs[job_id] = server.Job(id=job_id, cache_key="fail-cache")
+
+    with patch.object(server, "WORK_DIR", temp_root), \
+         patch.object(server, "prepare_runtime_model_dir", return_value=Path("runtime-model")), \
+         patch.object(server, "persistent_worker_enabled", return_value=True), \
+         patch.object(server, "run_persistent_worker_prediction", side_effect=failing_worker), \
+         patch.object(server, "is_debug_original_upload", return_value=False):
+        server.run_real_job(job_id, input_path)
+
+    job = server.jobs[job_id]
+    assert job.status == "failed"
+    assert "CUDA out of memory" in job.error
+
+    event_types = [e["type"] for e in job.events]
+    assert event_types[0] == "progress"
+    assert event_types[-1] == "error"
+
+    error_event = job.events[-1]
+    assert "CUDA out of memory" in error_event["message"]
+
+
+def test_push_heartbeat_emits_progress_event_with_heartbeat_flag():
+    server = load_server_module()
+
+    job = server.Job(id="heartbeat0001", status="running", progress=20, stage="常驻 nnUNetv2 worker 推理中")
+    job.started_at = server.time.time() - 30.0
+
+    server.push_heartbeat(job, "test_phase")
+
+    assert len(job.events) == 1
+    event = job.events[0]
+    assert event["type"] == "progress"
+    assert event["progress"] == 20
+    assert event["stage"] == "常驻 nnUNetv2 worker 推理中"
+    assert event["heartbeat"] is True
+    assert isinstance(event["elapsed_seconds"], (int, float))
+    assert 25.0 <= event["elapsed_seconds"] <= 35.0
+    assert "resource_latest" in event
+
+
+def test_push_heartbeat_failure_does_not_raise():
+    server = load_server_module()
+
+    job = server.Job(id="heartbeat0002", status="running", progress=20, stage="test")
+    job.started_at = None
+
+    server.push_heartbeat(job, "test_phase")
+    assert len(job.events) == 1
+    assert job.events[0]["heartbeat"] is True
+    assert job.events[0]["elapsed_seconds"] is None
+
+
 def test_job_state_can_reconstruct_legacy_output_without_summary():
     server = load_server_module()
     temp_root = make_test_output_dir("legacy-jobs")
@@ -909,3 +1091,8 @@ if __name__ == "__main__":
     test_process_log_is_persisted_as_utf8_and_tail_is_returned()
     test_job_state_can_read_persisted_summary_after_restart()
     test_job_state_can_reconstruct_legacy_output_without_summary()
+    test_e2e_inference_flow_create_events_result()
+    test_e2e_inference_flow_via_api_endpoints()
+    test_e2e_inference_failure_flow()
+    test_push_heartbeat_emits_progress_event_with_heartbeat_flag()
+    test_push_heartbeat_failure_does_not_raise()
