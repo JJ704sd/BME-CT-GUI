@@ -133,7 +133,7 @@
 讲解重点：
 
 - `AMOS_0117` 是有原生 label 的自动 validation 病例。
-- `FLARE22_Tr_0009` 当前只注册 original，不注册 label，因为 FLARE22 label ID 与 AMOS22 checkpoint 不同。
+- `FLARE22_Tr_0009` 在 `/api/samples` 中 `validation_available=false`，因为 FLARE22 label ID 与 AMOS22 checkpoint 不同。但标签文件可通过"标签 CT 导入"上传，在线 validation 链路已打通（job `bf20f0ec4456`）；taxonomy 错位导致在线 Dice 无意义，需离线 remap。
 - `shouldUpdateVoxelCoord()` 是本轮性能优化的基础小工具，用于阻止重复坐标更新。
 - `getVoxelCoordDragCommit()` 用于三视图拖动时的坐标裁剪、去重和 axial selected slice 推导，避免把该逻辑写死在 React 事件处理里。
 
