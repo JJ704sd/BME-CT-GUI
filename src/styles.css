@@ -2352,7 +2352,7 @@ h1 {
 }
 
 .bottom-console {
-  padding: 10px 14px;
+  padding: 8px 12px;
 }
 
 .console-head h2,
@@ -2369,6 +2369,161 @@ h1 {
 .console-head span {
   color: #93a19d;
   font-size: 13px;
+}
+
+.inference-progress-rail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.48fr);
+  align-items: stretch;
+  gap: 10px;
+  min-width: 0;
+  margin-top: 8px;
+  padding: 7px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(7, 10, 12, 0.58);
+}
+
+.inference-progress-main {
+  display: grid;
+  align-content: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.inference-progress-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.inference-progress-top strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #edf7f3;
+  font-size: 13px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inference-progress-top span {
+  flex: 0 0 auto;
+  color: #79efcc;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 850;
+}
+
+.inference-progress-track {
+  position: relative;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.075);
+}
+
+.inference-progress-track span {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #4fd1a5, #8bdcf6);
+  box-shadow: 0 0 18px rgba(92, 232, 194, 0.32);
+  transition: width 240ms ease;
+}
+
+.inference-progress-rail.is-running .inference-progress-track::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.18), transparent);
+  animation: progress-scan 1.7s linear infinite;
+}
+
+.inference-progress-rail.is-error .inference-progress-track span {
+  background: linear-gradient(90deg, #ff7e7e, #ffd166);
+}
+
+.inference-progress-rail.is-cancelled .inference-progress-track span {
+  background: linear-gradient(90deg, #9aa4a0, #d2d8d5);
+}
+
+.inference-progress-meta {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  color: #93a19d;
+  font-size: 12px;
+}
+
+.inference-progress-meta span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inference-timeline {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.inference-timeline li {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 58px;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 4px 7px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.045);
+  color: #b8c5c1;
+  font-size: 12px;
+}
+
+.inference-timeline li > span {
+  color: #79efcc;
+  font-variant-numeric: tabular-nums;
+  font-weight: 850;
+}
+
+.inference-timeline li[data-kind="error"] > span {
+  color: #ffadad;
+}
+
+.inference-timeline li[data-kind="cancelled"] > span {
+  color: #c2cbc8;
+}
+
+.inference-timeline p,
+.inference-timeline time {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inference-timeline time {
+  color: #7e8b87;
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes progress-scan {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
 }
 
 .log-grid {
@@ -2627,6 +2782,14 @@ h1 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .inference-progress-rail {
+    grid-template-columns: 1fr;
+  }
+
+  .inference-progress-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .content-grid {
     min-height: 980px;
   }
@@ -2669,6 +2832,28 @@ h1 {
   .viewer-caption span:last-child,
   .registration-caption {
     justify-content: flex-start;
+  }
+
+  .inference-progress-rail {
+    padding: 9px;
+  }
+
+  .inference-progress-top {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .inference-progress-meta {
+    grid-template-columns: 1fr;
+  }
+
+  .inference-timeline li {
+    grid-template-columns: 44px minmax(0, 1fr);
+  }
+
+  .inference-timeline time {
+    display: none;
   }
 
   .case-menu {

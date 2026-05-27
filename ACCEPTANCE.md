@@ -81,13 +81,17 @@
 | 资源快照 | device、GPU 显存、磁盘空间 |
 | 结果文件 | 下载状态、字节数、能否回填 GUI |
 | 验证结果 | 有标准答案时记录 mean/min/foreground Dice |
+| 底部实时进度 | 是否显示 SSE 阶段进度条、当前阶段、job id、推理模式、已耗时和最近阶段日志 |
 
 通过标准：
 
 - 模型配置完整时，后端可创建真实 nnUNetv2 job。
 - 模型配置不完整时返回明确错误，不创建假成功流程。
+- 上传 `.nii` 或 `.nii.gz` 原图时，后端输入目录中的文件名必须符合当前模型 `dataset.json.file_ending`，避免 nnUNetv2 报 `There are 0 cases in the source folder`。
 - `cached-real-nnunetv2` 只能表示历史缓存回填，不能代替未缓存真实推理性能。
 - SSE 文本进度和 NIfTI 二进制结果保持分离。
+- GUI 底部进度条必须来自 SSE 阶段事件，不得把前端估算动画写成真实 nnUNetv2 内部进度。
+- 点击“取消推理”应请求 `/api/segment/jobs/{job_id}/cancel`，后端应终止运行中的 nnUNetv2 子进程并写入取消状态。
 - GUI 可下载结果并回填到 overlay / split / side / difference 对比流程。
 
 ## 执行步骤
@@ -415,3 +419,47 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\checkpoint_best.
 - 拖动过程中十字线和体素坐标仍以最新位置为准。
 - 三张视图在拖动过程中仍会实时变化；快速拖动时使用轻量预览图像，释放后恢复完整质量。
 - 本改动不改变 nnUNetv2 推理、validation、Dice/IoU/Hausdorff 指标或 FLARE22 taxonomy remap。
+
+## 2026-05-26 底部实时推理进度记录
+
+范围：
+
+- 在底部“切片与流程日志”区域新增实时推理进度 rail。
+- 复用现有 `/api/segment/jobs/{job_id}/events` SSE 阶段事件，不修改后端推理语义。
+
+验收证据：
+
+| 检查项 | 结果 |
+|---|---|
+| 进度来源 | `progress/complete/error` 事件写入结构化 `inferenceTimeline`，进度条百分比使用后端 SSE 阶段值。 |
+| 底部信息 | 显示当前阶段、百分比、job id、`quality/fast` 模式、已耗时和最近阶段日志。 |
+| 失败路径 | SSE `error.log_tail` 保留到 timeline 摘要，不伪装成成功。 |
+| 布局回归 | `tests/browserLayout.test.ts` 覆盖桌面和移动端 progress rail，避免遮挡或压缩三视图。 |
+| 自动验证 | `node tests/imagingLogic.test.ts`、`node tests/browserLayout.test.ts`、`npm test`、`npm run build` 均通过。 |
+
+行为边界：
+
+- 长时间 nnUNetv2 主体推理仍可能停留在 `20%` 阶段；界面用“推理运行中”和已耗时表达活跃状态，不伪造连续百分比。
+- 本轮只实现前端阶段进度展示；后端 heartbeat 仍是后续可选增强。
+- 本改动不改变 nnUNetv2 推理、validation、Dice/IoU/Hausdorff 指标或 FLARE22 taxonomy remap。
+
+## 2026-05-26 在线推理启动与取消链路修复记录
+
+范围：
+
+- 修复 `.nii` 原图上传后 nnUNetv2 报 `There are 0 cases in the source folder` 的问题。
+- 复核在线推理取消链路，确认前端已有“取消推理”入口，后端已有子进程终止逻辑。
+
+验收证据：
+
+| 检查项 | 结果 |
+|---|---|
+| 根因 | 当前模型 `dataset.json.file_ending` 为 `.nii.gz`，失败 job 的输入保存为 `<job>_0000.nii`，nnUNetv2 因后缀不匹配识别到 `0` 个病例。 |
+| 修复 | 后端按模型 `file_ending` 规范化输入；`.nii` 上传会 gzip 成 `<job>_0000.nii.gz`。 |
+| 取消链路 | `tests/backendState.test.py` 已覆盖运行中 job 取消、`cancel_requested`、子进程 `terminate()` 和 SSE 取消阶段事件。 |
+| 自动验证 | `python tests/backendState.test.py` 通过。 |
+
+行为边界：
+
+- 该修复只解决 nnUNetv2 输入识别问题，不改变模型权重、推理参数或指标计算。
+- 浏览器不能自动启动 Python 后端；在线推理前仍需 FastAPI 服务在 `127.0.0.1:8000` 运行。

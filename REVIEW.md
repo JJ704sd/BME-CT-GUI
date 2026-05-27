@@ -1888,6 +1888,63 @@ FLARE22 label ID 与当前 AMOS22 checkpoint 不一致：
 - `node tests/imagingLogic.test.ts`：先失败后通过，覆盖拖动面板识别、三视图实时轻量渲染、固定切片 key 去重和辅助切片预览空闲同步。
 - `npm test`：通过。
 
+## 三十九、2026-05-26 底部实时推理进度展示
+
+### 39.1 目标和边界
+
+用户希望点击“运行分割流程”后，底部“切片与流程日志”区域能结合前后端真实推理链路显示实时进度。当前实现采用前端优先方案：复用已有 `/api/segment/jobs/{job_id}/events` SSE 阶段事件，不修改后端推理任务、不解析 nnUNetv2 内部 patch 级进度，也不使用前端估算动画伪造百分比。
+
+### 39.2 本轮实现
+
+- `src/main.tsx` 新增 `inferenceTimeline`、`inferenceStartedAt` 和 `inferenceProgressCopy`。
+- `startSegmentation()` 在 job 创建、SSE `progress/complete/error`、结果回填、取消和失败路径中写入结构化 timeline。
+- 底部 console 在切片缩略图上方新增 `inference-progress-rail`，显示当前阶段、SSE 百分比、job id、推理模式、已耗时和最近阶段日志。
+- `fast` profile 在底部元信息中继续显示“快速预览 · 需人工复核”。
+- SSE `error.log_tail` 会进入 timeline 摘要，失败或取消不会把进度伪装成成功。
+- `src/styles.css` 新增桌面/移动端 progress rail 样式；桌面保持横向 rail，移动端降级为纵向堆叠。
+
+### 39.3 验证
+
+- `node tests/imagingLogic.test.ts`：先失败后通过，覆盖结构化 timeline、底部 progress rail、SSE progress 写入和失败日志保留。
+- `node tests/browserLayout.test.ts`：先失败后通过，覆盖新增 progress rail 的桌面/移动端布局约束。
+- `npm test`：通过。
+- `npm run build`：通过。
+
+### 39.4 后续
+
+若真实演示中仍觉得 `20%` 阶段停留过久，下一步再补后端 heartbeat 型 progress 事件：百分比保持阶段值，附带已耗时和可选资源快照，用于表达后端仍活跃，而不是伪造内部完成度。
+
+## 四十、2026-05-26 在线推理输入识别与取消链路收口
+
+### 40.1 现象和根因
+
+用户在前端点击“运行分割”后，后端 job 能创建、SSE 能推进到 `90%`，但最终报错“nnUNetv2 命令已结束，但未找到输出 NIfTI 结果”。查看 `server/work/bfff9fa79a98/output/nnunetv2_process.log` 后确认 nnUNetv2 返回码为 `0`，但 stdout 中写着 `There are 0 cases in the source folder`。
+
+根因是输入文件后缀与模型 `dataset.json.file_ending` 不一致：当前模型要求 `.nii.gz`，失败 job 的输入目录中只有 `<job>_0000.nii`，nnUNetv2 因后缀不匹配没有把它识别为病例，因此没有生成输出。
+
+### 40.2 本轮修复
+
+- `server/main.py` 新增 `get_model_file_ending()`，从 checkpoint 内嵌 `dataset_json.file_ending` 或模型目录 `dataset.json` 读取当前模型期望的输入后缀。
+- `server/main.py` 新增 `copy_upload_to_nnunet_input()`，当模型要求 `.nii.gz` 但上传文件是 `.nii` 时，后端会 gzip 写入 `<job>_0000.nii.gz`。
+- `get_model_state()` 增加 `model_file_ending` 字段，便于 health 和调试确认当前模型输入要求。
+- `tests/backendState.test.py` 新增回归测试，覆盖 `.nii` 上传会规范化为 `.nii.gz`。
+
+### 40.3 取消链路判断
+
+当前项目已经有取消设计和实现：
+
+- 前端运行中按钮会从“运行分割”切换为“取消推理”。
+- `cancelInferenceJob()` 调用 `/api/segment/jobs/{job_id}/cancel`。
+- 后端 `request_job_cancel()` 设置 `cancel_requested=true`、状态为 `cancelling`，并对运行中的 nnUNetv2 子进程调用 `terminate()`。
+- `run_process_with_cancel()` 会继续等待进程退出，必要时升级到 `kill()`，然后写入取消 summary 和 SSE 事件。
+
+### 40.4 验证和边界
+
+- `python tests/backendState.test.py`：先失败后通过，覆盖输入后缀规范化和既有取消链路。
+- 已重启本地后端，`/api/health` 返回 `predict_device=cuda`、`model_file_ending=.nii.gz`。
+- 本轮修复不改变 nnUNetv2 权重、推理 profile、validation 规则或历史实验指标。
+- 浏览器不能直接启动 Python/FastAPI 后端进程；在线推理前仍需要后端服务在 `127.0.0.1:8000` 运行。
+
 ---
 
 *文档版本：2026-05-26*

@@ -22,7 +22,10 @@
 - `split` 分屏模式表示原图与分割 mask 的滑动对比，不是 Axial / Sagittal / Coronal 布局切换。
 - 点击非背景 label 后展示对应器官说明。
 - 通过本地 FastAPI 创建 nnUNetv2 推理任务，并通过 SSE 获取进度。
+- 底部“切片与流程日志”区域展示 SSE 阶段进度条、当前阶段、job id、推理模式、已耗时和最近阶段日志。
 - 推理完成后下载 NIfTI 分割结果并回填 GUI。
+- 后端会按当前模型 `dataset.json.file_ending` 规范化输入文件名；当前模型要求 `.nii.gz`，所以 `.nii` 上传会转为 nnUNet 可识别的 `_0000.nii.gz` 输入。
+- 推理运行中可点击“取消推理”，后端会请求终止当前 nnUNetv2 子进程并通过 SSE 回写取消状态。
 - 对带标准答案的参考病例计算 per-label Dice、mean Dice、min Dice 和 foreground Dice。
 - 持久化 job summary、阶段耗时、结果大小、资源快照和 nnUNetv2 日志尾部。
 - 支持同输入、同 checkpoint、同推理配置的历史结果缓存回填：`cached-real-nnunetv2`。
@@ -169,6 +172,14 @@ FLARE22 Tr 0009 非 AMOS 在线推理补充：
 - 松开鼠标后，当前坐标会自动恢复 `full` 完整质量切片渲染，最终查看质量不下降。
 - 右侧 axial 预览和底部缩略图只在拖动空闲后同步，避免快速拖动时抢占主线程。
 
+## 底部实时推理进度
+
+- 点击“运行分割流程”后，底部 console 会立即显示结构化推理进度 rail。
+- 进度百分比来自 `/api/segment/jobs/{job_id}/events` 的 SSE `progress/complete/error` 事件，不估算 nnUNetv2 内部 patch 级进度。
+- 长时间停留在 `20%` 的真实 nnUNetv2 阶段会通过“推理运行中”、已耗时和阶段日志表达任务仍在运行。
+- `fast` profile 在底部元信息中继续标注“快速预览 · 需人工复核”。
+- 失败、取消和缓存命中路径都会保留底部状态和最近阶段日志，便于和后端 job id、`server/work` 输出及日志尾部对应。
+
 ## API 概览
 
 - `GET /api/health`：后端和模型状态，含 worker、设备、推理参数。
@@ -203,4 +214,5 @@ python tools/perf_no_cache_persistent.py --inference-profile fast --disable-tta 
 - `confidenceThreshold` 仍是质控提示，不会真实作用于多标签概率图。
 - `fast` profile 会牺牲一部分 nnUNetv2 默认质量设置。AMOS 0117 对照中 fast 明显更快，但 validation 为 `review`，不能作为正式报告结果。
 - 单个新病例的首次未缓存推理仍可能达到分钟级到十几分钟级。
+- 浏览器本身不能启动 Python/FastAPI 后端进程；在线推理前需要本地后端已在 `127.0.0.1:8000` 运行。
 - 当前已有 AMOS 0117 原生标签验收和 FLARE22 Tr 0009 非 AMOS 推理补充；新增病例后仍应分别记录三正交显示、label 点击、推理耗时、资源快照和标准答案状态。

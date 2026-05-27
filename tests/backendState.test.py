@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import gzip
 import json
 import os
 import shutil
@@ -229,6 +230,45 @@ def test_create_job_uses_requested_inference_profile_for_options_and_cache_key()
     assert state["inference_profile"] == "fast"
     assert state["inference_options"] == expected_options
     assert captured_model_state["inference_options"] == expected_options
+
+
+def test_create_job_normalizes_nii_upload_to_model_file_ending():
+    server = load_server_module()
+    temp_root = make_test_output_dir(f"normalized-input-ending-{os.getpid()}")
+
+    class NoopThread:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def start(self):
+            pass
+
+    with patch.object(server, "WORK_DIR", temp_root), \
+         patch.object(server, "get_model_state", return_value={
+             "ready": True,
+             "status": "ready",
+             "mode": "real-nnunetv2",
+             "missing": [],
+             "model_file_ending": ".nii.gz",
+         }), \
+         patch.object(server, "find_cached_prediction", return_value=None), \
+         patch.object(server.threading, "Thread", NoopThread):
+        client = TestClient(server.app)
+        response = client.post(
+            "/api/segment/jobs",
+            files={"file": ("case_0000.nii", b"plain-nifti-bytes", "application/octet-stream")},
+            data={"model_id": "abdomen"},
+        )
+        body = response.json()
+
+    input_dir = temp_root / body["job_id"] / "input"
+    normalized = input_dir / f"{body['job_id']}_0000.nii.gz"
+    legacy_plain = input_dir / f"{body['job_id']}_0000.nii"
+
+    assert response.status_code == 200
+    assert normalized.exists()
+    assert not legacy_plain.exists()
+    assert gzip.decompress(normalized.read_bytes()) == b"plain-nifti-bytes"
 
 
 def test_prediction_cache_key_changes_with_inference_options():
@@ -848,6 +888,7 @@ if __name__ == "__main__":
     test_predict_worker_counts_have_safe_defaults_and_clamps()
     test_fast_inference_profile_controls_nnunet_prediction_flags()
     test_create_job_uses_requested_inference_profile_for_options_and_cache_key()
+    test_create_job_normalizes_nii_upload_to_model_file_ending()
     test_prediction_cache_key_changes_with_inference_options()
     test_legacy_reference_cache_requires_matching_summary_cache_key()
     test_persistent_worker_key_includes_inference_options()

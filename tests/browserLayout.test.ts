@@ -10,6 +10,10 @@ const browserExecutable = [
   "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"
 ].find((path) => existsSync(path));
 
+assert.ok(css.includes(".inference-progress-rail"), "bottom console should style the structured inference progress rail");
+assert.ok(css.includes(".inference-progress-track"), "bottom console should style a horizontal SSE-backed progress track");
+assert.ok(css.includes(".inference-timeline"), "bottom console should style structured inference timeline rows");
+
 function panelMarkup(title: string, orientation: string) {
   return `
     <div class="ortho-panel ortho-${orientation}">
@@ -56,7 +60,27 @@ function fixture() {
           </section>
           <aside class="inspector"><section class="panel"><div class="section-head"><h2>分割控制</h2></div></section></aside>
         </section>
-        <footer class="bottom-console"><div class="console-head"><h2>流程日志</h2></div></footer>
+        <footer class="bottom-console">
+          <div class="console-head"><h2>流程日志</h2></div>
+          <section class="inference-progress-rail is-running" aria-label="实时推理进度">
+            <div class="inference-progress-main">
+              <div class="inference-progress-top"><strong>推理运行中</strong><span>20%</span></div>
+              <div class="inference-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="20">
+                <span style="width:20%"></span>
+              </div>
+              <div class="inference-progress-meta">
+                <span>nnUNetv2 命令运行中</span>
+                <span>job_demo_001</span>
+                <span>质量推理</span>
+                <span>1分05秒</span>
+              </div>
+            </div>
+            <ol class="inference-timeline">
+              <li><span>20%</span><p>nnUNetv2 命令运行中</p></li>
+              <li><span>14%</span><p>已准备训练权重</p></li>
+            </ol>
+          </section>
+        </footer>
       </section>
     </main>
   `;
@@ -85,6 +109,7 @@ type LayoutSnapshot = {
   document: { clientWidth: number; scrollWidth: number };
   grid: { columns: string; rows: string };
   frame: DOMRect;
+  rail: DOMRect;
   panels: DOMRect[];
   canvases: DOMRect[];
   images: { objectFit: string; pointerEvents: string; userDrag: string | null }[];
@@ -122,6 +147,7 @@ async function snapshot(width: number, height: number): Promise<LayoutSnapshot> 
         document: { clientWidth: document.documentElement.clientWidth, scrollWidth: document.documentElement.scrollWidth },
         grid: { columns: gridStyle.gridTemplateColumns, rows: gridStyle.gridTemplateRows },
         frame: rect(document.querySelector(".viewer-frame")!),
+        rail: rect(document.querySelector(".inference-progress-rail")!),
         panels: Array.from(document.querySelectorAll(".ortho-panel")).map(rect),
         canvases: Array.from(document.querySelectorAll(".ortho-canvas")).map(rect),
         images: Array.from(document.querySelectorAll(".ortho-canvas img")).map((image) => {
@@ -167,6 +193,7 @@ assert.ok(desktop.panels[1].top < desktop.panels[2].top, "desktop sagittal shoul
 assert.ok(desktop.panels[0].height > desktop.panels[1].height + desktop.panels[2].height - 36, "desktop axial panel should span the side-stack height");
 assert.ok(desktop.canvases[1].width >= 300 && desktop.canvases[2].width >= 300, "desktop sagittal/coronal canvases should have enough width for detail review");
 assert.ok(desktop.canvases.every((box) => box.width >= 180 && box.height >= 140), "desktop canvases should stay readable");
+assert.ok(desktop.rail.width >= 700 && desktop.rail.height <= 150, "desktop progress rail should fit below the viewer without becoming a tall panel");
 assert.ok(desktop.document.scrollWidth <= desktop.document.clientWidth + 1, "desktop should not create horizontal page overflow");
 
 const mobile = await snapshot(390, 844);
@@ -175,6 +202,7 @@ assert.ok(mobile.grid.columns.split(" ").length === 1, "mobile grid should colla
 assert.ok(mobile.panels[0].top < mobile.panels[1].top && mobile.panels[1].top < mobile.panels[2].top, "mobile panels should stack vertically");
 assert.ok(mobile.frame.height >= 560, "mobile viewer frame should keep usable height");
 assert.ok(mobile.canvases.every((box) => box.width >= 260 && box.height >= 90), "mobile canvases should not collapse into thumbnails");
+assert.ok(mobile.rail.width <= mobile.document.clientWidth && mobile.rail.height <= 230, "mobile progress rail should stack without horizontal overflow");
 assert.ok(mobile.document.scrollWidth <= mobile.document.clientWidth + 1, "mobile should not create horizontal page overflow");
 
 for (const image of [...desktop.images, ...mobile.images]) {

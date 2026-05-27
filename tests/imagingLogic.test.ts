@@ -32,6 +32,13 @@ assert.equal(mainSource.includes("api/samples/amos_0117/original"), false, "UI s
 assert.equal(mainSource.includes("质量推理"), true, "UI should expose the default quality inference profile");
 assert.equal(mainSource.includes("快速预览"), true, "UI should expose the fast preview inference profile");
 assert.equal(mainSource.includes("需人工复核"), true, "UI should warn that fast preview results require review");
+assert.equal(mainSource.includes("inferenceTimeline"), true, "front-end should keep structured inference timeline state for bottom progress");
+assert.equal(mainSource.includes("appendInferenceTimelineEntry"), true, "SSE progress and terminal events should append structured timeline entries");
+assert.equal(mainSource.includes("inferenceStartedAt"), true, "front-end should track inference start time for elapsed runtime copy");
+assert.equal(mainSource.includes("inference-progress-rail"), true, "bottom console should render a structured inference progress rail");
+assert.equal(mainSource.includes("inference-progress-track"), true, "bottom console should render a real progressbar track from SSE progress");
+assert.equal(mainSource.includes("parsed.log_tail"), true, "failed SSE events should preserve backend log_tail for review");
+assert.equal(mainSource.includes("const idleProgress = inferenceTimeline.length ? clampedProgress : 0"), true, "waiting progress rail should not show the previous 100% baseline before any inference event");
 for (const mockCaseId of ["Case_FLARE_024", "Case_LUNG_112", "Case_PANC_038"]) {
   assert.equal(mainSource.includes(mockCaseId), false, `top case selector should not expose mock case ${mockCaseId}`);
 }
