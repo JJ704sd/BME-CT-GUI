@@ -25,7 +25,8 @@
 - 底部“切片与流程日志”区域展示 SSE 阶段进度条、当前阶段、job id、推理模式、已耗时和最近阶段日志。
 - 推理完成后下载 NIfTI 分割结果并回填 GUI。
 - 后端会按当前模型 `dataset.json.file_ending` 规范化输入文件名；当前模型要求 `.nii.gz`，所以 `.nii` 上传会转为 nnUNet 可识别的 `_0000.nii.gz` 输入。
-- 推理运行中可点击“取消推理”，后端会请求终止当前 nnUNetv2 子进程并通过 SSE 回写取消状态。
+- 推理运行中可点击”取消推理”，后端会请求终止当前 nnUNetv2 子进程并通过 SSE 回写取消状态。
+- 长时间推理期间后端会定期发送心跳事件（间隔 10 秒），前端底部进度 rail 更新已耗时和资源快照，避免界面显示停滞。
 - 对带标准答案的参考病例计算 per-label Dice、mean Dice、min Dice 和 foreground Dice。
 - 持久化 job summary、阶段耗时、结果大小、资源快照和 nnUNetv2 日志尾部。
 - 支持同输入、同 checkpoint、同推理配置的历史结果缓存回填：`cached-real-nnunetv2`。
@@ -48,6 +49,7 @@ $env:SEGMENTATION_TILE_STEP_SIZE='1.0'
 
 含义：
 
+- `SEGMENTATION_DEVICE`：推理设备，可选 `cuda`、`cpu`、`mps`，默认 `cuda`。
 - `SEGMENTATION_INFERENCE_PROFILE=quality`：默认质量模式，nnUNetv2 默认 `tile_step_size=0.5`，保留 TTA/mirroring；用于正式结果和报告依据。
 - `SEGMENTATION_INFERENCE_PROFILE=fast`：在线快速模式，默认 `SEGMENTATION_DISABLE_TTA=1`，`SEGMENTATION_TILE_STEP_SIZE=1.0`。速度更快，但本地 AMOS 0117 对照已显示质量明显下降，只能作为快速预览并需人工复核。
 - `SEGMENTATION_DISABLE_TTA`：显式控制是否关闭 mirroring/TTA。
@@ -69,10 +71,10 @@ npm install
 npm run dev -- --port 5173
 ```
 
-启动后端。默认建议使用质量模式：
+启动后端。默认推理设备为 `cuda`，默认推理模式为 `质量推理`：
 
 ```powershell
-$env:SEGMENTATION_DEVICE='cuda'
+$env:SEGMENTATION_DEVICE='cuda'   # 可选，默认已是 cuda
 $env:SEGMENTATION_INFERENCE_PROFILE='quality'
 $env:SEGMENTATION_PREPROCESS_WORKERS='2'
 $env:SEGMENTATION_EXPORT_WORKERS='2'
@@ -189,7 +191,7 @@ FLARE22 Tr 0009 非 AMOS 在线推理补充：
 - `GET /api/samples/{sample_id}/label`：下载参考病例标准答案。
 - `POST /api/segment/jobs`：创建 nnUNetv2 推理任务；表单字段 `inference_profile=quality|fast` 可按任务选择质量/速度配置。
 - `GET /api/segment/jobs/{job_id}`：查询任务状态、耗时、资源、验证摘要和最终 `inference_options`。
-- `GET /api/segment/jobs/{job_id}/events`：SSE 推理进度；complete 事件包含最终 `inference_options`。
+- `GET /api/segment/jobs/{job_id}/events`：SSE 推理进度；推理期间每 10 秒发送心跳事件（含已耗时和资源快照）；complete 事件包含最终 `inference_options`。
 - `POST /api/segment/jobs/{job_id}/cancel`：请求取消运行中任务。
 - `GET /api/segment/jobs/{job_id}/result`：下载结果 NIfTI。
 

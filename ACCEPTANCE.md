@@ -91,7 +91,8 @@
 - `cached-real-nnunetv2` 只能表示历史缓存回填，不能代替未缓存真实推理性能。
 - SSE 文本进度和 NIfTI 二进制结果保持分离。
 - GUI 底部进度条必须来自 SSE 阶段事件，不得把前端估算动画写成真实 nnUNetv2 内部进度。
-- 点击“取消推理”应请求 `/api/segment/jobs/{job_id}/cancel`，后端应终止运行中的 nnUNetv2 子进程并写入取消状态。
+- 长时间推理期间后端应定期发送心跳事件（`heartbeat: true`），前端更新已耗时和资源快照，避免界面显示停滞。
+- 点击”取消推理”应请求 `/api/segment/jobs/{job_id}/cancel`，后端应终止运行中的 nnUNetv2 子进程并写入取消状态。
 - GUI 可下载结果并回填到 overlay / split / side / difference 对比流程。
 
 ## 执行步骤
@@ -105,7 +106,7 @@ $env:SEGMENTATION_REFERENCE_CASES_JSON = "D:\BME2026\BME_CT_Seg\segmentation-gui
 2. 启动后端：
 
 ```powershell
-$env:SEGMENTATION_DEVICE = "cuda"
+$env:SEGMENTATION_DEVICE = "cuda"   # 可选，默认已是 cuda
 $env:SEGMENTATION_PREPROCESS_WORKERS = "2"
 $env:SEGMENTATION_EXPORT_WORKERS = "2"
 $env:SEGMENTATION_PERSISTENT_WORKER = "1"
@@ -439,8 +440,8 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\checkpoint_best.
 
 行为边界：
 
-- 长时间 nnUNetv2 主体推理仍可能停留在 `20%` 阶段；界面用“推理运行中”和已耗时表达活跃状态，不伪造连续百分比。
-- 本轮只实现前端阶段进度展示；后端 heartbeat 仍是后续可选增强。
+- 长时间 nnUNetv2 主体推理仍可能停留在 `20%` 阶段；界面用”推理运行中”和已耗时表达活跃状态，不伪造连续百分比。
+- 后端已实现心跳机制（`push_heartbeat()`，间隔 10 秒），推理期间会定期通过 SSE 推送已耗时和资源快照，前端底部进度 rail 会更新活跃状态。
 - 本改动不改变 nnUNetv2 推理、validation、Dice/IoU/Hausdorff 指标或 FLARE22 taxonomy remap。
 
 ## 2026-05-26 在线推理启动与取消链路修复记录

@@ -1947,5 +1947,47 @@ FLARE22 label ID 与当前 AMOS22 checkpoint 不一致：
 
 ---
 
-*文档版本：2026-05-26*
+## 四十一、2026-05-27 推理心跳机制与默认设备收口
+
+### 41.1 背景
+
+长时间 nnUNetv2 推理（尤其是 `quality` profile 下的 3D full-res sliding-window 计算）可能持续十几分钟甚至更久。在此期间，SSE 进度可能停留在同一阶段百分比（如 `20%`），前端底部进度 rail 显示停滞，用户无法判断后端是否仍在运行。
+
+### 41.2 本轮实现
+
+1. **后端心跳机制**
+   - `server/main.py` 新增 `HEARTBEAT_INTERVAL = 10`（秒）和 `push_heartbeat()` 函数。
+   - `push_heartbeat()` 在 SSE 中推送带 `heartbeat: true` 标记的 progress 事件，包含当前进度、阶段、已耗时和资源快照。所有异常隔离，失败不中断推理。
+   - `run_process_with_cancel()` 中，`communicate(timeout=0.5)` 超时循环会检查距上次心跳是否已过 10 秒，超过则发送心跳。
+   - 常驻 worker 路径使用 `_read_worker_event_with_heartbeat()`，通过 `queue.Queue` 的 `get(timeout=HEARTBEAT_INTERVAL)` 实现非阻塞读取：超时后自动发送心跳，收到响应则正常返回。
+
+2. **前端心跳处理**
+   - `src/inference/inferenceClient.ts` 的 `parseInferenceEvent()` 已支持解析 `heartbeat` 和 `elapsed_seconds` 字段。
+   - 前端收到心跳事件后只更新底部进度 rail 的已耗时和资源快照，不污染结构化 `inferenceTimeline`。
+
+3. **默认设备变更**
+   - `get_predict_device()` 默认值从 `cpu` 改为 `cuda`，与实际使用场景一致。
+   - `get_model_state()` 中 `predict_device` 字段会反映当前生效的设备。
+
+4. **端到端推理流程测试**
+   - `tests/backendState.test.py` 新增 `test_e2e_inference_flow_create_events_result()`，覆盖创建 job → 执行推理 → 验证事件序列（progress → complete，无 error）→ 下载结果的完整链路。
+   - 验证 `duration_seconds`、`phase_timings`、`result_size_bytes`、`result_ready` 等字段。
+
+### 41.3 验证
+
+- `python tests/backendState.test.py`：通过，覆盖 E2E 推理流程。
+- `node tests/imagingLogic.test.ts`：通过，覆盖心跳事件解析。
+- `npm test`：通过。
+- `npm run build`：通过。
+
+### 41.4 行为边界
+
+- 心跳事件的 `heartbeat: true` 字段可用于前端区分心跳和真正的阶段进度变化。
+- 心跳间隔为 10 秒，不可通过环境变量配置；如需调整需修改 `HEARTBEAT_INTERVAL` 常量。
+- 心跳失败（包括资源快照获取失败）完全隔离，不会影响推理执行。
+- 本轮不改变 nnUNetv2 推理参数、validation 规则或历史实验指标。
+
+---
+
+*文档版本：2026-05-27*
 *更新依据：当前 `src/main.tsx`、`src/components/OrthogonalViewer.tsx`、`src/imaging/voxelMapping.ts`、`src/imaging/sliceRenderer.ts`、`src/data/organDetails.ts`、`src/inference/inferenceClient.ts`、`server/main.py`、`server/persistent_nnunet_worker.py`、`server/requirements.txt`、`tools/perf_no_cache_persistent.py`、`README.md`、`ACCEPTANCE.md`、`SEGMENTATION_METRICS_SUMMARY.md`、`reference_cases.example.json`、`tests/*.test.ts` 与本地运行验证结果。*
