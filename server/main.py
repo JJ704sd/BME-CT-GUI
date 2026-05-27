@@ -4,6 +4,7 @@ import gzip
 import json
 import os
 import hashlib
+import queue
 import shutil
 import subprocess
 import sys
@@ -169,6 +170,28 @@ persistent_worker_lock = threading.Lock()
 persistent_worker_process: subprocess.Popen[str] | None = None
 persistent_worker_key: tuple[str, str, str, int, int, float, bool, bool] | None = None
 persistent_worker_log_handle: Any | None = None
+
+HEARTBEAT_INTERVAL = 10
+
+
+def push_heartbeat(job: Job, phase: str) -> None:
+  try:
+    elapsed = get_job_duration_seconds(job)
+    event: dict[str, Any] = {
+      "type": "progress",
+      "progress": job.progress,
+      "stage": job.stage,
+      "heartbeat": True,
+      "elapsed_seconds": elapsed,
+    }
+    try:
+      snapshot = record_job_resource_snapshot(job, f"heartbeat_{phase}")
+      event["resource_latest"] = snapshot
+    except Exception:
+      pass
+    push_event(job, event)
+  except Exception:
+    pass
 
 
 class JobCancelled(RuntimeError):
@@ -593,6 +616,7 @@ def run_process_with_cancel(job: Job, command: list[str]) -> subprocess.Complete
   with jobs_lock:
     job.process = process
   record_job_resource_snapshot(job, "process_started")
+  last_heartbeat = time.monotonic()
   try:
     while True:
       try:
@@ -602,6 +626,10 @@ def run_process_with_cancel(job: Job, command: list[str]) -> subprocess.Complete
           raise JobCancelled(completed)
         return completed
       except subprocess.TimeoutExpired:
+        now = time.monotonic()
+        if now - last_heartbeat >= HEARTBEAT_INTERVAL:
+          last_heartbeat = now
+          push_heartbeat(job, "nnunet_process")
         if job.cancel_requested:
           if process.poll() is None:
             process.terminate()
@@ -925,8 +953,8 @@ def get_model_state() -> dict[str, Any]:
 
 
 def get_predict_device() -> str:
-  device = os.environ.get("SEGMENTATION_DEVICE", "cpu").strip().lower()
-  return device if device in {"cpu", "cuda", "mps"} else "cpu"
+  device = os.environ.get("SEGMENTATION_DEVICE", "cuda").strip().lower()
+  return device if device in {"cpu", "cuda", "mps"} else "cuda"
 
 
 def get_env_int(name: str, default: int, minimum: int = 1, maximum: int = 8) -> int:
@@ -1133,6 +1161,42 @@ def ensure_persistent_worker(model_dir: Path, inference_options: dict[str, Any] 
   return persistent_worker_process
 
 
+def _persistent_worker_reader_thread(stdout: Any, q: queue.Queue[str | None]) -> None:
+  try:
+    for line in stdout:
+      q.put(line)
+  except Exception:
+    pass
+  finally:
+    q.put(None)
+
+
+def _read_worker_event_with_heartbeat(job: Job, process: subprocess.Popen[str]) -> dict[str, Any]:
+  if process.stdout is None:
+    raise RuntimeError("常驻 nnUNetv2 worker 未打开 stdout。")
+  q: queue.Queue[str | None] = queue.Queue()
+  reader = threading.Thread(target=_persistent_worker_reader_thread, args=(process.stdout, q), daemon=True)
+  reader.start()
+  while True:
+    try:
+      line = q.get(timeout=HEARTBEAT_INTERVAL)
+    except queue.Empty:
+      push_heartbeat(job, "persistent_worker")
+      continue
+    if line is None:
+      raise RuntimeError("常驻 nnUNetv2 worker 已退出。")
+    line = line.strip()
+    if not line:
+      continue
+    try:
+      event = json.loads(line)
+    except json.JSONDecodeError as exc:
+      raise RuntimeError(f"常驻 nnUNetv2 worker 返回了无效 JSON：{line[:200]}") from exc
+    if not isinstance(event, dict):
+      raise RuntimeError("常驻 nnUNetv2 worker 返回了无效事件。")
+    return event
+
+
 def run_persistent_worker_prediction(job: Job, input_dir: Path, output_dir: Path, model_dir: Path) -> subprocess.CompletedProcess[str]:
   with persistent_worker_lock:
     try:
@@ -1151,7 +1215,7 @@ def run_persistent_worker_prediction(job: Job, input_dir: Path, output_dir: Path
         "disable_tta": bool(options.get("disable_tta", False)),
         "not_on_device": bool(options.get("not_on_device", False)),
       })
-      event = read_persistent_worker_event(process)
+      event = _read_worker_event_with_heartbeat(job, process)
       if event.get("type") == "complete":
         return subprocess.CompletedProcess(
           args=["persistent-nnunetv2-worker", str(PERSISTENT_WORKER_SCRIPT)],
