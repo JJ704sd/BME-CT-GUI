@@ -1063,7 +1063,81 @@ def test_job_state_can_reconstruct_legacy_output_without_summary():
     assert result_response.content == b"legacy-result"
 
 
+def test_taxonomy_detects_flare22_and_remaps_label_ids():
+    """taxonomy 模块能检测 FLARE22 标签并生成正确的 ID 重映射"""
+    import sys
+    taxonomy_path = PROJECT_ROOT / "server" / "taxonomy.py"
+    spec = importlib.util.spec_from_file_location("taxonomy", taxonomy_path)
+    taxonomy = importlib.util.module_from_spec(spec)
+    sys.modules["taxonomy"] = taxonomy
+    spec.loader.exec_module(taxonomy)
+
+    # AMOS22 checkpoint labels (from dataset.json)
+    amos_labels = [
+        {"label": 1, "id": "spleen", "nameEn": "spleen", "nameZh": "脾脏"},
+        {"label": 2, "id": "right-kidney", "nameEn": "right_kidney", "nameZh": "右肾"},
+        {"label": 3, "id": "left-kidney", "nameEn": "left_kidney", "nameZh": "左肾"},
+        {"label": 4, "id": "gallbladder", "nameEn": "gall_bladder", "nameZh": "胆囊"},
+        {"label": 5, "id": "esophagus", "nameEn": "esophagus", "nameZh": "食管"},
+        {"label": 6, "id": "liver", "nameEn": "liver", "nameZh": "肝脏"},
+        {"label": 7, "id": "stomach", "nameEn": "stomach", "nameZh": "胃"},
+        {"label": 8, "id": "aorta", "nameEn": "aorta", "nameZh": "主动脉"},
+        {"label": 9, "id": "ivc", "nameEn": "postcava", "nameZh": "下腔静脉"},
+        {"label": 10, "id": "pancreas", "nameEn": "pancreas", "nameZh": "胰腺"},
+        {"label": 11, "id": "right-adrenal-gland", "nameEn": "right_adrenal_gland", "nameZh": "右肾上腺"},
+        {"label": 12, "id": "left-adrenal-gland", "nameEn": "left_adrenal_gland", "nameZh": "左肾上腺"},
+        {"label": 13, "id": "duodenum", "nameEn": "duodenum", "nameZh": "十二指肠"},
+    ]
+
+    # FLARE22 reference has IDs {1..13}
+    flare22_ids = set(range(1, 14))
+
+    # Should detect FLARE22
+    detected = taxonomy.detect_dataset(flare22_ids, amos_labels)
+    assert detected == "FLARE22", f"Expected FLARE22, got {detected}"
+
+    # Should build correct mapping
+    mapping = taxonomy.build_remap_mapping(amos_labels, detected)
+    # FLARE22 ID 1 (liver) → AMOS22 ID 6 (liver)
+    assert mapping[1] == 6, f"FLARE22 liver(1) should map to AMOS22 liver(6), got {mapping.get(1)}"
+    # FLARE22 ID 3 (spleen) → AMOS22 ID 1 (spleen)
+    assert mapping[3] == 1, f"FLARE22 spleen(3) should map to AMOS22 spleen(1), got {mapping.get(3)}"
+    # FLARE22 ID 2 (right_kidney) → same ID, should NOT be in mapping
+    assert 2 not in mapping, "right_kidney has same ID in both datasets, should not be remapped"
+
+    # Should apply remap correctly
+    import numpy as np
+    reference = np.array([0, 1, 2, 3, 13], dtype=np.int32)
+    remapped = taxonomy.apply_remap(reference, mapping)
+    assert remapped[1] == 6, f"Label 1 should become 6 (liver), got {remapped[1]}"
+    assert remapped[2] == 2, f"Label 2 should stay 2 (right_kidney), got {remapped[2]}"
+    assert remapped[3] == 1, f"Label 3 should become 1 (spleen), got {remapped[3]}"
+    assert remapped[4] == 3, f"Label 13 should become 3 (left_kidney), got {remapped[4]}"
+
+
+def test_taxonomy_returns_none_for_amos_native_labels():
+    """当 reference 标签与 checkpoint 相同时，不做 remap"""
+    import sys
+    taxonomy_path = PROJECT_ROOT / "server" / "taxonomy.py"
+    spec = importlib.util.spec_from_file_location("taxonomy", taxonomy_path)
+    taxonomy = importlib.util.module_from_spec(spec)
+    sys.modules["taxonomy"] = taxonomy
+    spec.loader.exec_module(taxonomy)
+
+    amos_labels = [
+        {"label": 1, "id": "spleen", "nameEn": "spleen", "nameZh": "脾脏"},
+        {"label": 2, "id": "right-kidney", "nameEn": "right_kidney", "nameZh": "右肾"},
+    ]
+
+    # AMOS native reference has same IDs
+    amos_ids = {1, 2}
+    detected = taxonomy.detect_dataset(amos_ids, amos_labels)
+    assert detected is None, f"Should not detect any dataset for AMOS-native labels, got {detected}"
+
+
 if __name__ == "__main__":
+    test_taxonomy_detects_flare22_and_remaps_label_ids()
+    test_taxonomy_returns_none_for_amos_native_labels()
     test_model_state_reports_missing_required_files()
     test_create_job_rejects_when_model_is_not_ready()
     test_predict_command_uses_model_folder_and_job_io()

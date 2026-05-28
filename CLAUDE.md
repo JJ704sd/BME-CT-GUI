@@ -41,11 +41,11 @@ python tools/segmentation_metrics_summary.py --prediction <pred.nii.gz> --refere
 
 ### 前端（`src/`）
 
-- **`main.tsx`**（~2000 行）：主容器，管理全局 UI 状态、NIfTI 解析、参考病例、在线推理、底部实时进度。产品流程编排中心。
+- **`main.tsx`**（~2000 行）：主容器，管理全局 UI 状态、NIfTI 解析、参考病例、在线推理、底部实时进度、标签文件上传（`UploadRole = "source" | "result" | "label"`）。产品流程编排中心。
 - **`components/OrthogonalViewer.tsx`**：Axial/Sagittal/Coronal 三正交视图。使用 `requestAnimationFrame` 合并高频拖动渲染，`interactive`/`full` 两种切片质量模式。
 - **`imaging/voxelMapping.ts`**：纯函数 — 体素坐标 ↔ 切片坐标映射、十字线位置计算、contain 布局下的鼠标偏移修正。
 - **`imaging/sliceRenderer.ts`**：NIfTI 切片 → canvas → data URL 渲染。WeakMap 做 volume 级缓存，`interactive` 模式用于拖动实时预览。
-- **`inference/inferenceClient.ts`**：封装 `/api/segment/jobs` 的创建、SSE 监听、结果下载。`parseInferenceEvent()` 解析 progress/complete/error/heartbeat 事件。
+- **`inference/inferenceClient.ts`**：封装 `/api/segment/jobs` 的创建、SSE 监听、结果下载。支持可选 `label_file` FormData 字段用于在线 Dice 验证。`parseInferenceEvent()` 解析 progress/complete/error/heartbeat 事件。
 - **`data/organDetails.ts`**：13 个器官的 label、颜色、中文名、说明文案。
 - **`organLayerLogic.ts`**：label 列表 → UI 器官层，合并 validation 分数。
 - **`referenceCases.ts`**：归一化 `/api/samples` 返回值。
@@ -54,7 +54,8 @@ python tools/segmentation_metrics_summary.py --prediction <pred.nii.gz> --refere
 
 ### 后端（`server/`）
 
-- **`main.py`**（~1700 行）：FastAPI 主文件。Job 生命周期管理、nnUNetv2 推理调度、SSE 事件推送、结果缓存、validation、资源快照、heartbeat。
+- **`main.py`**（~1700 行）：FastAPI 主文件。Job 生命周期管理、nnUNetv2 推理调度、SSE 事件推送、结果缓存、validation（含自定义标签文件的 `validate_against_custom_label()`）、资源快照、heartbeat。`create_job()` 接收可选 `label_file` 参数，保存到 `job_dir / "label" /`。
+- **`taxonomy.py`**：跨数据集标签 taxonomy 检测与自动重映射。定义 FLARE22 标签表和器官名别名映射。`detect_dataset()` 通过比较 checkpoint 和参考标签的器官名 ID 分布自动识别数据集来源；`build_remap_mapping()` 按器官名建立 ID 映射表；`apply_remap()` 用查找表重排参考标签数组。
 - **`persistent_nnunet_worker.py`**：常驻 nnUNet predictor worker，通过 stdin/stdout JSON 协议通信。
 
 ### 关键数据流
@@ -95,7 +96,18 @@ python tools/segmentation_metrics_summary.py --prediction <pred.nii.gz> --refere
 
 ### Python 依赖
 
-后端依赖见 `server/requirements.txt`：`fastapi`、`uvicorn`、`python-multipart`、`numpy`、`nibabel`。
+后端依赖见 `server/requirements.txt`：`fastapi`、`uvicorn`、`python-multipart`、`numpy`、`nibabel`、`torch`、`nnunetv2`。
+
+### 文档体系
+
+| 文件 | 用途 |
+|---|---|
+| `REVIEW.md` | 每轮改动的技术审核记录（42 节） |
+| `ACCEPTANCE.md` | 三大目标验收包 |
+| `SEGMENTATION_EXPERIMENT_COMPARISON.md` | 跨轮次实验对比表 |
+| `SEGMENTATION_METRICS_SUMMARY.md` | 当前权重指标汇总 |
+| `SEGMENTATION_RECENT_ROUNDS.md` | 近三轮在线推理滚动记录 |
+| `CODE_MODULE_GUIDE.md` | 模块级代码讲解材料 |
 
 ## 重要约束
 
@@ -104,5 +116,6 @@ python tools/segmentation_metrics_summary.py --prediction <pred.nii.gz> --refere
 - **前端 monolith**：`main.tsx` 约 2000 行，承载产品流程编排。底层成像逻辑已拆分到 `imaging/`、`inference/`、`viewerLogic.ts`，不应再往 `main.tsx` 塞底层逻辑。
 - **三视图联动核心**：`voxelCoord` 状态驱动三个方向。`selectedSlice` 主要服务 axial 预览和滑条。拖动时 `scheduleVoxelCoordChange()` 合并到每帧一次。
 - **推理 profile**：`quality`（默认，TTA 开）用于正式报告；`fast`（TTA 关）仅作预览，必须标注"需人工复核"。
-- **Label taxonomy**：AMOS22 checkpoint 的 label ID 顺序与 FLARE22 不同。跨数据集指标必须用离线 remap，不能混入 AMOS 原生验证。
+- **Label taxonomy**：AMOS22 checkpoint 的 label ID 顺序与 FLARE22 不同（如 AMOS22 的 1=脾脏 vs FLARE22 的 1=肝脏）。`server/taxonomy.py` 提供自动检测和重映射功能：当上传的标签文件来自已知数据集（如 FLARE22）时，后端自动按器官名重映射 ID 后再计算 Dice。validation 结果中 `remap_applied: true` 表示已自动重映射，`remap_source` 标识来源数据集。
+- **规划文档**：`.planning/` 目录存放任务规划（如 `label-scoring-optimization/`）。近三轮在线推理滚动记录在 `SEGMENTATION_RECENT_ROUNDS.md`。
 - **心跳机制**：`push_heartbeat()` 全部异常隔离，失败不影响推理。前端心跳事件只更新耗时，不污染 timeline。

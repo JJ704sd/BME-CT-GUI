@@ -916,6 +916,25 @@ def validate_against_custom_label(prediction_path: Path, label_path: Path, label
     return unavailable_validation(f"预测结果尺寸 {prediction.shape} 与标签尺寸 {reference.shape} 不一致，无法计算 Dice。")
   checkpoint_labels = {int(item["label"]) for item in labels}
   reference_labels = set(np.unique(reference).astype(int)) - {0}
+
+  # Try automatic taxonomy remap for known datasets (e.g. FLARE22 → AMOS22)
+  try:
+    from server.taxonomy import detect_dataset, build_remap_mapping, apply_remap
+    detected = detect_dataset(reference_labels, labels)
+    if detected:
+      mapping = build_remap_mapping(labels, detected)
+      if mapping:
+        remapped_reference = apply_remap(reference, mapping)
+        result = compute_label_metrics(prediction, remapped_reference, labels, sample_id=sample_id)
+        result["taxonomy_match"] = True
+        result["remap_applied"] = True
+        result["remap_source"] = detected
+        result["remap_mapping"] = {str(k): v for k, v in mapping.items()}
+        result["message"] = f"已自动重映射标签 ID（{detected} → 当前模型）。" + (result.get("message") or "")
+        return result
+  except Exception as remap_exc:
+    print(f"[taxonomy] remap failed, falling through: {remap_exc}")
+
   if not reference_labels.intersection(checkpoint_labels):
     return {
       **unavailable_validation("标签 ID 与当前 checkpoint 定义不匹配，需要离线 taxonomy remap。"),

@@ -9,6 +9,8 @@ export type ValidationSummary = {
   accepted?: boolean;
   message?: string;
   taxonomy_match?: boolean;
+  remap_applied?: boolean;
+  remap_source?: string;
   thresholds?: {
     mean_dice?: number;
     min_label_dice?: number;
@@ -92,6 +94,8 @@ function normalizeValidation(payload: unknown): ValidationSummary | undefined {
   }
   if (typeof raw.accepted === "boolean") summary.accepted = raw.accepted;
   if (typeof raw.taxonomy_match === "boolean") summary.taxonomy_match = raw.taxonomy_match;
+  if (typeof raw.remap_applied === "boolean") summary.remap_applied = raw.remap_applied;
+  if (typeof raw.remap_source === "string") summary.remap_source = raw.remap_source;
   if (raw.message !== undefined) summary.message = String(raw.message);
   if (raw.thresholds && typeof raw.thresholds === "object") {
     const thresholds = raw.thresholds as Record<string, unknown>;

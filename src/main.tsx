@@ -424,8 +424,9 @@ function formatBytes(value: number | undefined) {
 function getValidationStatusCopy(validation: ValidationSummary | null, hasLabelFile: boolean) {
   if (!validation) return hasLabelFile ? "等待验证结果" : "未提供标签 CT";
   if (validation.taxonomy_match === false) return "标签 ID 不匹配";
-  if (validation.status === "passed") return "验证通过";
-  if (validation.status === "review") return "建议人工复核";
+  const remapTag = validation.remap_applied ? `（${validation.remap_source ?? "已知数据集"}→当前模型）` : "";
+  if (validation.status === "passed") return `验证通过${remapTag}`;
+  if (validation.status === "review") return `建议人工复核${remapTag}`;
   return "无法自动验证";
 }
 
@@ -1911,6 +1912,7 @@ function App() {
                   <Metric label="最低 Dice" value={formatDiceMetric(validationSummary?.min_dice)} />
                   <Metric label="前景 Dice" value={formatDiceMetric(validationSummary?.foreground_dice)} />
                   <Metric label="标签验证" value={validationStatusCopy} />
+                  {validationSummary?.remap_applied ? <Metric label="标签重映射" value={`${validationSummary.remap_source ?? "已知数据集"} → 当前模型`} /> : null}
                   <Metric label="推理模式" value={resultProfileCopy} />
                   <Metric label="推理耗时" value={inferenceDurationCopy} />
                   <Metric label="瓶颈阶段" value={inferencePhaseTimingCopy} />

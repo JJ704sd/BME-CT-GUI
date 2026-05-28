@@ -34,7 +34,7 @@ python tools\segmentation_metrics_summary.py `
 - 不要混用旧的外部 `dataset.json`；如果标签集合不同，会导致 label 名称错位或漏记空标签。
 - 本轮 checkpoint 定义 15 个前景标签。AMOS 0117 的参考标签实际只出现 label `1..13`；如果预测也没有 label `14/15`，它们记录为 N/A。如果预测出现 label `14/15` 假阳性，则 Dice/IoU 为 `0` 并应纳入 fast/quality 对照判断。
 - 2026-05-26 后端新增输入后缀规范化，确保 `.nii` 上传会按当前模型 `file_ending=.nii.gz` 进入 nnUNetv2；该工程修复不改变本文件既有指标数值。
-- 2026-05-27 标签文件传输修复后，后端在线 custom label validation 已可用。当上传的标签 ID 与 checkpoint 不一致时，需按器官名 remap 才能得到有意义的 Dice；`taxonomy_match: True` 只检查 ID 集合交集，不做语义级匹配。
+- 2026-05-27 标签文件传输修复后，后端在线 custom label validation 已可用。当上传的标签 ID 与 checkpoint 不一致时，`server/taxonomy.py` 会自动检测数据集来源（如 FLARE22）并按器官名重映射 ID，validation 结果中 `remap_applied: true` 表示已自动重映射。
 
 ## 当前 AMOS 基线运行
 
@@ -125,7 +125,7 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\amos_0117(2).nii
 
 ## FLARE22 Tr 0009 标签体系重映射对照
 
-2026-05-26 新增 FLARE22 Tr 0009 后执行一次 `quality` 在线推理。该病例的原始 FLARE22 label ID 顺序与当前 AMOS22 checkpoint 不一致，因此后端自动 validation 保持关闭，`/api/samples` 中 `validation_available=false`。下表指标来自离线 remap：先按器官名把 FLARE22 label 映射到 AMOS22 checkpoint label ID，再运行指标脚本，仅作为非 AMOS 对照证据。
+2026-05-26 新增 FLARE22 Tr 0009 后执行一次 `quality` 在线推理。该病例的原始 FLARE22 label ID 顺序与当前 AMOS22 checkpoint 不一致，后端通过 `server/taxonomy.py` 自动检测并重映射。下表指标来自离线 remap：先按器官名把 FLARE22 label 映射到 AMOS22 checkpoint label ID，再运行指标脚本，仅作为非 AMOS 对照证据。
 
 运行输出：
 
@@ -217,6 +217,6 @@ Checkpoint 元数据：
 - 本轮没有改变 nnUNetv2 推理、validation、Dice/IoU/Hausdorff 计算，也没有改变 FLARE22 taxonomy-remap 指标。
 
 - 本文档记录的是 AMOS 0117 参考病例上的指标，不代表所有外部 CT 都具备同等效果。
-- 2026-05-27 标签文件传输修复后，后端在线 custom label validation 链路已打通。job `bf20f0ec4456`（FLARE22 + 标签上传）验证了 `label_path` 非空、validation 正常执行。但因 taxonomy 错位，在线 mean_dice=0.073 无参考价值，需自动 remap。
+- 2026-05-27 标签文件传输修复后，后端在线 custom label validation 链路已打通。job `bf20f0ec4456`（FLARE22 + 标签上传）验证了 `label_path` 非空、validation 正常执行。2026-05-28 实现自动 taxonomy remap 后，job `a717dacf42d3` 在线验证 mean_dice=0.926，验证通过。
 - 没有标准标签的病例不能计算 Dice、IoU 或 Hausdorff Distance，只能记录推理耗时、资源快照和人工复核结论。
 - 后续训练权重应保留每次的 JSON 原始输出，并把关键聚合指标追加到本文档。

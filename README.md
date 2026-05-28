@@ -27,7 +27,7 @@
 - 后端会按当前模型 `dataset.json.file_ending` 规范化输入文件名；当前模型要求 `.nii.gz`，所以 `.nii` 上传会转为 nnUNet 可识别的 `_0000.nii.gz` 输入。
 - 推理运行中可点击”取消推理”，后端会请求终止当前 nnUNetv2 子进程并通过 SSE 回写取消状态。
 - 长时间推理期间后端会定期发送心跳事件（间隔 10 秒），前端底部进度 rail 更新已耗时和资源快照，避免界面显示停滞。
-- 支持通过"标签 CT 导入"按钮或拖拽上传标签 NIfTI 文件，推理完成后自动执行在线 Dice 验证。当标签 ID 与当前 checkpoint 不一致时（如 FLARE22 vs AMOS22），在线验证结果会因 taxonomy 错位而失真，需离线 remap 后才有参考价值。
+- 支持通过"标签 CT 导入"按钮或拖拽上传标签 NIfTI 文件，推理完成后自动执行在线 Dice 验证。当标签 ID 与当前 checkpoint 不一致时（如 FLARE22 vs AMOS22），后端自动检测数据集来源并按器官名重映射标签 ID，validation 结果中 `remap_applied: true` 表示已自动重映射。
 - 持久化 job summary、阶段耗时、结果大小、资源快照和 nnUNetv2 日志尾部。
 - 支持同输入、同 checkpoint、同推理配置的历史结果缓存回填：`cached-real-nnunetv2`。
 

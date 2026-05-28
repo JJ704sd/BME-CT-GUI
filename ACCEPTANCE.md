@@ -1,6 +1,6 @@
 # 三大目标验收包
 
-本文档用于把当前 GUI 的三个目标从”功能接近完成”推进到”可复现验收”。当前证据包含 AMOS 0117 原生标签验证，以及 FLARE22 Tr 0009 的非 AMOS 在线推理和离线 taxonomy-remap 指标。2026-05-27 标签文件传输修复后，FLARE22 在线 validation 链路已打通（job `bf20f0ec4456`），但因 taxonomy 错位导致在线 Dice 无意义，需自动 remap 后才能得到有意义的跨数据集指标。
+本文档用于把当前 GUI 的三个目标从”功能接近完成”推进到”可复现验收”。当前证据包含 AMOS 0117 原生标签验证，以及 FLARE22 Tr 0009 的非 AMOS 在线推理和 taxonomy-remap 指标。2026-05-28 实现自动 taxonomy remap 后，FLARE22 在线验证已能自动重映射标签 ID 并得到有意义的跨数据集指标（job `a717dacf42d3`，mean_dice=0.926，验证通过）。
 
 ## 目标 1：CT 可浏览、三正交可联动
 

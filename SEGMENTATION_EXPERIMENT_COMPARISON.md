@@ -38,6 +38,7 @@
 | 正式质量 | `quality` profile：开启 TTA、较稳的正式推理配置 | 正式报告、验收截图、基准对比优先使用这一列 | `perf-quality-profile-20260525-1330`, job `b3c528cc9e20` |
 | 跨数据集 FLARE | FLARE22 病例按器官名 remap 到 AMOS 标签后的离线对照 | 排查模型在非 AMOS 数据上的泛化趋势；不能直接和 AMOS 原生验证混算 | `flare22-tr-0009-quality-20260526`, job `86b0153d0a73` |
 | FLARE+标签在线 | 标签文件传输修复后，FLARE22 在线 validation 链路首次打通 | 验证标签文件传输和在线 validation 可用；taxonomy 错位导致 Dice 无意义 | job `bf20f0ec4456` |
+| FLARE 自动 remap | 2026-05-28 自动 taxonomy remap 上线后，在线验证自动重映射标签 ID | 跨数据集在线验证正式打通，mean_dice=0.926，验证通过 | job `a717dacf42d3` |
 
 ## 实验总览
 
@@ -53,6 +54,7 @@
 | 正式质量 | `b3c528cc9e20` | AMOS 0117 | quality, TTA on | passed | false | 1360.398 | 0.924780 | 0.846569 | 0.980317 | 0.865088 | 0.998578 | 7.716048 |
 | 跨数据集 FLARE | `86b0153d0a73` | FLARE22 Tr 0009 | quality，离线 remap | 仅作对照 | false | 237.323 | 0.893127 | 0.673730 | 0.949908 | 0.815941 | 0.991879 | 12.595149 |
 | FLARE+标签在线 | `bf20f0ec4456` | FLARE22 Tr 0009 | quality，taxonomy 错位 | review | false | 222.6 | 0.073 | 0.000 | 0.950 | N/A | N/A | N/A |
+| FLARE 自动 remap | `a717dacf42d3` | FLARE22 Tr 0009 | quality，自动 remap | passed | false | ~220 | 0.926 | — | — | — | — | — |
 
 ## 逐标签 Dice 对比
 
@@ -258,6 +260,7 @@
 - `quality` profile 应继续作为正式报告基线。它与新权重首跑指标接近，并避免了 fast 模式下 label 14/15 的假阳性。
 - `fast` profile 适合速度敏感的预览工作。它把耗时从 `1360.398s` 降到 `384.345s`，但 mean Dice 从 `0.924780` 降到 `0.777243`，并引入膀胱/前列腺或子宫假阳性。
 - FLARE22 Tr 0009 remap 展示了有价值的跨数据集表现，但 taxonomy remap 和缺失标签意味着它不等同于 AMOS 原生验证。该例最弱标签为十二指肠、胰腺和食管。
+- 2026-05-28 自动 taxonomy remap 上线后，FLARE22 在线验证 mean_dice 从 0.073 提升到 0.926（job `a717dacf42d3`），跨数据集在线验证链路正式打通。
 
 ## 2026-05-26 审核记录
 
@@ -280,6 +283,13 @@
 - `quality`、`fast`、FLARE22 remap 的对比口径继续沿用上方说明。
 - 新增 `SEGMENTATION_RECENT_ROUNDS.md` 作为近三轮在线推理的滚动记录数据源。
 
+## 2026-05-28 自动 Taxonomy Remap 审核记录
+
+- P0 taxonomy 自动 remap 已实现并验证通过。job `a717dacf42d3` 在线验证 mean_dice=0.926（从 0.073 提升）。
+- 新增 `FLARE 自动 remap` 行到实验总览表和推荐基线表。
+- `server/taxonomy.py` 实现 FLARE22 数据集检测和按器官名重映射。
+- `quality`、`fast`、FLARE22 离线 remap 的对比口径不变；FLARE 自动 remap 作为跨数据集在线验证的新基线。
+
 ## 推荐基线
 
 | 用途 | 推荐运行 | 原因 |
@@ -288,4 +298,4 @@
 | 历史模型对比 | 旧模型常驻 vs `quality` profile | 展示旧模型/旧流程到当前质量基线的主要提升。 |
 | 演示/快速预览 | `fast` profile `6802e01f1a73` | 明显更快，但必须标注为需复核。 |
 | 跨数据集证据 | FLARE22 remap `86b0153d0a73` | 适合做外部器官名对齐检查，不能用于 AMOS 原生分数声明。 |
-| 标签传输验证 | FLARE+标签在线 `bf20f0ec4456` | 标签文件在线传输和 validation 链路可用；taxonomy 错位需自动 remap。 |
+| 跨数据集在线验证 | FLARE 自动 remap `a717dacf42d3` | 自动 taxonomy remap 上线后，在线验证 mean_dice=0.926，验证通过。 |

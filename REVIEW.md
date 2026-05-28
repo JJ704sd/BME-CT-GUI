@@ -2,7 +2,7 @@
 
 > 基于 `segmentation-gui-prototype` 当前代码、运行中的本地服务以及 `nnunetv2_files` 资源整理。
 > 目标是把这个原型收敛成一个可浏览 CT、可联动三正交视图、可点击器官说明、可连接本地分割后端的工作型 GUI。
-> 当前结论：前端已经具备三正交浏览、13 类器官说明、真实病例入口和结果对比视图；后端已接入本地 nnUNetv2 model folder 与真实推理命令，并会在配置不完整时明确拒绝创建任务。AMOS 0117 已形成原生标签质量基线，FLARE22 Tr 0009 已完成未缓存 `quality` 在线推理和离线 taxonomy-remap 对照；FLARE22 的自动 Dice 验证仍按标签体系不兼容处理为关闭。
+> 当前结论：前端已经具备三正交浏览、13 类器官说明、真实病例入口和结果对比视图；后端已接入本地 nnUNetv2 model folder 与真实推理命令，并会在配置不完整时明确拒绝创建任务。AMOS 0117 已形成原生标签质量基线，FLARE22 Tr 0009 已完成未缓存 `quality` 在线推理和自动 taxonomy-remap 验证（job `a717dacf42d3`，mean_dice=0.926，验证通过）。
 
 ---
 

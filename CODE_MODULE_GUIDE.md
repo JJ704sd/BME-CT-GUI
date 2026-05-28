@@ -9,8 +9,9 @@
 3. 到 `src/imaging/voxelMapping.ts` 和 `src/imaging/sliceRenderer.ts` 讲体素坐标、切片坐标、方向映射和 canvas 切片渲染缓存。
 4. 到 `src/inference/inferenceClient.ts` 讲前端如何创建 job、监听 SSE、下载结果。
 5. 到 `server/main.py` 和 `server/persistent_nnunet_worker.py` 讲 FastAPI 后端如何桥接 nnUNetv2、管理任务、缓存和 validation。
-6. 到 `tools/segmentation_metrics_summary.py` 讲 Dice、IoU、Voxel Accuracy 和 Hausdorff Distance 指标如何离线复算。
-7. 最后用 `tests/` 和文档说明验收边界：AMOS 原生 validation 与 FLARE22 taxonomy-remapped comparison 必须分开解释。
+6. 到 `server/taxonomy.py` 讲跨数据集标签 taxonomy 检测与自动重映射：FLARE22 标签定义、器官名别名映射、`detect_dataset()` 自动识别数据集来源、`build_remap_mapping()` 按器官名建立 ID 映射、`apply_remap()` 用查找表重排参考标签数组。
+7. 到 `tools/segmentation_metrics_summary.py` 讲 Dice、IoU、Voxel Accuracy 和 Hausdorff Distance 指标如何离线复算。
+8. 最后用 `tests/` 和文档说明验收边界：AMOS 原生 validation 与 FLARE22 自动 taxonomy-remap validation 的区别。
 
 ## 2. 前端入口：`src/main.tsx`
 
