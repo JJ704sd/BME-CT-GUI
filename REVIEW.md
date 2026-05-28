@@ -2114,5 +2114,65 @@ job `a717dacf42d3`（FLARE22 Tr 0009 + 自动 taxonomy remap）：
 
 ---
 
+## 44. 窗预设联动器官高亮与模型信息真实化
+
+### 44.1 背景
+
+原有 GUI 的窗宽窗位预设（软组织/肺窗/骨窗）点击后只更新窗参数，没有视觉反馈告诉用户哪些器官在该窗下最相关。模型选择区域显示 3 个虚构模型（Abdomen-TotalSegmentator / Lung-Lobe-AirwayNet / RespDigest-Hybrid），与实际只能运行 AMOS22 单模型的事实不符。
+
+### 44.2 本轮实现
+
+1. **窗预设 → 器官高亮联动**
+   - 新增 `presetOrganMap`：`soft` 映射到全部 15 个腹部器官 ID，`lung`/`bone` 为空数组（当前模型无相关标签）。
+   - 新增 `activePresetId` 状态：跟踪当前激活的预设按钮。
+   - 新增 `highlightedOrganIds` 状态：`Set<string>`，存储需要高亮的器官 ID。
+   - `applyWindowPreset()` 重写：设置窗参数 → 切换 `activePresetId` → 设置 `highlightedOrganIds` → 2.2 秒后自动清除高亮。
+   - 预设按钮增加 `active-preset` class 条件渲染。
+   - 器官行增加 `highlight` class 条件渲染，使用 `.filter(Boolean).join(" ")` 组合 class。
+
+2. **预设 Toast 提示**
+   - 新增 `presetToast` 状态和 `presetToastTimerRef`。
+   - `showPresetToast()` 函数：清除旧定时器 → 设置新消息 → 2.8 秒后自动清除。
+   - 软组织预设：`"软组织 · 高亮 15 个关联器官"`。
+   - 肺窗/骨窗预设：`"肺窗：当前模型暂无相关标签，后续扩展后可联动"`。
+   - Toast 渲染在 `.preset-strip` 正下方，使用 `.preset-toast` class。
+   - `resetView()` 中清除所有预设相关状态和定时器。
+
+3. **模型信息真实化**
+   - `modelOptions` 从 3 个虚构模型改为 1 个真实 AMOS22 模型条目。
+   - 模型卡片下方新增 `.organ-category-grid`：4 个分类卡片（消化系统/泌尿系统/血管结构/其他器官）。
+   - `.model-card` CSS 从 2 列 grid 改为单列，新增 `.model-detail` 样式。
+
+4. **CSS 动画与样式**
+   - `.organ-row.highlight`：outline + 背景色。
+   - `.organ-row.active.highlight`：更强的绿色（active 优先级高于 highlight）。
+   - `@keyframes organ-highlight-pulse`：box-shadow 脉冲淡出。
+   - `.organ-row.highlight:not(.active)`：`organ-highlight-pulse-fade` 动画（含背景重置）。
+   - `.preset-toast`：`flex-basis: 100%`、绿色背景、`preset-toast-fade` 动画。
+   - `.organ-category-grid` / `.organ-category`：2 列 grid 布局、圆点指示器。
+
+5. **定时器管理**
+   - `highlightTimerRef` 和 `presetToastTimerRef` 防止快速点击堆叠定时器。
+   - `resetView()` 中统一清理两个定时器。
+
+### 44.3 验证
+
+- `npm run build`：TypeScript 检查通过。
+- `npm test`：全部测试通过。
+- 浏览器验证：
+  - 点击"软组织"→ 按钮高亮 + 15 个器官行脉冲高亮 2.2 秒后淡出。
+  - 点击"肺窗"→ 按钮高亮 + toast "当前模型暂无相关标签"。
+  - 点击"骨窗"→ 按钮高亮 + toast "当前模型暂无相关标签"。
+  - 再次点击同一预设 → 取消高亮，恢复默认状态。
+  - 重置视图 → 所有预设状态清除。
+
+### 44.4 行为边界
+
+- 本轮只改变前端 UI 交互，不改变 nnUNetv2 推理参数、validation 规则或后端逻辑。
+- 肺窗/骨窗的器官映射为空，等待后续模型扩展时补充。
+- 高亮动画使用 CSS `forwards` fill-mode，通过拆分 `organ-highlight-pulse` 和 `organ-highlight-pulse-fade` 两套 keyframe 解决 active/highlight 样式冲突。
+
+---
+
 *文档版本：2026-05-28*
 *更新依据：当前 `src/main.tsx`、`src/components/OrthogonalViewer.tsx`、`src/imaging/voxelMapping.ts`、`src/imaging/sliceRenderer.ts`、`src/data/organDetails.ts`、`src/inference/inferenceClient.ts`、`server/main.py`、`server/taxonomy.py`、`server/persistent_nnunet_worker.py`、`server/requirements.txt`、`tools/perf_no_cache_persistent.py`、`README.md`、`ACCEPTANCE.md`、`SEGMENTATION_METRICS_SUMMARY.md`、`SEGMENTATION_EXPERIMENT_COMPARISON.md`、`SEGMENTATION_RECENT_ROUNDS.md`、`reference_cases.example.json`、`tests/*.test.ts` 与本地运行验证结果。*

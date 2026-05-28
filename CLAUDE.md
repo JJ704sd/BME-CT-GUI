@@ -119,3 +119,41 @@ python tools/segmentation_metrics_summary.py --prediction <pred.nii.gz> --refere
 - **Label taxonomy**：AMOS22 checkpoint 的 label ID 顺序与 FLARE22 不同（如 AMOS22 的 1=脾脏 vs FLARE22 的 1=肝脏）。`server/taxonomy.py` 提供自动检测和重映射功能：当上传的标签文件来自已知数据集（如 FLARE22）时，后端自动按器官名重映射 ID 后再计算 Dice。validation 结果中 `remap_applied: true` 表示已自动重映射，`remap_source` 标识来源数据集。
 - **规划文档**：`.planning/` 目录存放任务规划（如 `label-scoring-optimization/`）。近三轮在线推理滚动记录在 `SEGMENTATION_RECENT_ROUNDS.md`。
 - **心跳机制**：`push_heartbeat()` 全部异常隔离，失败不影响推理。前端心跳事件只更新耗时，不污染 timeline。
+
+## Linux 部署差异
+
+**必须修改的路径**（`server/main.py:43-44`）：
+```python
+# Windows
+NNUNET_PREDICT_COMMAND = PROJECT_ROOT / "nnunet_env" / "Scripts" / "nnUNetv2_predict_from_modelfolder.exe"
+NNUNET_PYTHON_COMMAND = PROJECT_ROOT / "nnunet_env" / "Scripts" / "python.exe"
+
+# Linux
+NNUNET_PREDICT_COMMAND = PROJECT_ROOT / "nnunet_env" / "bin" / "nnUNetv2_predict_from_modelfolder"
+NNUNET_PYTHON_COMMAND = PROJECT_ROOT / "nnunet_env" / "bin" / "python"
+```
+
+**跨平台方案**：
+```python
+import sys
+def get_platform_command(project_root: Path, name: str) -> Path:
+    subdir = "Scripts" if sys.platform == "win32" else "bin"
+    ext = ".exe" if sys.platform == "win32" else ""
+    return project_root / "nnunet_env" / subdir / f"{name}{ext}"
+```
+
+**GPU 选择**：
+```bash
+CUDA_VISIBLE_DEVICES=0 SEGMENTATION_DEVICE=cuda python -m uvicorn server.main:app --host 0.0.0.0 --port 8000
+```
+
+## 模型替换快速参考
+
+**只更新权重**：替换 `nnunetv2_files/checkpoint_best.pth` → 运行测试 → 更新文档
+
+**标签/架构变化**：需要额外修改：
+- `server/main.py:37-42`（模型目录路径）
+- `src/data/organDetails.ts`（前端器官详情）
+- `server/taxonomy.py:16-30`（标签映射）
+
+详见 `.planning/deployment-preparation/task_plan.md`

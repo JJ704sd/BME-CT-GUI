@@ -207,9 +207,7 @@ const toolbarHints = [
 ];
 
 const modelOptions = [
-  { id: "abdomen", name: "Abdomen-TotalSegmentator", scope: "肝脏、胰腺、胆囊、胃肠道", speed: "32 s" },
-  { id: "lung", name: "Lung-Lobe-AirwayNet", scope: "肺叶、气管树、肺血管、结节", speed: "26 s" },
-  { id: "hybrid", name: "RespDigest-Hybrid", scope: "胸腹联合器官分割", speed: "41 s" }
+  { id: "abdomen", name: "AMOS22 腹部器官分割", scope: "15 类腹部器官 · 脾肾肝胆胰胃肠 · 血管 · 泌尿生殖", detail: "基于 AMOS22 公开数据集训练的 nnUNetv2 3D fullres 模型，支持腹部 CT 中 15 个前景器官的全自动分割。" }
 ];
 
 const inferenceProfileOptions: { id: InferenceProfile; label: string; detail: string; meta: string }[] = [
@@ -222,6 +220,12 @@ const windowPresets = [
   { id: "lung", label: "肺窗", level: -600, width: 1500 },
   { id: "bone", label: "骨窗", level: 300, width: 1500 }
 ];
+
+const presetOrganMap: Record<string, string[]> = {
+  soft: defaultOrganLabels.map((l) => l.id),
+  lung: [],
+  bone: [],
+};
 
 const runSteps = ["数据预处理", "器官候选区定位", "掩膜后处理", "质控指标刷新", "报告草稿同步"];
 const baseLogs = ["演示病例已加载", "支持 PNG/JPG/WebP 与 .nii/.nii.gz 体数据", "侧栏支持导入、删除、质控与报告"];
@@ -498,6 +502,11 @@ function App() {
   const [zoom, setZoom] = useState(1);
   const [windowLevel, setWindowLevel] = useState(40);
   const [windowWidth, setWindowWidth] = useState(360);
+  const [activePresetId, setActivePresetId] = useState<string | null>("soft");
+  const [highlightedOrganIds, setHighlightedOrganIds] = useState<Set<string>>(new Set());
+  const [presetToast, setPresetToast] = useState<string | null>(null);
+  const presetToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [maskOpacity, setMaskOpacity] = useState(58);
   const [comparePosition, setComparePosition] = useState(52);
   const [isDraggingSplit, setIsDraggingSplit] = useState(false);
@@ -1184,6 +1193,11 @@ function App() {
     setZoom(1);
     setWindowLevel(40);
     setWindowWidth(360);
+    setActivePresetId("soft");
+    setHighlightedOrganIds(new Set());
+    setPresetToast(null);
+    if (highlightTimerRef.current) { clearTimeout(highlightTimerRef.current); highlightTimerRef.current = null; }
+    if (presetToastTimerRef.current) { clearTimeout(presetToastTimerRef.current); presetToastTimerRef.current = null; }
     setSelectedSlice(Math.min(currentTotalSlices, Math.floor(currentTotalSlices / 2) + 1));
     setToast("视图已重置");
   }
@@ -1191,7 +1205,29 @@ function App() {
   function applyWindowPreset(preset: typeof windowPresets[number]) {
     setWindowLevel(preset.level);
     setWindowWidth(preset.width);
+    const isSamePreset = activePresetId === preset.id;
+    setActivePresetId(isSamePreset ? null : preset.id);
+    const organIds = presetOrganMap[preset.id] ?? [];
+    if (isSamePreset) {
+      setHighlightedOrganIds(new Set());
+      setPresetToast(null);
+      if (highlightTimerRef.current) { clearTimeout(highlightTimerRef.current); highlightTimerRef.current = null; }
+    } else if (organIds.length > 0) {
+      setHighlightedOrganIds(new Set(organIds));
+      showPresetToast(`${preset.label} · 高亮 ${organIds.length} 个关联器官`);
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+      highlightTimerRef.current = setTimeout(() => { setHighlightedOrganIds(new Set()); highlightTimerRef.current = null; }, 2200);
+    } else {
+      setHighlightedOrganIds(new Set());
+      showPresetToast(`${preset.label}：当前模型暂无相关标签，后续扩展后可联动`);
+    }
     setLogs((items) => [`窗宽窗位切换：${preset.label} · WL ${preset.level} / WW ${preset.width}`, ...items].slice(0, 8));
+  }
+
+  function showPresetToast(message: string) {
+    if (presetToastTimerRef.current) clearTimeout(presetToastTimerRef.current);
+    setPresetToast(message);
+    presetToastTimerRef.current = setTimeout(() => setPresetToast(null), 2800);
   }
 
   async function selectCase(nextCase: CaseItem) {
@@ -1588,9 +1624,10 @@ function App() {
               </div>
               <div className="preset-strip" aria-label="窗宽窗位预设">
                 {windowPresets.map((preset) => (
-                  <button key={preset.id} onClick={() => applyWindowPreset(preset)}>{preset.label}</button>
+                  <button key={preset.id} className={activePresetId === preset.id ? "active-preset" : ""} onClick={() => applyWindowPreset(preset)}>{preset.label}</button>
                 ))}
               </div>
+              {presetToast ? <div className="preset-toast">{presetToast}</div> : null}
               <label className="range-control slice-range">
                 切片
                 <input type="range" min="1" max={currentTotalSlices} value={selectedSlice} onChange={(event) => setSelectedSlice(Number(event.target.value))} />
@@ -1837,10 +1874,18 @@ function App() {
                   <div className="section-head"><h2><ScanLine size={18} />分割控制</h2><span className="detail-chip">{runState === "running" ? `${progress}%` : "可操作"}</span></div>
                   <div className="model-list">
                     {modelOptions.map((model) => (
-                      <button key={model.id} className={selectedModelId === model.id ? "model-card active" : "model-card"} onClick={() => setSelectedModelId(model.id)}>
-                        <strong>{model.name}</strong><span>{model.scope}</span><small>{model.speed}</small>
-                      </button>
+                      <div key={model.id} className="model-card active">
+                        <strong>{model.name}</strong>
+                        <span>{model.scope}</span>
+                        <small className="model-detail">{model.detail}</small>
+                      </div>
                     ))}
+                    <div className="organ-category-grid">
+                      <div className="organ-category"><i /><span>消化系统</span><small>肝脏 · 胰腺 · 胆囊 · 胃 · 食管 · 十二指肠</small></div>
+                      <div className="organ-category"><i /><span>泌尿系统</span><small>左肾 · 右肾 · 膀胱</small></div>
+                      <div className="organ-category"><i /><span>血管结构</span><small>主动脉 · 下腔静脉</small></div>
+                      <div className="organ-category"><i /><span>其他器官</span><small>脾脏 · 双侧肾上腺 · 前列腺/子宫</small></div>
+                    </div>
                   </div>
                   <div className="inference-profile-grid" aria-label="推理模式">
                     {inferenceProfileOptions.map((profile) => (
@@ -1894,11 +1939,16 @@ function App() {
                 <section className="panel">
                   <div className="section-head"><h2><Layers3 size={18} />器官图层</h2><span className="detail-chip">{visibleOrgans.size}/{organs.length}</span></div>
                   <div className="organ-list">
-                    {organs.map((organ) => (
-                      <button key={organ.id} className={selectedOrganId === organ.id ? "organ-row active" : "organ-row"} onClick={() => toggleOrgan(organ.id)}>
-                        <i style={{ background: organ.color }} /><span>{organ.name}</span><strong>{formatOrganScore(organ.score)}</strong>
-                      </button>
-                    ))}
+                    {organs.map((organ) => {
+                      const isActive = selectedOrganId === organ.id;
+                      const isHighlight = highlightedOrganIds.has(organ.id);
+                      const cls = ["organ-row", isActive && "active", isHighlight && "highlight"].filter(Boolean).join(" ");
+                      return (
+                        <button key={organ.id} className={cls} onClick={() => toggleOrgan(organ.id)}>
+                          <i style={{ background: organ.color }} /><span>{organ.name}</span><strong>{formatOrganScore(organ.score)}</strong>
+                        </button>
+                      );
+                    })}
                   </div>
                 </section>
               </>

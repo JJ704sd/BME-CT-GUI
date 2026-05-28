@@ -19,13 +19,15 @@
 
 主要职责：
 
-- 维护全局 UI 状态：当前模块、病例、体素坐标、切片、窗宽窗位、对比模式、推理状态、器官列表、报告状态。
+- 维护全局 UI 状态：当前模块、病例、体素坐标、切片、窗宽窗位、窗预设激活态、器官高亮集合、对比模式、推理状态、器官列表、报告状态。
 - 解析本地 `.nii` / `.nii.gz`：`parseNiftiVolume()` 读取 NIfTI header 和 image buffer，生成前端可用的 volume 对象。
 - 管理参考病例：通过 `/api/samples` 拉取本地 registry，把 `AMOS_0117`、`FLARE22_Tr_0009` 等真实病例显示到顶部病例选择器。
 - 管理标签文件：`labelFile` 状态存储用户上传的标签 NIfTI，通过"标签 CT 导入"按钮或拖拽区域选择。`processVisualizationFile()` 中 `role === "label"` 分支处理标签文件。推理前若 `labelFile` 为 null 会 toast 提醒。
 - 管理在线推理：`startSegmentation()` 调用 inference client 创建 job，监听进度，下载结果并回填到 GUI。标签文件通过 FormData 的 `label_file` 字段传给后端。
 - 管理底部实时进度：`inferenceTimeline` 记录结构化阶段日志，`inferenceStartedAt` 驱动已耗时展示，`inferenceProgressCopy` 集中生成底部 progress rail 文案。
 - 管理 axial 预览：右侧文件卡片和底部切片时间轴使用 `renderCachedAxialNiftiSliceToDataUrl()`，复用 `src/imaging/sliceRenderer.ts` 的切片缓存，避免重复 canvas toDataURL。
+- 管理窗预设联动：`applyWindowPreset()` 切换窗宽窗位时同步设置 `activePresetId` 和 `highlightedOrganIds`；`presetOrganMap` 映射预设到关联器官 ID 列表；`highlightTimerRef` / `presetToastTimerRef` 防止快速点击堆叠定时器。
+- 管理模型信息展示：`modelOptions` 显示当前可用模型（AMOS22 腹部器官分割），下方 `.organ-category-grid` 按系统分类展示覆盖的 15 个器官。
 
 本轮性能相关改动：
 
@@ -39,6 +41,9 @@
 - `selectedSlice` 主要服务 axial 预览、滑条和底部时间轴。
 - 在线推理的结果不是图片，而是 NIfTI mask volume；GUI 回填后仍走同一套三视图渲染。
 - 底部 progress rail 只展示后端 SSE 阶段百分比，不伪造 nnUNetv2 内部细粒度进度。
+- 窗预设联动：`presetOrganMap` 定义预设→器官映射；软组织映射全部 15 个器官，肺窗/骨窗为空（当前模型无相关标签）。高亮使用 CSS `organ-highlight-pulse` 动画，2.2 秒后自动淡出。
+- 预设 Toast：`.preset-toast` 渲染在 `.preset-strip` 正下方，`flex-basis: 100%` 独占一行，2.8 秒后自动消失。
+- 模型卡片：从虚构多模型改为单一真实 AMOS22 模型 + 4 个器官分类卡片（消化/泌尿/血管/其他）。
 
 ## 3. 三正交视图：`src/components/OrthogonalViewer.tsx`
 
