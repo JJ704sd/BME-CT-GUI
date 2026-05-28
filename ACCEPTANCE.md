@@ -296,7 +296,7 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\checkpoint_best.
 
 - FLARE22 label 定义为 `1=liver`, `2=right_kidney`, `3=spleen`, `4=pancreas`, `5=aorta`, `6=inferior_vena_cava`, `7=right_adrenal_gland`, `8=left_adrenal_gland`, `9=gallbladder`, `10=esophagus`, `11=stomach`, `12=duodenum`, `13=left_kidney`。
 - 当前 checkpoint 是 `Dataset001_AMOS22`，label ID 顺序不同且包含 `14=bladder`, `15=prostate_or_uterus`。
-- 因此后端自动 validation 保持关闭；任何数值指标必须明确说明是离线 taxonomy remap 对照。
+- 该参考病例在 `/api/samples` 中仍保持 `validation_available=false`，因为内置 registry 不把 FLARE22 标签直接当作 AMOS 原生标签使用；如用户另行上传 FLARE22 标签文件，2026-05-28 之后后端会通过自动 taxonomy remap 执行在线 validation。
 
 未缓存 `quality` 在线推理记录：
 
@@ -355,7 +355,7 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\checkpoint_best.
 结论：
 
 - FLARE22 Tr 0009 的后端在线推理链路通过，结果可下载，且未命中历史缓存。
-- 该病例不是 AMOS 原生标签验收；自动 Dice 验证被正确关闭。
+- 该病例不是 AMOS 原生标签验收；在未上传标签文件的这次运行中，自动 Dice 验证被正确关闭。
 - Remapped 指标显示总体可用，但 duodenum 低于 `0.70`，pancreas/esophagus 约 `0.81`，正式报告仍需人工复核三正交视图和局部边界。
 
 ## 2026-05-26 矢状/冠状拖动回跳修复记录
@@ -488,6 +488,31 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\checkpoint_best.
 行为边界：
 
 - 标签文件传输 bug 的根因可能是后端服务未重启导致代码变更未生效。
-- `taxonomy_match: True` 只检查了 ID 集合交集，未做语义级匹配，这是一个已知误判。
+- 该历史运行中的 `taxonomy_match: True` 只检查了 ID 集合交集，未做语义级匹配；这个问题已在 2026-05-28 的自动 taxonomy remap 中修正。
 - 在线验证 mean_dice=0.073 是 taxonomy 错位导致，非模型质量问题；离线 remap 后真实值为 0.893。
-- 后续需实现自动 taxonomy remap（Phase 1），才能让在线验证对跨数据集有意义。
+- 2026-05-28 已实现自动 taxonomy remap（见下一节），跨数据集在线验证现在可以按器官名重映射后解释。
+
+## 2026-05-28 自动 Taxonomy Remap 在线验证记录
+
+范围：
+
+- 将 FLARE22 等已知数据集的标签 ID 按器官名自动重映射到当前 AMOS22 checkpoint 的标签 ID。
+- 让用户上传标签文件后的在线 Dice validation 可以得到有意义的跨数据集指标。
+- 在 validation 结果和评估面板中明确显示 `remap_applied`、`remap_source` 和重映射说明。
+
+验收证据：
+
+| 检查项 | 结果 |
+|---|---|
+| 代码路径 | `server/taxonomy.py` 负责 FLARE22 标签表、器官别名、数据集检测、映射构建和参考标签数组重排。 |
+| 在线运行 | job `a717dacf42d3`，病例 FLARE22 Tr 0009，`quality` profile，未命中缓存。 |
+| 重映射状态 | `remap_applied=true`，`remap_source=FLARE22`。 |
+| validation | `status=passed`，`mean_dice=0.926`，相对 taxonomy 错位运行的 `0.073` 明显恢复。 |
+| 前端展示 | 评估面板显示“已自动重映射标签 ID（FLARE22 → 当前模型）”，避免误认为 AMOS 原生标签。 |
+| 文档记录 | `README.md`、`REVIEW.md`、`SEGMENTATION_EXPERIMENT_COMPARISON.md`、`SEGMENTATION_RECENT_ROUNDS.md` 已记录该轮结果。 |
+
+行为边界：
+
+- 自动 remap 解决的是标签 ID 语义错位，不改变 nnUNetv2 模型输出本身。
+- FLARE22 自动 remap 是跨数据集在线验证证据，仍不能和 AMOS 0117 原生标签指标无条件混算。
+- 当前已知 remap 来源以 FLARE22 为主；新增数据集前应先补充标签表、别名映射、测试和验收记录。

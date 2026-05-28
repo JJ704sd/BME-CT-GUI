@@ -1,83 +1,88 @@
-# Online Inference Follow-up Plan
+# 在线推理后续规划
 
-**Scope:** Track the next round of online inference product work after the 2026-05-25 fast vs quality comparison.
+**范围：** 记录 2026-05-25 fast / quality 对照之后的在线推理产品化工作。
 
-**Current branch:** `main`
+**当前分支：** `main`
 
-**Current baseline:** commit `838e77e merge selectable inference profiles`
+**当前基线：** commit `838e77e merge selectable inference profiles`
 
-**Primary rule:** `quality` remains the default and official report path. `fast` is only a quick preview path and must be visibly marked as needing review.
+**核心规则：** `quality` 仍是默认和正式报告路径；`fast` 只是快速预览路径，必须明确标注“需人工复核”。
 
-## Status
+## 状态
 
-- [x] Record fast vs quality no-cache baseline in `REVIEW.md`.
-- [x] Record benchmark metrics in `SEGMENTATION_METRICS_SUMMARY.md`.
-- [x] Push baseline documentation to `origin/codex/update-ct-gui-prototype`.
-- [x] Add user-visible inference mode selection.
-- [x] Carry selected inference profile through the API/job state/result summary.
-- [x] Show a clear "needs review" warning for fast preview results.
-- [x] Re-run focused verification after UI/backend profile plumbing.
-- [x] Update `README.md`, `REVIEW.md`, and `SEGMENTATION_METRICS_SUMMARY.md` after implementation.
-- [x] Merge and push the selectable inference profile follow-up to `origin/main`.
+- [x] 在 `REVIEW.md` 记录 fast vs quality 无缓存基线。
+- [x] 在 `SEGMENTATION_METRICS_SUMMARY.md` 记录基准指标。
+- [x] 将基线文档推送到 `origin/codex/update-ct-gui-prototype`。
+- [x] 增加用户可见的推理模式选择。
+- [x] 将所选推理 profile 贯穿 API、job state 和结果 summary。
+- [x] 对 fast preview 结果显示清晰的“需人工复核”提示。
+- [x] 在 UI 和后端 profile 串联后重新运行聚焦验证。
+- [x] 实现后更新 `README.md`、`REVIEW.md` 和 `SEGMENTATION_METRICS_SUMMARY.md`。
+- [x] 将可选推理 profile 后续改动合并并推送到 `origin/main`。
 
-## Phase 1: Product Mode Selection
+## Phase 1：产品化推理模式选择
 
-Goal: make the quality/fast distinction explicit in the product instead of relying only on process environment variables.
+目标：把 `quality` / `fast` 区别显式放进产品界面，而不是只依赖环境变量。
 
-Tasks:
+任务：
 
-- [x] Inspect current job creation UI and backend request schema.
-- [x] Add a mode control with two choices: `quality` and `fast`.
-- [x] Default to `quality`.
-- [x] Label `fast` as quick preview only and requiring review.
-- [x] Persist selected profile in job state and `job_summary.json`.
-- [x] Ensure cache key still includes the effective inference options.
+- [x] 检查当前 job 创建 UI 和后端请求 schema。
+- [x] 增加两个模式选择：`quality` 和 `fast`。
+- [x] 默认使用 `quality`。
+- [x] 将 `fast` 标注为快速预览且需要复核。
+- [x] 将所选 profile 写入 job state 和 `job_summary.json`。
+- [x] 确保缓存 key 仍包含最终生效的 `inference_options`。
 
-Acceptance checks:
+验收：
 
-- [x] A default submission uses `quality`.
-- [x] A fast preview submission uses `fast`, `tile_step_size=1.0`, and TTA disabled unless explicitly overridden by backend config.
-- [x] Fast results cannot be mistaken for official quality results in the UI or job summary.
+- [x] 默认提交使用 `quality`。
+- [x] fast preview 提交使用 `fast`、`tile_step_size=1.0`，并在未被后端显式覆盖时关闭 TTA。
+- [x] UI 和 job summary 中 fast 结果不会被误认为正式质量结果。
 
-## Phase 2: Benchmark Discipline
+## Phase 2：基准记录纪律
 
-Goal: keep future speed claims tied to reproducible measurements.
+目标：后续速度声明必须绑定可复现的测量记录。
 
-Tasks:
+任务：
 
-- [ ] Keep benchmark runs under `.test-output/`.
-- [ ] For every benchmark, record input, checkpoint, profile, tile step, TTA state, cache state, job id, total duration, phase timings, result size, resource snapshot, and validation status.
-- [ ] For reference cases with labels, record Dice, IoU, Hausdorff, and label 14/15 prediction voxel counts.
-- [ ] Separate raw model metrics from any postprocess metrics.
+- [x] 基准运行输出保留在 `.test-output/`。
+- [x] 每个基准记录输入、checkpoint、profile、tile step、TTA 状态、缓存状态、job id、总耗时、阶段耗时、结果大小、资源快照和 validation 状态。
+- [x] 有标签的参考病例记录 Dice、IoU、Hausdorff 以及 label 14/15 预测体素数量。
+- [x] 区分原始模型指标和任何后处理指标。
 
-Acceptance checks:
+验收：
 
-- [ ] `REVIEW.md` contains the decision-level conclusion.
-- [ ] `SEGMENTATION_METRICS_SUMMARY.md` contains the numeric comparison.
-- [ ] README only contains current user-facing usage, not the full experiment log.
+- [x] `REVIEW.md` 包含决策级结论。
+- [x] `SEGMENTATION_METRICS_SUMMARY.md` 包含数值对比。
+- [x] `README.md` 只保留当前面向用户的用法，不承载完整实验日志。
 
-## Phase 3: Postprocess Experiment Gate
+## Phase 3：后处理实验门禁
 
-Goal: investigate label 14/15 false positives only as an explicit postprocess experiment.
+目标：只把 label 14/15 假阳性作为显式后处理实验研究，不覆盖原始模型质量指标。
 
-Tasks:
+任务：
 
-- [ ] Design a small-volume connected-component filter for absent or tiny labels.
-- [ ] Run it against the existing fast output with label 14/15 false positives.
-- [ ] Report both raw and postprocess metrics.
-- [ ] Do not replace raw model quality metrics with filtered metrics.
+- [ ] 设计一个面向缺失或极小标签的小体积连通域过滤实验。
+- [ ] 用现有 fast 输出中的 label 14/15 假阳性做离线试验。
+- [ ] 同时报告原始指标和后处理指标。
+- [ ] 不用过滤后的指标替换原始模型质量指标。
 
-Acceptance checks:
+验收：
 
-- [ ] Postprocess output is labeled separately.
-- [ ] Raw fast metrics remain visible in documentation.
-- [ ] No product default changes until the filter is validated on more than one case.
+- [ ] 后处理输出有单独标识。
+- [ ] 原始 fast 指标仍在文档中可见。
+- [ ] 未在超过一个病例验证前，不修改产品默认行为。
 
-## Phase 4: Main Baseline Verification
+## Phase 4：主分支基线验证
 
-Tasks:
+任务：
 
-- [x] Run `npm test` from the project root.
-- [x] Run `npm run build` from the project root.
-- [x] Check `git status --short`.
-- [x] Record the verified `main` baseline in `progress.md`.
+- [x] 从项目根目录运行 `npm test`。
+- [x] 从项目根目录运行 `npm run build`。
+- [x] 检查 `git status --short`。
+- [x] 将已验证的 `main` 基线记录到 `progress.md`。
+
+## 2026-05-28 现状补记
+
+- 推理 profile 产品化已完成，当前仍沿用 `quality` 正式、`fast` 预览的口径。
+- 后续在线推理重点转为远程 Linux GPU 部署、长耗时病例性能策略和报告/评估细节打磨。

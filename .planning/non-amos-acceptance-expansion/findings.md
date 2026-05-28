@@ -1,68 +1,36 @@
-# Non-AMOS Acceptance Expansion Findings
+# 非 AMOS 验收扩展发现
 
-## Current Evidence
+## 当前证据
 
-- Active project baseline is `main` at `838e77e merge selectable inference profiles`.
-- The online inference follow-up plan records fresh baseline verification:
-  - `npm --prefix 'D:\BME2026\BME_CT_Seg\segmentation-gui-prototype' test` exited 0.
-  - `npm --prefix 'D:\BME2026\BME_CT_Seg\segmentation-gui-prototype' run build` exited 0.
-- The tracked `reference_cases.example.json` contains AMOS 0117 plus a placeholder `flare_demo`.
-- Local `nnunetv2_files/` currently shows AMOS 0117 image/label/prediction files and `checkpoint_best.pth`; no confirmed non-AMOS acceptance case has been found in that directory.
-- `.gitignore` excludes `nnunetv2_files/`, `.test-output/`, `server/work/`, `*.nii`, `*.nii.gz`, `*.pth`, and `*.pt`.
+- 活动基线为 `main`，历史提交 `838e77e merge selectable inference profiles`。
+- tracked 的 `reference_cases.example.json` 只作为公开示例；真实非 AMOS 病例通过被忽略的本地 registry 管理。
+- `.gitignore` 已排除 `nnunetv2_files/`、`.test-output/`、`server/work/`、`*.nii`、`*.nii.gz`、`*.pth` 和 `*.pt`。
+- 当前可复用的非 AMOS 证据主要是 FLARE22 Tr 0009：未上传标签时 registry 中 `validation_available=false`，上传标签后可通过自动 taxonomy remap 在线 validation。
 
-## Decisions
+## 关键决策
 
-- Use a private local registry such as `nnunetv2_files/reference_cases.local.json` or an external path referenced by `SEGMENTATION_REFERENCE_CASES_JSON`.
-- Keep `reference_cases.example.json` public and schematic.
-- Treat unlabeled external cases as manual acceptance only.
-- Use `quality` as the official acceptance path.
-- Keep fast-profile or postprocess experiments out of this acceptance expansion unless explicitly recorded as separate comparisons.
+- 私有病例 registry 使用 `nnunetv2_files/reference_cases.local.json` 或由 `SEGMENTATION_REFERENCE_CASES_JSON` 指向的外部路径。
+- `reference_cases.example.json` 保持公开 schema / example，不写入私有真实路径。
+- 无标签外部病例只做浏览、推理、下载、GUI 回填和人工复核。
+- 有标签但 taxonomy 不同的病例，只有在 `server/taxonomy.py` 可识别并可按器官名 remap 时才记录 Dice、IoU 或 Hausdorff。
+- `quality` 是正式验收路径；`fast` 和后处理实验只能单独记录为对照。
 
-## Risks
+## FLARE22 发现
 
-- A non-AMOS label file may use a different label taxonomy from the current checkpoint. If so, automatic Dice/IoU/Hausdorff interpretation is invalid.
-- Long first-run inference can take many minutes per case. Cache hits must be recorded separately from uncached runs.
-- Single non-AMOS cases improve evidence breadth but still do not prove broad generalization.
-- Private data paths can leak into docs if copied directly from local commands; documentation should use case IDs and dataset names instead.
+- 本地 FLARE 数据与当前 AMOS22 checkpoint 的标签 ID 语义不同：例如 FLARE22 的 `1=liver`，而 AMOS22 的 `1=spleen`。
+- 2026-05-26 的 FLARE22 Tr 0009 `quality` 在线推理成功，job `86b0153d0a73`，耗时 `237.323s`，结果大小 `120761` bytes。
+- 离线按器官名 remap 后，FLARE22 Tr 0009 指标为 mean Dice `0.893127`，foreground Dice `0.949908`，min Dice `0.673730`。
+- 2026-05-28 自动 taxonomy remap 上线后，FLARE22 Tr 0009 上传标签在线 validation 通过，job `a717dacf42d3`，mean Dice `0.926`，`remap_applied=true`。
 
-## Open Questions
+## 风险
 
-- Which local non-AMOS cases are available and allowed for this project?
-- Do any non-AMOS cases include compatible ground-truth labels?
-- How many cases are enough for the next acceptance milestone: one labeled plus one unlabeled, or a larger set?
-- Should screenshots be kept local only, or should sanitized screenshots be added deliberately later?
+- 单个非 AMOS 病例只能扩展证据宽度，不能证明广泛泛化。
+- 私有数据路径容易在复制命令时泄漏到文档；公开文档应使用 case id、dataset 和脱敏说明。
+- 跨数据集 remap 后的指标不能与 AMOS 原生标签指标混算。
+- 首次未缓存推理可能持续数分钟到十几分钟；缓存命中必须单独记录。
 
-## 2026-05-26 Candidate Inventory Findings
+## 待确认问题
 
-- Credible non-AMOS candidates are available in local FLARE data under `D:\BME2026\BME_CT_Seg\nnUNet_raw\Dataset001_FLARE`.
-- Selected `flare_case_00002` from `imagesTr` and `flare_ts_0000` from `imagesTs` for private registry validation.
-- `flare_case_00002` has a matching local label file in `nnUNet_preprocessed\Dataset001_FLARE\gt_segmentations`, but it is not compatible with the active checkpoint taxonomy.
-- The active `nnunetv2_files\checkpoint_best.pth` reports `Dataset001_AMOS22`, configuration `3d_fullres`, and AMOS-style labels where label `1` is spleen, label `6` is liver, and labels `14/15` are bladder and prostate/uterus.
-- The local FLARE dataset labels define label `1` as liver, label `3` as spleen, and only foreground labels `1..13`. This mismatch makes automatic Dice/IoU/Hausdorff invalid for FLARE labels under the current checkpoint.
-- The private registry should omit `label` fields for the selected FLARE cases so `/api/samples` correctly reports `validation_available=false`.
-- `nnunet_env` is the inference environment and currently lacks FastAPI. Use the default `python` environment to run or test `server.main`; keep `nnunet_env` for nnUNet execution through the backend.
-- The private registry validation path is working: temporary uvicorn on `127.0.0.1:8000` returned both FLARE cases with `has_original=true`, `has_label=false`, and `validation_available=false`.
-
-## 2026-05-26 FLARE22 Tr 0009 Findings
-
-- `FLARE22_Tr_0009_0000.nii.gz` is a usable non-AMOS CT original for online inference.
-- `FLARE22_Tr_0009.nii.gz` is a real label with matching shape/spacing, but its label IDs follow FLARE22 rather than the active AMOS22 checkpoint.
-- Because of the label mismatch, the correct product behavior is `validation_available=false` in `/api/samples`; automatic backend validation would be misleading.
-- The quality online inference completed successfully without cache:
-  - job `86b0153d0a73`
-  - `duration_seconds=237.323`
-  - `result_size_bytes=120761`
-  - completion GPU snapshot `1804 / 8188 MiB`, `18%`
-- Offline taxonomy remap by organ name gives a useful comparison signal: `mean_dice=0.893127`, `foreground_dice=0.949908`, `min_dice=0.673730`.
-- Weakest remapped label is `duodenum` (`Dice=0.673730`, Hausdorff `38.043429 mm`); `pancreas` and `esophagus` are around `0.81` Dice and should be manually reviewed.
-- Labels `14/15` are absent in FLARE22 and the `quality` prediction had `0 / 0` predicted voxels for them in this case.
-
-## 2026-05-26 GUI Interaction Findings
-
-- The reported cursor lag is tied to synchronous front-end rendering, not to nnUNetv2 inference or backend data loading.
-- `requestAnimationFrame` coalescing is appropriate here because pointer events can arrive faster than useful slice image repaint cadence.
-- Crosshair movement should remain bound to the immediate coordinate state; only heavy slice image generation should be deferred/coalesced.
-- The `分屏` control means original-vs-mask sliding comparison, not Axial/Sagittal/Coronal layout switching.
-- A bug existed in the current three-view workflow: split-mode CSS clipping was implemented for the old `.result-layer` comparison stage but not for `.ortho-mask`.
-- The fix is to clip `.compare-split.has-mask .ortho-mask` by `--compare-position` and show the divider only when `maskVolume` exists.
-- If only the original CT is loaded, split mode has no visible comparison target and should not display a fake divider.
+- 下一批可公开描述但不泄露路径的非 AMOS 病例有哪些？
+- 新增数据集是否具备可 remap 的标签定义和器官名别名？
+- 是否需要生成脱敏截图作为后续 PR 或答辩材料？

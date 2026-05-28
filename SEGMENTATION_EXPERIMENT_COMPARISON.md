@@ -254,6 +254,24 @@
 
 结论：标签文件传输链路修复成功，validation 正常执行。Dice 极低是 AMOS22 checkpoint 与 FLARE22 标签 ID 语义错位导致，非模型质量问题。`taxonomy_match: True` 是误判——只检查了 ID 集合交集，未做语义级匹配。离线 remap 后真实 mean_dice=0.893。
 
+## FLARE22 Tr 0009 自动 taxonomy remap 在线验证详情
+
+运行：自动 taxonomy remap 上线后在线验证，job `a717dacf42d3`
+
+| 项目 | 结果 |
+|---|---|
+| 病例 | FLARE22 Tr 0009 |
+| 标签文件 | 已上传 |
+| profile | `quality` |
+| mode | `real-nnunetv2` |
+| cached_result | `false` |
+| remap_applied | `true` |
+| remap_source | `FLARE22` |
+| validation status | `passed` |
+| mean Dice | `0.926` |
+
+结论：自动 remap 后，在线 validation 会先按器官名把 FLARE22 标签 ID 重映射到当前 AMOS22 checkpoint 标签 ID，再计算 Dice。该运行证明跨数据集在线验证链路已打通，但仍应与 AMOS 0117 原生标签指标分开解释。
+
 ## 结论解读
 
 - 新 checkpoint 是历史结果中的主要提升点。AMOS 最弱标签从旧模型胃 Dice 约 `0.556` 提升到新权重和正式质量配置中的约 `0.8465`。

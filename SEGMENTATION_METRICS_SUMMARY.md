@@ -125,7 +125,9 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\amos_0117(2).nii
 
 ## FLARE22 Tr 0009 标签体系重映射对照
 
-2026-05-26 新增 FLARE22 Tr 0009 后执行一次 `quality` 在线推理。该病例的原始 FLARE22 label ID 顺序与当前 AMOS22 checkpoint 不一致，后端通过 `server/taxonomy.py` 自动检测并重映射。下表指标来自离线 remap：先按器官名把 FLARE22 label 映射到 AMOS22 checkpoint label ID，再运行指标脚本，仅作为非 AMOS 对照证据。
+2026-05-26 新增 FLARE22 Tr 0009 后执行一次 `quality` 在线推理。该病例的原始 FLARE22 label ID 顺序与当前 AMOS22 checkpoint 不一致；当时的下表指标来自离线 remap：先按器官名把 FLARE22 label 映射到 AMOS22 checkpoint label ID，再运行指标脚本，仅作为非 AMOS 对照证据。
+
+2026-05-28 已将同一类映射能力产品化到后端 `server/taxonomy.py`：用户上传 FLARE22 标签文件时，后端会自动检测来源数据集并按器官名重映射后计算在线 Dice。最新在线验证记录见本节后面的“自动 taxonomy remap 在线验证”。
 
 运行输出：
 
@@ -170,9 +172,29 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\amos_0117(2).nii
 
 解释边界：
 
-- 这不是后端自动验证，不能与 AMOS 0117 原生标签指标混算。
+- 这是 2026-05-26 的离线 remap 对照，不是当时的后端自动验证；不能与 AMOS 0117 原生标签指标混算。
 - 该 remap 只适合作为 FLARE22 与 AMOS22 checkpoint 共有 13 个器官的器官名对齐检查。
 - FLARE22 本例没有膀胱或前列腺/子宫标签；label `14/15` 仍为空，并且本次 `quality` 运行中对应预测体素为 `0`。
+
+### 自动 taxonomy remap 在线验证
+
+2026-05-28 自动 taxonomy remap 上线后，FLARE22 Tr 0009 上传标签文件即可在后端在线 validation 中自动重映射：
+
+| 指标 | 数值 |
+|---|---:|
+| job id | `a717dacf42d3` |
+| mode | `real-nnunetv2` |
+| cached_result | `false` |
+| profile | `quality` |
+| remap_applied | `true` |
+| remap_source | `FLARE22` |
+| mean Dice | `0.926` |
+| validation status | `passed` |
+
+解释边界：
+
+- 该记录证明跨数据集在线 validation 链路已打通，但仍是 FLARE22 标签按器官名重映射后的指标，不是 AMOS 原生标签验证。
+- `remap_applied: true` 是解释指标的关键字段；缺少该字段时，不应把 FLARE22 原始 label ID 直接当作 AMOS22 label ID 解读。
 
 Checkpoint 元数据：
 

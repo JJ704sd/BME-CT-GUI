@@ -34,6 +34,20 @@
 
 **`taxonomy_match: True` 的误判：** `validate_against_custom_label()` 只检查了标签 ID 集合是否有交集（两边都有 1..13），未做语义级匹配。
 
+## 2026-05-28：自动 taxonomy remap 结果
+
+**实现结论：** `server/taxonomy.py` 已把 taxonomy 处理从“人工解释”推进到“后端自动检测并重映射”。FLARE22 标签上传后，后端会按器官名建立 FLARE22 ID → AMOS22 ID 的映射，再计算 validation。
+
+**验证数据：**
+- job `a717dacf42d3`
+- 病例：FLARE22 Tr 0009
+- `remap_applied=true`
+- `remap_source=FLARE22`
+- `mean_dice=0.926`
+- validation 状态：`passed`
+
+**解释边界：** 自动 remap 让跨数据集在线验证可解释，但它仍不是 AMOS 原生标签验证；后续新增数据集时必须补标签定义、别名映射和测试。
+
 ## 2026-05-27：AMOS vs FLARE22 推理耗时差异
 
 **数据：** AMOS 0117 (568 层) 1054s vs FLARE22 Tr 0009 (87 层) 214s。

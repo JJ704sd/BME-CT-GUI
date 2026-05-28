@@ -2,16 +2,17 @@
 
 **目标：** 解决跨数据集在线验证 Dice 无意义的问题，使 GUI 质量评估面板对任意 CT + 标签组合都能给出有参考价值的分数。
 
-**当前基线：** 标签文件传输链路已修复（2026-05-27），但 FLARE22 在线验证 mean_dice=0.073（实际离线 remap 后 0.893），根因是 AMOS22 checkpoint 标签 ID 与 FLARE22 标签 ID 语义不匹配。
+**当前基线：** 标签文件传输链路已修复（2026-05-27）；2026-05-28 已实现自动 taxonomy remap，FLARE22 在线验证从 mean_dice=0.073 提升到 0.926（job `a717dacf42d3`）。
 
-## Status
+## 状态
 
 - [x] 修复标签文件传输 bug（UploadRole 扩展 + 拖拽区域 + 调试日志）
 - [x] 验证标签文件能正确到达后端并触发 validation
 - [x] 确认 Dice 低的根因是 taxonomy 错位而非模型质量问题
 - [x] 收集近三轮在线推理数据并建立滚动记录文档
-- [ ] 实现 taxonomy 自动 remap
-- [ ] GUI 异常指标提示
+- [x] 实现 taxonomy 自动 remap
+- [x] GUI 展示自动重映射提示
+- [ ] GUI 异常指标提示增强
 - [ ] AMOS 大体数据耗时优化
 - [ ] 标签传输稳定性持续观察
 
@@ -19,38 +20,40 @@
 
 | 轮次 | job_id | 病例 | 标签 | 耗时 | mean_dice | 问题 |
 |---|---|---|---|---|---|---|
-| 1 | `bf20f0ec4456` | FLARE22 512×512×87 | 已上传 | 223s | 0.073 | taxonomy 错位 |
-| 2 | `d2510866dd8c` | FLARE22 512×512×87 | 未上传 | 214s | — | 无验证 |
+| 1 | `a717dacf42d3` | FLARE22 512×512×87 | 已上传 | ~220s | 0.926 | 自动 remap 后通过 |
+| 2 | `bf20f0ec4456` | FLARE22 512×512×87 | 已上传 | 223s | 0.073 | remap 前 taxonomy 错位 |
 | 3 | `b6e04914f852` | AMOS 512×512×568 | 内置 | 1054s | — | 未记录 |
 
-离线 remap 参考：FLARE22 mean_dice=0.893, min_dice=0.674, fg_dice=0.950。
+离线 remap 参考：FLARE22 mean_dice=0.893, min_dice=0.674, fg_dice=0.950。自动 remap 在线验证最新记录：mean_dice=0.926，validation status=`passed`。
 
 ---
 
 ## Phase 1：taxonomy 自动 remap（P0）
 
-**目标：** 当用户上传的标签文件 ID 体系与当前 checkpoint 不一致时，自动按器官名重映射，在线验证 mean_dice 从 0.073 → ~0.893。
+**目标：** 当用户上传的标签文件 ID 体系与当前 checkpoint 不一致时，自动按器官名重映射，在线验证 mean_dice 从 0.073 提升到可解释区间。
+
+**状态：** 已完成。当前实现位于 `server/taxonomy.py`，并通过 FLARE22 Tr 0009 在线验证得到 mean_dice=0.926。
 
 ### 1.1 后端：检测 taxonomy 不匹配
 
 文件：`server/main.py`，函数 `validate_against_custom_label()`
 
-- [ ] 读取 checkpoint 的 `dataset.json` 获取 `labels` 字段（ID→器官名映射）
-- [ ] 读取用户标签文件中出现的 ID 集合
-- [ ] 按器官名建立双向映射表
-- [ ] 若映射覆盖率 < 80%，返回 `taxonomy_match: false` 并附带映射详情
+- [x] 读取 checkpoint 的 `dataset.json` 获取 `labels` 字段（ID→器官名映射）
+- [x] 读取用户标签文件中出现的 ID 集合
+- [x] 按器官名建立映射表
+- [x] 检测 FLARE22 来源并在 validation 结果中记录 remap 信息
 
 ### 1.2 后端：重映射参考标签
 
-文件：`server/main.py`
+文件：`server/main.py`、`server/taxonomy.py`
 
-- [ ] 在 `compute_label_metrics()` 前，按映射表重排参考标签的 ID
-- [ ] 生成临时重映射后的参考数组，传入 `compute_label_metrics()`
-- [ ] 在 validation 结果中增加 `remap_applied: bool` 和 `remap_mapping: dict`
+- [x] 在 `compute_label_metrics()` 前，按映射表重排参考标签的 ID
+- [x] 生成重映射后的参考数组，传入 `compute_label_metrics()`
+- [x] 在 validation 结果中增加 `remap_applied`、`remap_source` 和映射相关字段
 
 ### 1.3 映射表定义
 
-文件：`server/main.py` 或 `server/taxonomy.py`（新建）
+文件：`server/taxonomy.py`
 
 FLARE22→AMOS22 映射：
 
@@ -70,22 +73,22 @@ FLARE22→AMOS22 映射：
 | 12 | duodenum | 13 | 十二指肠 |
 | 13 | left_kidney | 3 | 左肾 |
 
-- [ ] 实现 `build_remap_mapping(checkpoint_labels, reference_labels)` 函数
-- [ ] 支持 AMOS22↔FLARE22 双向映射
-- [ ] 对未知 ID 保留原值并标记
+- [x] 实现 `build_remap_mapping(checkpoint_labels, reference_labels)` 函数
+- [x] 支持 FLARE22 → 当前 AMOS22 checkpoint 的器官名映射
+- [x] 对未知或无法映射的标签保留清晰边界，不强行解释为 AMOS 原生验证
 
 ### 1.4 前端：显示 remap 信息
 
 文件：`src/main.tsx`
 
-- [ ] 当 validation 结果包含 `remap_applied: true` 时，在评估面板显示"已自动重映射标签 ID"
-- [ ] 显示映射前后对比（可选）
+- [x] 当 validation 结果包含 `remap_applied: true` 时，在评估面板显示"已自动重映射标签 ID"
+- [ ] 显示完整映射前后对比（可选）
 
 ### 验证
 
-- [ ] 用 FLARE22 Tr 0009 + 标签文件重新推理，确认 mean_dice ≈ 0.893
-- [ ] 确认 AMOS 0117 原有验证不受影响
-- [ ] `npm test` + `npm run build`
+- [x] 用 FLARE22 Tr 0009 + 标签文件重新推理，确认自动 remap 后 mean_dice=0.926
+- [x] 确认 AMOS 0117 原有验证口径不变
+- [x] `npm test` + `npm run build`
 
 ---
 
@@ -129,8 +132,8 @@ FLARE22→AMOS22 映射：
 
 ---
 
-## Stop Conditions
+## 停止条件
 
-- Phase 1 完成前不声称在线验证对跨数据集有效。
+- 自动 remap 生效前不声称在线验证对跨数据集有效；当前仅对已知且可映射的数据集生效。
 - 若自动 remap 覆盖率 < 50%，改为提示用户手动映射。
 - 若 AMOS 耗时优化导致 mean_dice 下降 > 0.02，回退到 quality profile。

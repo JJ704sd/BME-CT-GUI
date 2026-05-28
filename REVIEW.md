@@ -2241,5 +2241,41 @@ job `a717dacf42d3`（FLARE22 Tr 0009 + 自动 taxonomy remap）：
 
 ---
 
+## 46. 文档现状同步与下一轮规划收尾
+
+### 46.1 范围
+
+本轮不改动产品代码，重点核对并同步项目说明、验收、指标、实验对比、模块讲解、协作指南和 `.planning/` 规划目录，使其符合 2026-05-28 GUI 项目现状。
+
+### 46.2 本轮更新
+
+- `AGENTS.md`：补充当前项目状态、API、推理 profile、缓存、heartbeat、取消、报告导出、测试和验收口径。
+- `ACCEPTANCE.md`：修正历史 FLARE22 运行中的旧 taxonomy 口径，新增自动 taxonomy remap 在线验证记录。
+- `SEGMENTATION_METRICS_SUMMARY.md`：区分 2026-05-26 FLARE22 离线 remap 对照和 2026-05-28 自动 remap 在线 validation。
+- `SEGMENTATION_EXPERIMENT_COMPARISON.md`：补充 FLARE22 自动 remap 在线验证详情。
+- `README.md`、`CODE_MODULE_GUIDE.md`：同步 FLARE22 标签上传、自动 remap 和 validation 解释边界。
+- `.planning/`：新增 `documentation-refresh-20260528/`，更新 `next-round-candidates/`、`label-scoring-optimization/`、`realtime-inference-progress/`、`online-inference-followup/` 和 `non-amos-acceptance-expansion/`。
+
+### 46.3 核对结论
+
+- 文档主体说明保持中文；保留必要英文技术字段、命令、路径、profile、job id 和指标名。
+- AMOS 原生验证、FLARE22 自动 remap 在线验证、FLARE22 离线 remap 对照、fast preview 和 cached result 已分开表述。
+- 历史记录中的 taxonomy 错位运行仍保留，但已标注为 remap 上线前的历史证据，不能再作为当前能力限制解读。
+- 下一轮优先级建议为远程推理分体部署、长耗时病例性能策略、跨数据集标签评估增强、UI/报告细化和多模型准备。
+
+### 46.4 验证
+
+- `node tests/acceptanceDocs.test.ts`：通过。
+- `git diff --check`：通过，仅出现 Git 行尾转换提示，无 whitespace error。
+- `npm test`：通过；包含前端逻辑、文档、性能工具、布局、后端状态、指标和浏览器布局测试。
+- `npm run build`：通过；Vite 构建 `1594` 个模块，用时约 `2.99s`。
+
+### 46.5 行为边界
+
+- 本轮只同步文档和规划，不改变 nnUNetv2 推理、validation、缓存、报告导出或 UI 运行逻辑。
+- `CLAUDE.md` 在本轮开始前已有未提交修改；该文件未纳入用户列出的目标文档，本轮提交时应单独确认是否纳入。
+
+---
+
 *文档版本：2026-05-28*
 *更新依据：当前 `src/main.tsx`、`src/components/OrthogonalViewer.tsx`、`src/imaging/voxelMapping.ts`、`src/imaging/sliceRenderer.ts`、`src/data/organDetails.ts`、`src/inference/inferenceClient.ts`、`server/main.py`、`server/taxonomy.py`、`server/persistent_nnunet_worker.py`、`server/requirements.txt`、`tools/perf_no_cache_persistent.py`、`README.md`、`ACCEPTANCE.md`、`SEGMENTATION_METRICS_SUMMARY.md`、`SEGMENTATION_EXPERIMENT_COMPARISON.md`、`SEGMENTATION_RECENT_ROUNDS.md`、`reference_cases.example.json`、`tests/*.test.ts` 与本地运行验证结果。*

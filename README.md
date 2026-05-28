@@ -162,7 +162,7 @@ FLARE22 Tr 0009 非 AMOS 在线推理补充：
 | profile | `quality` |
 | duration_seconds | `237.323` |
 | result_size_bytes | `120761` |
-| 后端自动验证 | 关闭，`validation_available=false` |
+| 后端自动验证 | 该参考病例 registry 中关闭，`validation_available=false`；用户上传标签文件时可走自动 taxonomy remap 在线验证 |
 | 离线 remap mean Dice | `0.893127` |
 | 离线 remap min Dice | `0.673730`，最低标签为十二指肠 |
 

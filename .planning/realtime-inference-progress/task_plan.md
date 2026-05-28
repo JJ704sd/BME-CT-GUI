@@ -5,7 +5,7 @@
 **当前基线：** `c4cabfb fix: keep orthogonal drag views live`  
 **范围：** 点击“运行分割/在线推理”后，在底部“切片与流程日志”区域展示实时推理进度条、当前阶段和阶段日志。  
 **原则：** 不伪造模型内部精确百分比；进度条基于后端 SSE 阶段事件，长时间 nnUNetv2 推理阶段用“运行中/耗时/心跳”表达。
-**实施状态：** 第一阶段已完成：前端底部 progress rail、结构化 `inferenceTimeline`、SSE 阶段日志写入和文档收尾已落地；后端 heartbeat 仍为后续候选增强。
+**实施状态：** 已完成前端底部 progress rail、结构化 `inferenceTimeline`、SSE 阶段日志写入、后端 heartbeat 和文档收尾。后续只保留更细粒度进度展示作为候选增强，不伪造 nnUNetv2 内部 patch 级进度。
 
 ## 背景与现状
 
@@ -42,7 +42,7 @@
 优点：视觉上最流畅。  
 缺点：容易误导使用者，以为这是 nnUNetv2 真实内部进度。除非明确标为“演示估算”，否则不采用。
 
-**推荐：** 先做方案 A，配合清晰的“阶段进度”文案；随后补方案 B 的后端心跳。暂不采用方案 C。
+**当前结论：** 方案 A 和方案 B 均已落地；前端使用阶段进度和已耗时表达活跃状态，后端 heartbeat 每 10 秒发送已耗时和资源快照。暂不采用方案 C。
 
 ## 目标体验
 
@@ -52,7 +52,7 @@
 - 当前阶段：例如“nnUNetv2 命令运行中”或“常驻 nnUNetv2 worker 推理中”。
 - job id：便于和后端 `server/work`、`.test-output`、文档记录对应。
 - 推理模式：`quality` 或 `fast`，其中 `fast` 保持“需人工复核”提示。
-- 已耗时：前端从提交成功开始计时；后续如实现心跳，则优先使用后端 `elapsed_seconds`。
+- 已耗时：前端从提交成功开始计时；收到 heartbeat 时优先使用后端 `elapsed_seconds`。
 - 阶段日志：保留最近若干条进度、验证、资源和失败信息。
 
 缓存命中时进度条可以快速到 `100%`，并显示“命中历史缓存”。失败或取消时，进度条停止并展示错误摘要，不自动伪装成功。
@@ -79,15 +79,15 @@
 
 ## 后端实施计划
 
-第一阶段可不改后端。若用户确认需要更强“实时感”，第二阶段补充：
+后端心跳已经实现，当前行为如下：
 
-1. 扩展 progress event 字段：
+1. progress event 字段：
    - `elapsed_seconds`
    - `phase_key`
    - `resource_latest`
    - `heartbeat: true`
-2. 在真实推理长阶段中增加心跳：
-   - `persistent_worker` 或 `nnunet_process` 运行期间每 5-10 秒发送一次事件。
+2. 在真实推理长阶段中发送心跳：
+   - `persistent_worker` 或 `nnunet_process` 运行期间每 10 秒发送一次事件。
    - 百分比保持当前阶段值，不伪造内部完成度。
    - 可附带 GPU/内存快照，复用已有 `record_job_resource_snapshot()` 机制。
 3. 保证取消、失败、complete 事件仍为终态事件，前端可停止计时和动效。
@@ -102,7 +102,7 @@
 后端测试：
 
 - `tests/backendState.test.py` 保留现有 SSE 行为测试。
-- 若实现心跳，新增测试：长任务会推送 heartbeat progress，取消/失败/complete 仍结束 stream。
+- 心跳测试覆盖长任务会推送 heartbeat progress，取消/失败/complete 仍结束 stream。
 
 手工验收：
 

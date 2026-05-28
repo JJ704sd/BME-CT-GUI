@@ -27,7 +27,22 @@
 
 ## 待办
 
-- [ ] Phase 1：taxonomy 自动 remap
-- [ ] Phase 2：GUI 异常指标提示
+- [x] Phase 1：taxonomy 自动 remap
+- [x] GUI 自动重映射提示
+- [ ] Phase 2：GUI 异常指标提示增强
 - [ ] Phase 3：AMOS 耗时优化
 - [ ] Phase 4：标签传输稳定性观察
+
+## 2026-05-28：自动 taxonomy remap 上线
+
+**完成：**
+- 新增 `server/taxonomy.py`，集中维护 FLARE22 标签表、器官名别名、数据集检测和 ID 重映射。
+- 后端 validation 在计算 Dice 前自动对 FLARE22 标签进行器官名重映射。
+- 前端评估面板显示 `remap_applied` 提示，避免把跨数据集指标误认为 AMOS 原生验证。
+
+**验证：**
+- job `a717dacf42d3`：FLARE22 Tr 0009 + 标签上传，`remap_applied=true`，`remap_source=FLARE22`。
+- 自动 remap 后在线 validation `mean_dice=0.926`，状态 `passed`。
+
+**剩余：**
+- 异常指标提示还可继续增强，例如低覆盖率 remap、未知数据集和 per-label 体素差异提示。
