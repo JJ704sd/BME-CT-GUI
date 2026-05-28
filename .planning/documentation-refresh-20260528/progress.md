@@ -24,3 +24,8 @@
 - `git diff --check`：通过；仅出现 Git 行尾转换提示，无 whitespace error。
 - `npm test`：首次在沙箱内失败于 `.test-output` 创建权限；以正常权限重跑后通过。
 - `npm run build`：通过；Vite 构建 `1594` 个模块，用时约 `2.99s`。
+
+## 2026-05-28 GitHub 收尾
+
+- 提交 `0364d2e docs: sync gui docs and planning` 已推送到 `origin/main`。
+- `CLAUDE.md` 是本轮开始前已有的未暂存修改，未纳入该提交。
