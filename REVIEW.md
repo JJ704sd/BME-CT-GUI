@@ -2048,7 +2048,71 @@ job `bf20f0ec4456`（FLARE22 Tr 0009 + 标签上传）：
 - 保留 `console.log` 调试日志两周，观察标签传输是否再次出现 null。
 - 本轮不改变 nnUNetv2 推理参数或 validation 规则。
 
+## 43. 自动 Taxonomy Remap 实现与跨数据集在线验证打通
+
+### 43.1 背景
+
+第 42 节发现 FLARE22 标签 ID 与 AMOS22 checkpoint 语义完全不同，导致在线验证 mean_dice=0.073（实际应为 ~0.893）。本轮实现后端自动 taxonomy remap，使上传 FLARE22 标签后能自动检测数据集来源并按器官名重映射标签 ID。
+
+### 43.2 本轮实现
+
+1. **新增 `server/taxonomy.py`**
+   - 定义 FLARE22 标签表（`FLARE22_LABELS`）：1=liver, 2=right_kidney, 3=spleen, ..., 13=left_kidney。
+   - 定义器官名别名映射（`_NAME_ALIASES`）：postcava↔ivc↔inferior_vena_cava, gall_bladder↔gallbladder, right_adrenal↔right_adrenal_gland 等。
+   - 实现 `detect_dataset(reference_labels, checkpoint_labels)`：通过比较 checkpoint 和参考标签的器官名 ID 分布，自动识别数据集来源（如 FLARE22）。
+   - 实现 `build_remap_mapping(checkpoint_labels, detected_dataset)`：按器官名建立参考标签 ID → checkpoint 标签 ID 的映射表。
+   - 实现 `apply_remap(reference_array, mapping)`：使用查找表（LUT）重排参考标签数组，避免直接替换时 ID 互相覆盖的问题。
+
+2. **修改 `server/main.py` 的 `validate_against_custom_label()`**
+   - 在现有 checkpoint/reference 标签交集检查之后、`compute_label_metrics()` 之前插入自动 remap 逻辑。
+   - 检测到已知数据集时，自动重映射参考标签并计算指标，结果中 `remap_applied: true`、`remap_source` 标识来源数据集。
+   - import 路径使用 `from server.taxonomy import ...`，确保 `python -m uvicorn server.main:app` 方式启动时能正确导入。
+   - 异常处理从静默 `pass` 改为打印错误信息，便于调试。
+
+3. **修改 `src/inference/inferenceClient.ts`**
+   - `ValidationSummary` 类型新增 `remap_applied?: boolean` 和 `remap_source?: string`。
+   - `normalizeValidation()` 解析这两个新字段。
+
+4. **修改 `src/main.tsx`**
+   - `getValidationStatusCopy()` 在验证通过/建议复核文案后追加重映射标签，如"验证通过（FLARE22→当前模型）"。
+   - 评估面板新增"标签重映射"指标行，展示来源数据集和目标模型。
+
+5. **补充 `tests/backendState.test.py`**
+   - 新增 `test_taxonomy_detects_flare22_and_remaps_label_ids()`：验证 FLARE22 检测、映射正确性（12 个条目）和 apply_remap 对 numpy 数组的效果。
+   - 新增 `test_taxonomy_returns_none_for_amos_native_labels()`：验证 AMOS 原生标签不做 remap。
+
+### 43.3 关键实现细节
+
+- **器官名别名**：AMOS22 使用 `postcava`，FLARE22 使用 `inferior_vena_cava`，两者都映射到 canonical name `ivc`。类似地 `gall_bladder`↔`gallbladder`。初始实现遗漏了这些别名，导致只生成 10 个映射条目而非 12 个，后修复。
+- **Import 路径**：首次部署使用 `from taxonomy import ...`，在 `python -m uvicorn server.main:app` 方式下 Python 在项目根目录查找而非 `server/` 目录，导致 remap 未生效、Dice 仍为 0.073。修复为 `from server.taxonomy import ...` 后解决。
+- **LUT 方式**：`apply_remap()` 使用 `np.zeros_like` + 索引赋值，而非原地替换。这避免了当两个 ID 需要互换时（如 1→3, 3→1）的覆盖问题。
+
+### 43.4 验证数据
+
+job `a717dacf42d3`（FLARE22 Tr 0009 + 自动 taxonomy remap）：
+
+| 指标 | 值 |
+|---|---|
+| remap_applied | True |
+| remap_source | FLARE22 |
+| mean_dice | 0.926 |
+| 验证状态 | passed |
+
+对比第 42 节的 job `bf20f0ec4456`（无 remap）：mean_dice=0.073。自动 remap 后提升到 0.926，跨数据集在线验证链路正式打通。
+
+### 43.5 验证
+
+- `python tests/backendState.test.py`：通过，覆盖 FLARE22 检测、映射、remap 和 AMOS 原生标签不 remap。
+- `npm test`：通过。
+- `npm run build`：通过。
+
+### 43.6 行为边界
+
+- 自动 remap 只对已知数据集（当前仅 FLARE22）生效；未知标签体系不做 remap，保持原有逻辑。
+- AMOS 原生标签（如 AMOS 0117 参考病例）不会触发 remap，验证流程不受影响。
+- 本轮不改变 nnUNetv2 推理参数、推理 profile 或历史实验指标数值。
+
 ---
 
-*文档版本：2026-05-27*
-*更新依据：当前 `src/main.tsx`、`src/components/OrthogonalViewer.tsx`、`src/imaging/voxelMapping.ts`、`src/imaging/sliceRenderer.ts`、`src/data/organDetails.ts`、`src/inference/inferenceClient.ts`、`server/main.py`、`server/persistent_nnunet_worker.py`、`server/requirements.txt`、`tools/perf_no_cache_persistent.py`、`README.md`、`ACCEPTANCE.md`、`SEGMENTATION_METRICS_SUMMARY.md`、`SEGMENTATION_EXPERIMENT_COMPARISON.md`、`SEGMENTATION_RECENT_ROUNDS.md`、`reference_cases.example.json`、`tests/*.test.ts` 与本地运行验证结果。*
+*文档版本：2026-05-28*
+*更新依据：当前 `src/main.tsx`、`src/components/OrthogonalViewer.tsx`、`src/imaging/voxelMapping.ts`、`src/imaging/sliceRenderer.ts`、`src/data/organDetails.ts`、`src/inference/inferenceClient.ts`、`server/main.py`、`server/taxonomy.py`、`server/persistent_nnunet_worker.py`、`server/requirements.txt`、`tools/perf_no_cache_persistent.py`、`README.md`、`ACCEPTANCE.md`、`SEGMENTATION_METRICS_SUMMARY.md`、`SEGMENTATION_EXPERIMENT_COMPARISON.md`、`SEGMENTATION_RECENT_ROUNDS.md`、`reference_cases.example.json`、`tests/*.test.ts` 与本地运行验证结果。*
