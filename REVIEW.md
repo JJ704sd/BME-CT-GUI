@@ -2,7 +2,7 @@
 
 > 基于 `segmentation-gui-prototype` 当前代码、运行中的本地服务以及 `nnunetv2_files` 资源整理。
 > 目标是把这个原型收敛成一个可浏览 CT、可联动三正交视图、可点击器官说明、可连接本地分割后端的工作型 GUI。
-> 当前结论：前端已经具备三正交浏览、13 类器官说明、真实病例入口和结果对比视图；后端已接入本地 nnUNetv2 model folder 与真实推理命令，并会在配置不完整时明确拒绝创建任务。AMOS 0117 已形成原生标签质量基线，FLARE22 Tr 0009 已完成未缓存 `quality` 在线推理和自动 taxonomy-remap 验证（job `a717dacf42d3`，mean_dice=0.926，验证通过）。
+> 当前结论：前端已经具备三正交浏览、13 类器官说明、真实病例入口、结果对比视图和报告导出功能；后端已接入本地 nnUNetv2 model folder 与真实推理命令，并会在配置不完整时明确拒绝创建任务。AMOS 0117 已形成原生标签质量基线，FLARE22 Tr 0009 已完成未缓存 `quality` 在线推理和自动 taxonomy-remap 验证（job `a717dacf42d3`，mean_dice=0.926，验证通过）。GUI 支持 HTML / JSON / PDF 三种格式的分割报告导出。
 
 ---
 
@@ -23,6 +23,7 @@
 | NIfTI 切片渲染 | `src/imaging/sliceRenderer.ts` |
 | 器官说明 | `src/data/organDetails.ts` |
 | 推理客户端 | `src/inference/inferenceClient.ts` |
+| 报告导出 | `src/report/exportReport.ts` |
 | 后端桥接 | `server/main.py` |
 | 测试脚本 | `package.json` 已配置 `test` |
 
@@ -2171,6 +2172,72 @@ job `a717dacf42d3`（FLARE22 Tr 0009 + 自动 taxonomy remap）：
 - 本轮只改变前端 UI 交互，不改变 nnUNetv2 推理参数、validation 规则或后端逻辑。
 - 肺窗/骨窗的器官映射为空，等待后续模型扩展时补充。
 - 高亮动画使用 CSS `forwards` fill-mode，通过拆分 `organ-highlight-pulse` 和 `organ-highlight-pulse-fade` 两套 keyframe 解决 active/highlight 样式冲突。
+
+---
+
+## 45. 报告导出功能与 UI 布局美化
+
+### 45.1 背景
+
+用户需要将分割结果、验证指标、器官列表、测量点和推理时间线等信息导出为可分享的报告文件。原有"导出报告"按钮是演示级占位，只修改前端状态和弹 toast，不生成可下载文件。同时，GUI 顶栏在导入标签文件后出现标题换行、标签名截断等布局问题，需要一并修复。
+
+### 45.2 报告导出实现
+
+1. **新增 `src/report/exportReport.ts`**
+   - 定义 `ReportFormat = "html" | "json" | "pdf"` 和 `ReportData` 类型。
+   - `exportReport(data, format)` 根据格式分发到 `exportHtmlReport()`、`exportJsonReport()` 或 `exportPdfReport()`。
+   - HTML 报告为自包含文件，内联 CSS，`@media print` 友好，包含：概览、验证指标、逐标签指标表、器官列表、关键发现、测量点、推理时间线。
+   - JSON 报告加 `schema_version: "1.0"` 和 `report_type: "segmentation"` 字段，直接序列化。
+   - PDF 报告打开新窗口渲染同一 HTML，调用 `window.print()` 让用户"另存为 PDF"，不引入 jsPDF 等重依赖。
+
+2. **修改 `src/main.tsx`**
+   - 新增 `selectedExportFormat` 状态（默认 `html`）。
+   - `handleExport()` 收集当前病例、模型、推理、验证、器官、测量、时间线等状态组装 `ReportData`，调用 `exportReport()`。
+   - 导出按钮区域增加格式选择（HTML / JSON / PDF 三个 ghost-button）。
+   - 新增 `import { exportReport, type ReportFormat, type ReportData } from "./report/exportReport"`。
+
+### 45.3 UI 布局美化
+
+1. **顶栏从 grid 改为 flex 布局**
+   - `.topbar` 从 `display: grid` 改为 `display: flex; flex-wrap: wrap`。
+   - 标题区域 `flex: 0 0 auto; white-space: nowrap`，防止导入标签后标题换行。
+   - `.case-wrap` 同样 `flex: 0 0 auto`。
+   - `.top-actions` 使用 `flex: 1 1 0%; min-width: 0; justify-content: flex-end`，自动填充剩余空间。
+   - 1100px 媒体查询中允许标题 `min-width: 0`，窄屏不溢出。
+
+2. **标签文件名显示优化**
+   - 标签按钮文件名截断从 12 字符增加到 18 字符，超出部分显示省略号。
+   - 按钮增加 `title` 属性，鼠标悬停可查看完整文件名。
+   - 标签按钮选中后增加 `is-selected` class，绿色边框和背景提示已选择状态。
+
+3. **拖放区域三列布局**
+   - `.drop-grid` 从 `grid-template-columns: repeat(2, ...)` 改为 `repeat(3, ...)`，三个拖放区域不再挤成两行。
+   - 拖放区域文件名增加 `max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap`，防止长文件名溢出。
+   - 已有文件的拖放区域增加 `has-file` class，绿色边框和渐变背景提示已导入状态。
+
+4. **Ghost-button 交互增强**
+   - 新增 `.ghost-button.is-selected` 样式：绿色边框 + 浅绿背景。
+   - 新增 `.ghost-button:hover` 和 `.ghost-button.is-selected:hover` 样式，增强交互反馈。
+   - 所有 ghost-button 增加 `transition: background 0.15s, border-color 0.15s, color 0.15s`。
+
+### 45.4 验证
+
+- `npm run build`：TypeScript 检查通过。
+- `npm test`：全部测试通过，包括 `browserLayout.test.ts` 的桌面和移动端布局约束。
+- 浏览器验证：
+  - 载入参考病例 → 运行分割 → 选择 HTML → 导出 → 打开 HTML 验证内容完整。
+  - 选择 JSON → 导出 → 验证 JSON 结构和数据完整。
+  - 选择 PDF → 导出 → 验证弹出打印窗口，内容与 HTML 一致。
+  - 无推理结果时导出 → 各格式均正确显示"待生成"占位。
+  - 导入标签文件后，顶栏标题保持一行，标签名完整显示，拖放区域三列布局正常。
+
+### 45.5 行为边界
+
+- 报告导出为纯前端功能，不修改后端。
+- PDF 依赖浏览器原生打印功能，不引入第三方 PDF 库。
+- 报告不嵌入 CT 切片截图（canvas 截图增大文件体积，HTML 中无法保证跨浏览器渲染）。
+- 本轮 UI 布局改动不影响 `browserLayout.test.ts` 的测试断言（该测试使用简化 HTML 结构，无 `.case-wrap` div）。
+- 本轮不改变 nnUNetv2 推理参数、validation 规则或历史实验指标。
 
 ---
 

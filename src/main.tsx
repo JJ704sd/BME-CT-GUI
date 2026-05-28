@@ -40,7 +40,8 @@ import {
 } from "lucide-react";
 import demoCtImage from "./assets/demo-abdomen-ct.png";
 import { OrthogonalViewer } from "./components/OrthogonalViewer";
-import { buildLabelLookup, defaultOrganLabels, getOrganDetail } from "./data/organDetails";
+import { buildLabelLookup, defaultOrganLabels, getOrganDetail, organDetails as ORGAN_DETAIL_MAP } from "./data/organDetails";
+import { exportReport, type ReportFormat } from "./report/exportReport";
 import { cancelInferenceJob, createInferenceJob, downloadInferenceResult, fetchModelLabels, getInferenceResultMeta, getInferenceStatusCopy, getPhaseTimingSummary, getResourceSnapshotCopy, parseInferenceEvent, type InferenceOptions, type InferenceProfile, type InferenceStatus, type PhaseTimings, type ResourceSnapshot, type ValidationSummary } from "./inference/inferenceClient";
 import { renderNiftiSliceToDataUrl as renderOrientedNiftiSliceToDataUrl } from "./imaging/sliceRenderer";
 import type { VoxelCoord } from "./imaging/voxelMapping";
@@ -507,6 +508,7 @@ function App() {
   const [presetToast, setPresetToast] = useState<string | null>(null);
   const presetToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [selectedExportFormat, setSelectedExportFormat] = useState<ReportFormat>("html");
   const [maskOpacity, setMaskOpacity] = useState(58);
   const [comparePosition, setComparePosition] = useState(52);
   const [isDraggingSplit, setIsDraggingSplit] = useState(false);
@@ -1524,9 +1526,28 @@ function App() {
     setToast("已加入复核清单");
   }
 
-  function handleExport() {
+  function handleExport(overrideFormat?: ReportFormat) {
+    const format = overrideFormat ?? selectedExportFormat;
+    exportReport({
+      caseId: selectedCase.id,
+      caseTarget: selectedCase.target,
+      modelName: selectedModel.name,
+      imageKind: loadedImage.kind,
+      imageDimensions: loadedImage.dimensions,
+      resultKind: resultImage?.kind ?? "无",
+      currentSlice: selectedSlice,
+      totalSlices: currentTotalSlices,
+      validation: validationSummary,
+      inferenceStatus,
+      organs,
+      organDetails: ORGAN_DETAIL_MAP,
+      measurements,
+      timeline: inferenceTimeline,
+      aiFindings,
+      generatedAt: new Date().toLocaleString("zh-CN"),
+    }, format);
     setReportState((state) => ({ ...state, exportCount: state.exportCount + 1, lastExport: new Date().toLocaleTimeString() }));
-    setToast("演示报告摘要已生成");
+    setToast(`已导出 ${format.toUpperCase()} 分割报告`);
   }
 
   return (
@@ -1597,13 +1618,20 @@ function App() {
           <div className="top-actions">
             <button className="ghost-button" onClick={() => fileInputRef.current?.click()}><Upload size={17} />导入 CT 原图</button>
             <button className="ghost-button" onClick={() => resultFileInputRef.current?.click()}><Upload size={17} />导入分割结果</button>
-            <button className="ghost-button" onClick={() => labelFileInputRef.current?.click()}><Upload size={17} />{labelFile ? `标签：${labelFile.name.slice(0, 12)}` : "导入标签 CT"}</button>
+            <button className={`ghost-button${labelFile ? " is-selected" : ""}`} onClick={() => labelFileInputRef.current?.click()} title={labelFile?.name}><Upload size={17} />{labelFile ? `标签：${labelFile.name.length > 18 ? labelFile.name.slice(0, 18) + "…" : labelFile.name}` : "导入标签 CT"}</button>
             <button className="ghost-button" onClick={() => void loadReferenceCase()}><Database size={17} />载入参考病例</button>
             <button className="primary-button" onClick={() => runState === "running" ? void cancelSegmentation() : void startSegmentation()} disabled={inferenceStatus.status === "submitting"}>
               {runState === "running" ? <Pause size={17} /> : <Play size={17} />}
               {inferenceStatus.status === "submitting" ? "提交中" : runState === "running" ? "取消推理" : "运行分割"}
             </button>
-            <button className="ghost-button" onClick={handleExport}><Download size={17} />导出报告</button>
+            <div className="export-group">
+              <select value={selectedExportFormat} onChange={(e) => setSelectedExportFormat(e.target.value as ReportFormat)} className="export-format-select">
+                <option value="html">HTML</option>
+                <option value="json">JSON</option>
+                <option value="pdf">PDF</option>
+              </select>
+              <button className="ghost-button" onClick={() => handleExport()}><Download size={17} />导出报告</button>
+            </div>
           </div>
         </header>
 
@@ -1823,7 +1851,7 @@ function App() {
                     <button className={dragTarget === "result" ? "drop-zone active" : "drop-zone"} onClick={() => resultFileInputRef.current?.click()} onDragEnter={(event) => handleDrag(event, "result")} onDragOver={(event) => handleDrag(event, "result")} onDragLeave={(event) => handleDrag(event, null)} onDrop={(event) => handleDrop(event, "result")}>
                       <FileStack size={18} /><strong>结果图导入</strong><span>掩膜 / 叠加图 / NIfTI 标签</span>
                     </button>
-                    <button className={dragTarget === "label" ? "drop-zone active" : "drop-zone"} onClick={() => labelFileInputRef.current?.click()} onDragEnter={(event) => handleDrag(event, "label")} onDragOver={(event) => handleDrag(event, "label")} onDragLeave={(event) => handleDrag(event, null)} onDrop={(event) => handleDrop(event, "label")}>
+                    <button className={`${dragTarget === "label" ? "drop-zone active" : "drop-zone"}${labelFile ? " has-file" : ""}`} onClick={() => labelFileInputRef.current?.click()} onDragEnter={(event) => handleDrag(event, "label")} onDragOver={(event) => handleDrag(event, "label")} onDragLeave={(event) => handleDrag(event, null)} onDrop={(event) => handleDrop(event, "label")} title={labelFile?.name}>
                       <Upload size={18} /><strong>标签 CT 导入</strong><span>{labelFile ? labelFile.name : "NIfTI 标签文件 · 用于自动 Dice 验证"}</span>
                     </button>
                   </div>
@@ -2004,7 +2032,11 @@ function App() {
                   <div className="action-stack">
                     <button onClick={() => setShowReport(true)}><FileText size={16} />打开报告预览</button>
                     <button onClick={saveReportDraft}><ClipboardCheck size={16} />保存报告草稿</button>
-                    <button onClick={handleExport}><Download size={16} />导出 JSON 摘要</button>
+                    <div className="export-format-buttons">
+                      <button onClick={() => handleExport("html")}><FileText size={14} />HTML</button>
+                      <button onClick={() => handleExport("json")}><Download size={14} />JSON</button>
+                      <button onClick={() => handleExport("pdf")}><FileText size={14} />PDF</button>
+                    </div>
                     <button onClick={queueReportReview}><ClipboardCheck size={16} />加入复核清单</button>
                   </div>
                 </section>

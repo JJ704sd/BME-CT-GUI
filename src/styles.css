@@ -126,12 +126,28 @@ button:disabled {
 }
 
 .topbar {
-  display: grid;
-  grid-template-columns: minmax(260px, 1fr) auto auto;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 18px;
+  gap: 8px 18px;
   position: relative;
   z-index: 4;
+  transition: gap 0.2s;
+}
+
+.topbar > div:first-child {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.topbar > .case-wrap {
+  flex: 0 0 auto;
+}
+
+.topbar > .top-actions {
+  flex: 1 1 0%;
+  min-width: 0;
+  justify-content: flex-end;
 }
 
 h1,
@@ -144,6 +160,7 @@ h1 {
   font-size: clamp(24px, 2.1vw, 34px);
   line-height: 1.12;
   font-weight: 750;
+  white-space: nowrap;
 }
 
 .topbar p,
@@ -167,6 +184,25 @@ h1 {
   background: rgba(255, 255, 255, 0.055);
   color: #dbe6e3;
   white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.ghost-button.is-selected {
+  border-color: rgba(110, 236, 199, 0.4);
+  background: rgba(110, 236, 199, 0.08);
+  color: #6eecc7;
+}
+
+.ghost-button:hover {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.09);
+  color: #f0f6f4;
+}
+
+.ghost-button.is-selected:hover {
+  border-color: rgba(110, 236, 199, 0.55);
+  background: rgba(110, 236, 199, 0.14);
+  color: #8cf0d4;
 }
 
 .case-wrap {
@@ -264,6 +300,9 @@ h1 {
 .top-actions {
   display: flex;
   gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 0;
 }
 
 .primary-button {
@@ -1951,7 +1990,7 @@ h1 {
 
 .drop-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -1980,6 +2019,18 @@ h1 {
   transform: translateY(-1px);
 }
 
+.drop-zone.has-file {
+  border-color: rgba(110, 236, 199, 0.45);
+  border-style: solid;
+  background:
+    linear-gradient(135deg, rgba(110, 236, 199, 0.1), rgba(255, 255, 255, 0.03)),
+    rgba(7, 11, 13, 0.5);
+}
+
+.drop-zone.has-file strong {
+  color: #6eecc7;
+}
+
 .drop-zone svg {
   color: #6eecc7;
 }
@@ -1992,6 +2043,10 @@ h1 {
   color: #92a09c;
   font-size: 11px;
   line-height: 1.45;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .readiness-card {
@@ -2255,6 +2310,60 @@ h1 {
   min-height: 32px;
   padding: 7px 10px;
   font-size: 12px;
+}
+
+.export-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.export-format-select {
+  height: 40px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(110, 236, 199, 0.2);
+  background: rgba(14, 17, 20, 0.6);
+  color: #ecf4f1;
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+}
+
+.export-format-select:focus {
+  border-color: #6eecc7;
+}
+
+.export-format-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.export-format-buttons button {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 34px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(110, 236, 199, 0.15);
+  background: rgba(14, 17, 20, 0.4);
+  color: #c8d6d0;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.export-format-buttons button:hover {
+  background: rgba(110, 236, 199, 0.1);
+  border-color: rgba(110, 236, 199, 0.35);
+  color: #6eecc7;
+}
+
+.export-format-buttons button svg {
+  flex: 0 0 auto;
 }
 
 .file-meta strong {
@@ -2813,6 +2922,10 @@ h1 {
   .drop-grid,
   .tool-help-strip {
     grid-template-columns: 1fr;
+  }
+
+  .topbar > div:first-child {
+    min-width: 0;
   }
 
   .top-actions {

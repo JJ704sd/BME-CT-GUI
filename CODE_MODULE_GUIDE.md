@@ -8,10 +8,11 @@
 2. 到 `src/components/OrthogonalViewer.tsx` 讲三正交视图如何联动，以及本轮 `requestAnimationFrame` 合并渲染如何缓解快速鼠标移动卡帧。
 3. 到 `src/imaging/voxelMapping.ts` 和 `src/imaging/sliceRenderer.ts` 讲体素坐标、切片坐标、方向映射和 canvas 切片渲染缓存。
 4. 到 `src/inference/inferenceClient.ts` 讲前端如何创建 job、监听 SSE、下载结果。
-5. 到 `server/main.py` 和 `server/persistent_nnunet_worker.py` 讲 FastAPI 后端如何桥接 nnUNetv2、管理任务、缓存和 validation。
-6. 到 `server/taxonomy.py` 讲跨数据集标签 taxonomy 检测与自动重映射：FLARE22 标签定义、器官名别名映射、`detect_dataset()` 自动识别数据集来源、`build_remap_mapping()` 按器官名建立 ID 映射、`apply_remap()` 用查找表重排参考标签数组。
-7. 到 `tools/segmentation_metrics_summary.py` 讲 Dice、IoU、Voxel Accuracy 和 Hausdorff Distance 指标如何离线复算。
-8. 最后用 `tests/` 和文档说明验收边界：AMOS 原生 validation 与 FLARE22 自动 taxonomy-remap validation 的区别。
+5. 到 `src/report/exportReport.ts` 讲报告导出：HTML/JSON/PDF 三种格式、自包含 HTML 模板和数据收集。
+6. 到 `server/main.py` 和 `server/persistent_nnunet_worker.py` 讲 FastAPI 后端如何桥接 nnUNetv2、管理任务、缓存和 validation。
+7. 到 `server/taxonomy.py` 讲跨数据集标签 taxonomy 检测与自动重映射：FLARE22 标签定义、器官名别名映射、`detect_dataset()` 自动识别数据集来源、`build_remap_mapping()` 按器官名建立 ID 映射、`apply_remap()` 用查找表重排参考标签数组。
+8. 到 `tools/segmentation_metrics_summary.py` 讲 Dice、IoU、Voxel Accuracy 和 Hausdorff Distance 指标如何离线复算。
+9. 最后用 `tests/` 和文档说明验收边界：AMOS 原生 validation 与 FLARE22 自动 taxonomy-remap validation 的区别。
 
 ## 2. 前端入口：`src/main.tsx`
 
@@ -28,6 +29,7 @@
 - 管理 axial 预览：右侧文件卡片和底部切片时间轴使用 `renderCachedAxialNiftiSliceToDataUrl()`，复用 `src/imaging/sliceRenderer.ts` 的切片缓存，避免重复 canvas toDataURL。
 - 管理窗预设联动：`applyWindowPreset()` 切换窗宽窗位时同步设置 `activePresetId` 和 `highlightedOrganIds`；`presetOrganMap` 映射预设到关联器官 ID 列表；`highlightTimerRef` / `presetToastTimerRef` 防止快速点击堆叠定时器。
 - 管理模型信息展示：`modelOptions` 显示当前可用模型（AMOS22 腹部器官分割），下方 `.organ-category-grid` 按系统分类展示覆盖的 15 个器官。
+- 管理报告导出：`handleExport()` 收集当前病例、模型、推理、验证、器官、测量、时间线等状态组装 `ReportData`，调用 `exportReport()` 生成 HTML/JSON/PDF 报告。`selectedExportFormat` 控制导出格式。
 
 本轮性能相关改动：
 
@@ -143,7 +145,25 @@
 - `shouldUpdateVoxelCoord()` 是本轮性能优化的基础小工具，用于阻止重复坐标更新。
 - `getVoxelCoordDragCommit()` 用于三视图拖动时的坐标裁剪、去重和 axial selected slice 推导，避免把该逻辑写死在 React 事件处理里。
 
-## 8. 后端桥接：`server/main.py`
+## 8. 报告导出：`src/report/exportReport.ts`
+
+该模块负责将分割结果、验证指标、器官列表等信息导出为可分享的报告文件。
+
+主要职责：
+
+- `exportReport(data, format)`：根据格式分发到对应导出函数。
+- `exportHtmlReport(data, printMode)`：生成自包含 HTML 文件（内联 CSS，`@media print` 友好）或打开新窗口触发 `window.print()`。
+- `exportJsonReport(data)`：生成结构化 JSON，加 `schema_version` 和 `report_type` 字段。
+- HTML 报告包含：概览（模型、推理模式、耗时、结果大小）、验证指标（mean/min/foreground Dice、逐标签表）、器官列表（颜色圆点 + 质控分数 + 解剖位置）、关键发现、测量点、推理时间线。
+- `ReportData` 类型聚合前端已有状态：病例、模型、图像、验证、推理、器官、测量、时间线和 AI 发现。
+
+讲解重点：
+
+- PDF 导出不引入第三方库，复用同一 HTML 模板 + 浏览器原生打印。
+- 报告不嵌入 CT 切片截图，避免文件体积膨胀和跨浏览器渲染问题。
+- `downloadFile()` 使用 `Blob` + `URL.createObjectURL` 实现浏览器端文件下载。
+
+## 9. 后端桥接：`server/main.py`
 
 `server/main.py` 是 FastAPI 后端主文件，负责把前端请求转换成本地 nnUNetv2 推理任务。
 
@@ -167,7 +187,7 @@
 - 自动 validation 的前提是 label taxonomy 与 checkpoint 原生一致；FLARE22 remap 是离线指标，不是后端自动 validation。
 - 心跳事件的 `heartbeat: true` 字段可用于前端区分心跳和真正的阶段进度；心跳失败不会中断推理。
 
-## 9. 常驻推理 worker：`server/persistent_nnunet_worker.py`
+## 10. 常驻推理 worker：`server/persistent_nnunet_worker.py`
 
 该脚本承接后端启动的 persistent worker 路径，用于减少部分模型加载开销。
 
@@ -177,7 +197,7 @@
 - persistent worker 对未缓存首轮推理不应被宣传为已验证加速路径；相关限制在 `REVIEW.md` 和 `ACCEPTANCE.md` 中有记录。
 - 常驻 worker 读取响应时使用 `_persistent_worker_reader_thread()` + `queue.Queue` 实现非阻塞读取，超时后自动发送心跳，不阻塞主线程。
 
-## 10. 指标与性能工具
+## 11. 指标与性能工具
 
 相关文件：
 
@@ -189,7 +209,7 @@
 - 指标脚本可以用于 AMOS 原生 label，也可以用于 FLARE22 remapped reference，但文档必须明确区分解释边界。
 - 对外报告时，应优先引用 `SEGMENTATION_METRICS_SUMMARY.md` 中已经整理过的指标，而不是直接引用临时输出。
 
-## 11. 测试结构：`tests/`
+## 12. 测试结构：`tests/`
 
 主要测试：
 
@@ -212,7 +232,7 @@ npm test
 npm run build
 ```
 
-## 12. 本轮性能优化的讲解口径
+## 13. 本轮性能优化的讲解口径
 
 分屏模式说明：
 
@@ -247,7 +267,7 @@ npm run build
 - `npm run build` 通过。
 - 浏览器烟测在 `http://127.0.0.1:5173/` 快速拖动三视图后无控制台错误，三视图图片非空白。
 
-## 13. 数据与文档边界
+## 14. 数据与文档边界
 
 - 真实 NIfTI、checkpoint、推理输出和私有 registry 不提交。
 - `AMOS_0117` 是当前自动 validation 的主要原生标签案例。

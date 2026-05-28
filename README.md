@@ -31,6 +31,7 @@
 - 支持通过"标签 CT 导入"按钮或拖拽上传标签 NIfTI 文件，推理完成后自动执行在线 Dice 验证。当标签 ID 与当前 checkpoint 不一致时（如 FLARE22 vs AMOS22），后端自动检测数据集来源并按器官名重映射标签 ID，validation 结果中 `remap_applied: true` 表示已自动重映射。
 - 持久化 job summary、阶段耗时、结果大小、资源快照和 nnUNetv2 日志尾部。
 - 支持同输入、同 checkpoint、同推理配置的历史结果缓存回填：`cached-real-nnunetv2`。
+- 支持导出分割报告（HTML / JSON / PDF 三种格式），报告包含概览、验证指标、逐标签指标、器官列表、关键发现、测量点和推理时间线。PDF 导出使用浏览器原生打印，不引入第三方 PDF 库。
 
 ## 在线推理速度策略
 
