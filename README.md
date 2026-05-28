@@ -2,7 +2,7 @@
 
 本项目是面向腹部 CT 分割验证流程的本地 GUI 原型。前端使用 React + Vite，后端使用 FastAPI 桥接本机 nnUNetv2 环境，目标是完成 CT 浏览、三正交联动、器官 label 说明、真实模型推理回填、结果下载和验收记录。
 
-截至 2026-05-26，项目已经作为独立 GUI 仓库维护；真实 CT、NIfTI、checkpoint 权重和推理输出仍只保留在本机，不提交到 GitHub。
+截至 2026-05-28，项目已经作为独立 GUI 仓库维护；真实 CT、NIfTI、checkpoint 权重和推理输出仍只保留在本机，不提交到 GitHub。
 
 ## 当前状态
 
@@ -11,6 +11,7 @@
 - 后端模式：模型资源齐备时为 `real-nnunetv2`，缺失时为 `unavailable`
 - 当前主要参考病例：AMOS 0117、FLARE22 Tr 0009
 - 当前新权重：`nnunetv2_files/checkpoint_best.pth`
+- 自动 taxonomy remap：已实现，FLARE22 在线验证 mean_dice 从 0.073 提升到 0.926
 - 主要进展和实验记录：见 [REVIEW.md](./REVIEW.md)、[ACCEPTANCE.md](./ACCEPTANCE.md) 与 [SEGMENTATION_EXPERIMENT_COMPARISON.md](./SEGMENTATION_EXPERIMENT_COMPARISON.md)
 - 代码讲解材料：见 [CODE_MODULE_GUIDE.md](./CODE_MODULE_GUIDE.md)
 
@@ -182,7 +183,22 @@ FLARE22 Tr 0009 + 标签上传在线验证：
 | label 2（右肾）Dice | `0.945` |
 | 结论 | 标签传输链路修复成功；Dice 极低是 FLARE22 与 AMOS22 标签 ID 语义错位导致，非模型质量问题。离线 remap 后 mean_dice=0.893。 |
 
-该记录验证了标签文件在线传输和 validation 链路可用；但 taxonomy 错位问题需自动 remap 才能得到有意义的在线指标。
+该记录验证了标签文件在线传输和 validation 链路可用；taxonomy 错位问题已通过自动 remap 解决。
+
+FLARE22 Tr 0009 + 自动 taxonomy remap 在线验证：
+
+| 项目 | 结果 |
+|---|---|
+| job id | `a717dacf42d3` |
+| mode | `real-nnunetv2` |
+| cached_result | `false` |
+| profile | `quality` |
+| remap_applied | `true` |
+| remap_source | `FLARE22` |
+| mean_dice | `0.926` |
+| 验证状态 | `passed` |
+
+自动 taxonomy remap 上线后，FLARE22 标签在线验证从 mean_dice=0.073 提升到 0.926。后端 `server/taxonomy.py` 自动检测 FLARE22 数据集并按器官名重映射标签 ID，无需手动干预。跨数据集在线验证链路正式打通。
 
 ## 三视图拖动体验
 
@@ -235,4 +251,4 @@ python tools/perf_no_cache_persistent.py --inference-profile fast --disable-tta 
 - `fast` profile 会牺牲一部分 nnUNetv2 默认质量设置。AMOS 0117 对照中 fast 明显更快，但 validation 为 `review`，不能作为正式报告结果。
 - 单个新病例的首次未缓存推理仍可能达到分钟级到十几分钟级。
 - 浏览器本身不能启动 Python/FastAPI 后端进程；在线推理前需要本地后端已在 `127.0.0.1:8000` 运行。
-- 当前已有 AMOS 0117 原生标签验收和 FLARE22 Tr 0009 非 AMOS 推理补充（含标签上传在线验证）；新增病例后仍应分别记录三正交显示、label 点击、推理耗时、资源快照和标准答案状态。
+- 当前已有 AMOS 0117 原生标签验收和 FLARE22 Tr 0009 非 AMOS 推理补充（含标签上传在线验证和自动 taxonomy remap）；新增病例后仍应分别记录三正交显示、label 点击、推理耗时、资源快照和标准答案状态。
