@@ -10,4 +10,5 @@
   - `npm --prefix 'D:\BME2026\BME_CT_Seg\segmentation-gui-prototype' test`：退出码 0。
   - `npm --prefix 'D:\BME2026\BME_CT_Seg\segmentation-gui-prototype' run build`：退出码 0，Vite 构建 `1594` 个模块。
   - `git -C 'D:\BME2026\BME_CT_Seg\segmentation-gui-prototype' diff --check`：退出码 0，仅有 Git 行尾转换提示。
-- 当前仍需只 stage 本轮文档与 planning 文件，避免纳入既有 `AGENTS.md`、`CLAUDE.md` 改动。
+- 已提交 `eb475d0 docs: sync segmentation gui status after validation fixes`，并推送到 `origin/main`。
+- 提交范围只包含本轮文档与 `.planning` 文件；既有 `AGENTS.md`、`CLAUDE.md` 改动未纳入提交。

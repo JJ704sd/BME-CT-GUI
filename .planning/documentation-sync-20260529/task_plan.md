@@ -11,7 +11,7 @@
 - [x] 修正文档中过时、混淆或非中文主体说明。
 - [x] 增补 `.planning/` 下一轮候选任务，删除或降级已完成/已过时事项。
 - [x] 运行文档测试、全量测试、构建和 Git whitespace 检查。
-- [ ] 只提交本轮文档与 planning 变更并推送到 `origin/main`。
+- [x] 只提交本轮文档与 planning 变更并推送到 `origin/main`。
 
 ## 边界
 
