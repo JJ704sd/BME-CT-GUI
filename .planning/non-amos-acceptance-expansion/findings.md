@@ -2,7 +2,7 @@
 
 ## 当前证据
 
-- 活动基线为 `main`，历史提交 `838e77e merge selectable inference profiles`。
+- 活动基线为 `main`，当前提交 `dafe400 fix: close segmentation validation regressions`。
 - tracked 的 `reference_cases.example.json` 只作为公开示例；真实非 AMOS 病例通过被忽略的本地 registry 管理。
 - `.gitignore` 已排除 `nnunetv2_files/`、`.test-output/`、`server/work/`、`*.nii`、`*.nii.gz`、`*.pth` 和 `*.pt`。
 - 当前可复用的非 AMOS 证据主要是 FLARE22 Tr 0009：未上传标签时 registry 中 `validation_available=false`，上传标签后可通过自动 taxonomy remap 在线 validation。
@@ -21,6 +21,7 @@
 - 2026-05-26 的 FLARE22 Tr 0009 `quality` 在线推理成功，job `86b0153d0a73`，耗时 `237.323s`，结果大小 `120761` bytes。
 - 离线按器官名 remap 后，FLARE22 Tr 0009 指标为 mean Dice `0.893127`，foreground Dice `0.949908`，min Dice `0.673730`。
 - 2026-05-28 自动 taxonomy remap 上线后，FLARE22 Tr 0009 上传标签在线 validation 通过，job `a717dacf42d3`，mean Dice `0.926`，`remap_applied=true`。
+- 2026-05-29 自动 remap 支持至少两个明确错位 label 的 FLARE22 部分标签；单 label 文件仍需要显式数据集 hint 或人工判断。
 
 ## 风险
 
@@ -28,6 +29,7 @@
 - 私有数据路径容易在复制命令时泄漏到文档；公开文档应使用 case id、dataset 和脱敏说明。
 - 跨数据集 remap 后的指标不能与 AMOS 原生标签指标混算。
 - 首次未缓存推理可能持续数分钟到十几分钟；缓存命中必须单独记录。
+- 缓存命中不能复用缓存来源 job 的 validation；同一 CT 换标签时必须重新计算指标或标记为无当前标签。
 
 ## 待确认问题
 

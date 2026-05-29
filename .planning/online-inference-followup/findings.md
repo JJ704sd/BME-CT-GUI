@@ -2,7 +2,7 @@
 
 ## 已确认的证据
 
-- 最新已推送 main 提交：`838e77e merge selectable inference profiles`。
+- 最新已推送 main 提交：`dafe400 fix: close segmentation validation regressions`。
 - 可选推理 profile 工作已从 `codex/update-ct-gui-prototype` 合并到 `main`，旧分支不再作为当前规划基线。
 - fast 无缓存运行：
   - 运行目录：`.test-output\perf-fast-profile-20260525-1305`
@@ -44,6 +44,7 @@
 - `.test-output`、`nnunetv2_files` 和 `server/work` 不得提交。
 - Cache key 必须包含 checkpoint 身份和最终生效的推理参数。
 - 旧 AMOS 缓存只有在 `job_summary.json` 中存在匹配 `cache_key` 时才可复用。
+- 缓存命中后的 Dice/validation 必须按当前请求标签重新计算；不能沿用缓存来源 job 的旧指标。
 
 ## 待确认问题
 
@@ -55,3 +56,9 @@
 
 - 自动 taxonomy remap 已让 FLARE22 标签上传后的在线验证可解释，job `a717dacf42d3` mean Dice 为 `0.926`。
 - 后续在线推理规划应同时关注性能、远程部署和跨数据集评估解释，不再重复实现 profile 选择。
+
+## 2026-05-29 补记
+
+- 预测缓存和 validation 语义已拆开：缓存命中仍能快速回填 NIfTI，但当前标签的 Dice 需要重新计算。
+- persistent worker 的 stdout reader 改为共享队列；后续仍需真实无缓存连续推理对照来评估速度。
+- 上传文件名调试日志已移除，后续标签链路排查依赖 job state、`label_path` 和 validation summary。

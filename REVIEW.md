@@ -2007,10 +2007,9 @@ FLARE22 label ID 与当前 AMOS22 checkpoint 不一致：
 3. **推理前提醒**
    - `startSegmentation()` 中 `labelFile` 为 null 时，显示 toast 提示"未选择标签 CT，推理完成后不会自动计算 Dice"。
 
-4. **前后端调试日志**
-   - 前端 `console.log` 记录 `labelFile` 的 name 和 size。
-   - `src/inference/inferenceClient.ts` 记录 `label_file` 是否 append 到 FormData。
-   - 后端 `server/main.py` 的 `create_job()` 记录接收到的 `file.filename` 和 `label_file.filename`。
+4. **前后端临时排查日志**
+   - 当时临时在前端、inference client 和后端记录标签文件是否进入提交链路，用于确认后端服务是否加载了最新代码。
+   - 这些日志会暴露上传文件名，只作为 2026-05-27 的短期排查手段；2026-05-29 已在第 47 节移除。
 
 5. **后端重启修复**
    - 添加调试日志并重启后端服务后，`label_path` 从 `null` 变为非空，标签文件正确保存到 `job_dir / "label" / f"{job_id}_label.nii.gz"`。
@@ -2046,7 +2045,7 @@ job `bf20f0ec4456`（FLARE22 Tr 0009 + 标签上传）：
 
 - 标签文件传输 bug 的根因可能是后端服务未重启导致的代码变更未生效，而非纯粹的前端逻辑错误。
 - taxonomy 错位是独立问题，需要 Phase 1（自动 remap）才能解决。
-- 保留 `console.log` 调试日志两周，观察标签传输是否再次出现 null。
+- 2026-05-29 已移除上传文件名调试日志；后续观察标签链路改为检查 job state、`label_path`、validation summary 和测试覆盖。
 - 本轮不改变 nnUNetv2 推理参数或 validation 规则。
 
 ## 43. 自动 Taxonomy Remap 实现与跨数据集在线验证打通
@@ -2336,6 +2335,29 @@ job `a717dacf42d3`（FLARE22 Tr 0009 + 自动 taxonomy remap）：
 - validation 是当前请求上下文的一部分，不再作为预测缓存的一部分复用。
 - 本轮没有运行真实长耗时 persistent worker 推理；已完成协议层和后端 reader 层 smoke，真实性能仍需单独用小病例或专门性能任务验证。
 - 部分标签 remap 只处理至少两个明确错位 label 的情况；单 label 文件仍需人工判断或后续引入显式数据集 hint。
+
+---
+
+## 48. 2026-05-29 文档现状同步与下一轮规划
+
+### 48.1 范围
+
+本轮不改动产品代码，核对用户指定的 7 份项目文档和 `.planning/` 规划目录，使说明符合第 47 节修复后的 GUI 现状。
+
+### 48.2 同步内容
+
+- `README.md`：更新项目日期、预测缓存与当前 validation 的边界、`label_file` API 字段、persistent worker smoke 边界和部分 FLARE22 remap 限制。
+- `ACCEPTANCE.md`：新增 2026-05-29 历史 bug 收口验收记录，并修正 2026-05-27 标签传输段落中的临时调试日志口径。
+- `CODE_MODULE_GUIDE.md`：更新后端 validation/cache 讲解、常驻 worker 共享 reader、测试覆盖和 FLARE22 部分标签边界。
+- `SEGMENTATION_RECENT_ROUNDS.md`：把最近更新改为 2026-05-29，移除保留 `console.log` 的待办，并新增缓存 validation 语义收口。
+- `SEGMENTATION_METRICS_SUMMARY.md` 与 `SEGMENTATION_EXPERIMENT_COMPARISON.md`：补充 2026-05-29 修复不改变历史指标，但改变后续缓存/validation 解释口径。
+- `.planning/`：更新下一轮候选任务，保留远程推理部署、真实 persistent worker 对照、单 label taxonomy hint、报告 remap 摘要等后续事项。
+
+### 48.3 行为边界
+
+- 文档主体继续保持中文；命令、路径、API 字段、profile、job id 和指标字段保留必要英文。
+- 本轮不修改真实 CT、NIfTI、checkpoint、推理输出或私有 registry。
+- `AGENTS.md`、`CLAUDE.md` 在本轮开始前已有未提交改动，本轮提交不应混入这两个文件。
 
 ---
 

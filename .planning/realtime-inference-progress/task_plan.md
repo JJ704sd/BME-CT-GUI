@@ -2,7 +2,7 @@
 
 **日期：** 2026-05-26  
 **当前分支：** `codex/plan-non-amos-acceptance`  
-**当前基线：** `c4cabfb fix: keep orthogonal drag views live`  
+**实施起点基线：** `c4cabfb fix: keep orthogonal drag views live`；当前主分支已推进到 2026-05-29 的 validation/cache 修复基线。
 **范围：** 点击“运行分割/在线推理”后，在底部“切片与流程日志”区域展示实时推理进度条、当前阶段和阶段日志。  
 **原则：** 不伪造模型内部精确百分比；进度条基于后端 SSE 阶段事件，长时间 nnUNetv2 推理阶段用“运行中/耗时/心跳”表达。
 **实施状态：** 已完成前端底部 progress rail、结构化 `inferenceTimeline`、SSE 阶段日志写入、后端 heartbeat 和文档收尾。后续只保留更细粒度进度展示作为候选增强，不伪造 nnUNetv2 内部 patch 级进度。

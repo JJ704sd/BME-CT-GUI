@@ -2,11 +2,13 @@
 
 **目标：** 在不提交私有影像数据的前提下，用本地非 AMOS CT 病例扩展 GUI 验收证据。
 
-**当前基线：** `main`，提交 `838e77e merge selectable inference profiles`。
+**当前基线：** `main`，提交 `dafe400 fix: close segmentation validation regressions`。
 
 **核心规则：** `quality` 仍是正式验收 profile。`fast` 只能作为预览或对照路径，必须继续标注“需人工复核”。
 
 **2026-05-28 现状：** 自动 taxonomy remap 已实现。FLARE22 这类已知标签体系不再只能归为 `manual-only`；用户上传标签文件后，后端可按器官名重映射并产出在线 validation。跨数据集指标仍必须与 AMOS 原生标签指标分开解释。
+
+**2026-05-29 现状：** 部分 FLARE22 标签在至少两个明确错位 label 时可自动 remap；单 label 文件仍不能自动推断数据集来源。缓存命中只复用预测 NIfTI，当前标签的 validation 必须重新计算。
 
 ## 状态
 
@@ -28,6 +30,7 @@
 - 真实本地病例 registry 放在被忽略的位置，优先使用 `nnunetv2_files/reference_cases.local.json`，再用 `SEGMENTATION_REFERENCE_CASES_JSON` 指向它。
 - `reference_cases.example.json` 只作为公开 schema / example，不写入私有真实路径。
 - 只有当病例有真实标签，且标签语义与 checkpoint 匹配或可通过 `server/taxonomy.py` 自动 remap 时，才记录 Dice、IoU 或 Hausdorff 指标。
+- 对单 label 或 remap 覆盖率不足的病例，先记录为人工复核或显式数据集 hint 待补，不声明自动指标通过。
 - 无标签病例只记录浏览、推理、结果下载、GUI 回填和人工复核。
 - 基准和推理输出保留在 `.test-output/`。
 - 原始模型指标与任何后处理实验指标必须分开。
@@ -88,6 +91,7 @@
 
 - [ ] 对未知数据集显示“无法自动重映射”的 UI 提示。
 - [ ] 对 remap 覆盖率不足的标签显示人工映射建议。
+- [ ] 为单 label 文件增加显式数据集 hint 设计，避免自动误判。
 - [ ] 在报告导出中记录 `remap_applied`、`remap_source` 和关键映射摘要。
 
 ### Phase 3：验收文档更新

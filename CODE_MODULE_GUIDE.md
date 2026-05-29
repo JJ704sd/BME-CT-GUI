@@ -141,7 +141,7 @@
 讲解重点：
 
 - `AMOS_0117` 是有原生 label 的自动 validation 病例。
-- `FLARE22_Tr_0009` 在 `/api/samples` 中 `validation_available=false`，因为内置 registry 不把 FLARE22 标签直接当作 AMOS 原生标签使用。标签文件可通过"标签 CT 导入"上传；2026-05-28 自动 taxonomy remap 上线后，后端会检测 FLARE22 并按器官名重映射，job `a717dacf42d3` 在线 validation mean Dice 为 `0.926`。历史 job `bf20f0ec4456` 的 `0.073` 是 remap 前的 taxonomy 错位示例。
+- `FLARE22_Tr_0009` 在 `/api/samples` 中 `validation_available=false`，因为内置 registry 不把 FLARE22 标签直接当作 AMOS 原生标签使用。标签文件可通过"标签 CT 导入"上传；2026-05-28 自动 taxonomy remap 上线后，后端会检测 FLARE22 并按器官名重映射，job `a717dacf42d3` 在线 validation mean Dice 为 `0.926`。2026-05-29 起，至少两个明确错位 label 的 FLARE22 部分标签也可自动 remap；单 label 文件仍保持保守处理。历史 job `bf20f0ec4456` 的 `0.073` 是 remap 前的 taxonomy 错位示例。
 - `shouldUpdateVoxelCoord()` 是本轮性能优化的基础小工具，用于阻止重复坐标更新。
 - `getVoxelCoordDragCommit()` 用于三视图拖动时的坐标裁剪、去重和 axial selected slice 推导，避免把该逻辑写死在 React 事件处理里。
 
@@ -175,8 +175,8 @@
 - 准备 runtime model，把项目 checkpoint 接入 nnUNetv2 modelfolder 推理。
 - 根据 `inference_profile` 生成 effective options，例如 `quality` / `fast`、TTA、tile step、device。
 - 按当前模型 `dataset.json.file_ending` 规范化上传输入；当前权重要求 `.nii.gz`，因此 `.nii` 原图会被 gzip 成 nnUNetv2 可识别的 `_0000.nii.gz`。
-- 对有 compatible label 的病例执行自动 validation。
-- 对相同输入、相同 checkpoint、相同 options 的任务返回 `cached-real-nnunetv2`。
+- 对有 compatible label 的病例执行自动 validation；用户上传 `label_file` 时，validation 使用本次请求的标签文件。
+- 对相同输入、相同 checkpoint、相同 options 的任务返回 `cached-real-nnunetv2`，但只复用预测 NIfTI；缓存命中后的 validation 按当前请求重新计算或为空，不继承缓存来源 job 的旧指标。
 - 取消运行中任务时，`request_job_cancel()` 会标记 `cancel_requested` 并终止当前子进程；前端通过”取消推理”调用 `/api/segment/jobs/{job_id}/cancel`。
 - 长时间推理期间会定期发送心跳事件：`push_heartbeat()` 每 10 秒通过 SSE 推送当前进度、已耗时和资源快照，避免前端在推理主阶段（如 `20%`）停留时显示停滞。常驻 worker 路径使用 `_read_worker_event_with_heartbeat()` 通过 `queue.Queue` 超时实现非阻塞心跳。
 - 默认推理设备为 `cuda`（`get_predict_device()`），可通过 `SEGMENTATION_DEVICE` 环境变量覆盖。
@@ -184,7 +184,7 @@
 讲解重点：
 
 - `nnunetv2_files/`、`.test-output/`、`server/work/` 都是本地私有或临时输出，不进入 Git。
-- 自动 validation 的前提是 label taxonomy 与 checkpoint 原生一致；FLARE22 remap 是离线指标，不是后端自动 validation。
+- 自动 validation 的前提是 label taxonomy 与 checkpoint 原生一致，或后端能通过 `server/taxonomy.py` 识别并自动 remap。FLARE22 已支持在线自动 remap；部分标签需至少两个明确错位 ID，单 label 文件仍需人工判断或后续显式数据集 hint。
 - 心跳事件的 `heartbeat: true` 字段可用于前端区分心跳和真正的阶段进度；心跳失败不会中断推理。
 
 ## 10. 常驻推理 worker：`server/persistent_nnunet_worker.py`
@@ -195,7 +195,8 @@
 
 - 目前已有实验证明历史结果缓存能显著加速重复演示。
 - persistent worker 对未缓存首轮推理不应被宣传为已验证加速路径；相关限制在 `REVIEW.md` 和 `ACCEPTANCE.md` 中有记录。
-- 常驻 worker 读取响应时使用 `_persistent_worker_reader_thread()` + `queue.Queue` 实现非阻塞读取，超时后自动发送心跳，不阻塞主线程。
+- 常驻 worker 读取响应时使用进程级共享 `_persistent_worker_reader_thread()` + `queue.Queue` 实现非阻塞读取，超时后自动发送心跳，不阻塞主线程。2026-05-29 修复前，复用 worker 时每次读事件都会新建 stdout reader 线程，存在旧线程抢读后续事件的风险；当前 reader 状态会随 worker 进程创建和关闭统一维护。
+- 目前只通过轻量 shutdown smoke 验证 worker 协议和 reader 清理，未重新完成真实长耗时无缓存推理加速验收。
 
 ## 11. 指标与性能工具
 
@@ -220,6 +221,8 @@
 - `tests/backendState.test.py`：后端 job state、cache key、registry、validation 等行为。
 - `tests/backendState.test.py` 覆盖 `.nii` 上传规范化为模型需要的 `.nii.gz`、运行中 job 取消、子进程 terminate 和取消事件记录。
 - `tests/backendState.test.py` 还包含端到端推理流程测试（`test_e2e_inference_flow_create_events_result`），验证创建 job → 执行推理 → 事件序列 → 结果下载的完整链路。
+- `tests/backendState.test.py` 覆盖缓存命中时 validation 不复用旧 job、带当前标签时重新 validation、persistent worker reader 连续读事件、部分 FLARE22 标签 remap 和后端上传文件名日志移除。
+- `tests/imagingLogic.test.ts` 覆盖前端主流程和 inference client 不再包含上传标签文件名调试日志。
 - `tests/segmentationMetrics.test.py`：指标脚本输出。
 - `tests/browserLayout.test.ts` / `tests/layoutRegression.test.ts`：三视图布局和响应式约束。
 - `tests/browserLayout.test.ts` 覆盖底部实时进度 rail 的桌面/移动布局，避免压缩三视图或产生横向溢出。
@@ -271,5 +274,5 @@ npm run build
 
 - 真实 NIfTI、checkpoint、推理输出和私有 registry 不提交。
 - `AMOS_0117` 是当前自动 validation 的主要原生标签案例。
-- `FLARE22_Tr_0009` 已完成真实 `quality` 在线推理，且标签文件传输链路已打通（job `bf20f0ec4456`），但因 taxonomy 错位导致在线 Dice 无意义。离线 remap 后 mean_dice=0.893。
-- 任何后续新增病例都应先判断 label taxonomy，再决定是否允许后端自动 validation。
+- `FLARE22_Tr_0009` 已完成真实 `quality` 在线推理、标签上传在线 validation 和自动 taxonomy remap 验证。remap 前 job `bf20f0ec4456` 的 Dice 低是 taxonomy 错位历史证据；remap 后 job `a717dacf42d3` mean Dice 为 `0.926`。
+- 任何后续新增病例都应先判断 label taxonomy，再决定是否允许后端自动 validation；未知数据集和单 label 文件不能自动声明模型质量通过。

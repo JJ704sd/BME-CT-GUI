@@ -2,7 +2,7 @@
 
 > 本文档按时间滚动覆写，只保留最近三轮成功推理的数据。历史完整记录见 `SEGMENTATION_EXPERIMENT_COMPARISON.md`。
 
-最近更新：2026-05-28
+最近更新：2026-05-29
 
 ## 第 1 轮（最新）— FLARE22 + 自动 Taxonomy Remap 在线验证
 
@@ -118,7 +118,7 @@
 
 ### 问题 1：FLARE22 taxonomy 错位导致 Dice 无意义 ✅ 已解决
 
-**现状：** 2026-05-28 实现自动 taxonomy remap。后端 `server/taxonomy.py` 自动检测 FLARE22 数据集并按器官名重映射标签 ID，job `a717dacf42d3` 在线验证 mean_dice=0.926，验证通过。
+**现状：** 2026-05-28 实现自动 taxonomy remap。后端 `server/taxonomy.py` 自动检测 FLARE22 数据集并按器官名重映射标签 ID，job `a717dacf42d3` 在线验证 mean_dice=0.926，验证通过。2026-05-29 补充支持至少两个明确错位 label 的 FLARE22 部分标签 remap；单 label 文件仍保持人工判断边界。
 
 ### 问题 2：GUI 评估面板对跨数据集结果的展示 ✅ 已解决
 
@@ -133,11 +133,18 @@
 **行动：**
 - 考虑 `fast` profile 作为默认预览模式（耗时 ~384s）
 - 调查 `tile_step_size` 对耗时和质量的影响
-- 确认 persistent worker 是否能改善连续推理
+- 单独设计真实连续无缓存推理对照，确认 persistent worker 是否改善第二个不同输入的等待时间；2026-05-29 只完成 reader 复用修复和轻量 smoke，不能写成已验证加速
 
-### 问题 4：标签文件传输稳定性观察
+### 问题 4：标签文件传输稳定性观察 ✅ 已收口
 
-**现状：** 通过新增拖拽支持和调试日志，标签文件现在能正确传输。自动 taxonomy remap 已上线。
+**现状：** 标签上传入口、FormData `label_file`、后端保存路径和在线 validation 已有回归覆盖。2026-05-29 已移除前后端上传文件名调试日志，避免病例文件名泄露到控制台或 stdout。
 
 **行动：**
-- 保留 `console.log` 调试日志一段时间，观察是否再次出现
+- 后续观察改为检查 job summary、`label_path` 和 validation 结果，不再依赖 `console.log`。
+
+### 问题 5：缓存命中 validation 语义 ✅ 已解决
+
+**现状：** 2026-05-29 修复后，`cached-real-nnunetv2` 只表示预测 NIfTI 复用。缓存命中时如果当前请求带标签文件，会重新 validation；如果没有当前标签且不是内置参考病例，则不返回旧 validation。
+
+**行动：**
+- 文档和验收记录中继续把“预测缓存”和“validation 当前请求上下文”分开描述。

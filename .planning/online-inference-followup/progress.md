@@ -28,7 +28,7 @@
 ## 2026-05-25 main 基线收口
 
 - 确认当前活动分支为 `main`，跟踪 `origin/main`。
-- 确认可选推理 profile 工作已合并并推送，提交为 `838e77e merge selectable inference profiles`。
+- 确认可选推理 profile 工作当时已合并并推送，提交为 `838e77e merge selectable inference profiles`；当前主分支基线见 2026-05-29 补记。
 - 更新后续计划，让剩余工作从基准记录纪律、后处理实验门禁和更广泛参考病例验证开始，而不是重复 Phase 1。
 - 计划运行基线验证：
   - `npm test`
@@ -42,3 +42,9 @@
 
 - 将本规划文件主体改为中文，保留必要英文技术字段和命令名。
 - 补充自动 taxonomy remap、报告导出和远程部署作为下一轮在线推理相关背景。
+
+## 2026-05-29 历史 bug 收口补记
+
+- 当前主分支基线为 `dafe400 fix: close segmentation validation regressions`。
+- 预测缓存和 validation 语义已拆开：缓存命中仍能快速回填 NIfTI，但当前标签的 Dice 需要重新计算。
+- persistent worker 的 stdout reader 改为共享队列；后续仍需真实无缓存连续推理对照来评估速度。

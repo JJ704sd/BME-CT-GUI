@@ -1,6 +1,6 @@
 # 三大目标验收包
 
-本文档用于把当前 GUI 的三个目标从”功能接近完成”推进到”可复现验收”。当前证据包含 AMOS 0117 原生标签验证，以及 FLARE22 Tr 0009 的非 AMOS 在线推理和 taxonomy-remap 指标。2026-05-28 实现自动 taxonomy remap 后，FLARE22 在线验证已能自动重映射标签 ID 并得到有意义的跨数据集指标（job `a717dacf42d3`，mean_dice=0.926，验证通过）。
+本文档用于把当前 GUI 的三个目标从”功能接近完成”推进到”可复现验收”。当前证据包含 AMOS 0117 原生标签验证，以及 FLARE22 Tr 0009 的非 AMOS 在线推理和 taxonomy-remap 指标。2026-05-28 实现自动 taxonomy remap 后，FLARE22 在线验证已能自动重映射标签 ID 并得到有意义的跨数据集指标（job `a717dacf42d3`，mean_dice=0.926，验证通过）。2026-05-29 已收口缓存 validation、persistent worker reader、上传文件名调试日志和部分 FLARE22 标签 remap 的历史风险。
 
 ## 目标 1：CT 可浏览、三正交可联动
 
@@ -88,7 +88,7 @@
 - 模型配置完整时，后端可创建真实 nnUNetv2 job。
 - 模型配置不完整时返回明确错误，不创建假成功流程。
 - 上传 `.nii` 或 `.nii.gz` 原图时，后端输入目录中的文件名必须符合当前模型 `dataset.json.file_ending`，避免 nnUNetv2 报 `There are 0 cases in the source folder`。
-- `cached-real-nnunetv2` 只能表示历史缓存回填，不能代替未缓存真实推理性能。
+- `cached-real-nnunetv2` 只能表示历史预测结果缓存回填，不能代替未缓存真实推理性能；validation 必须按本次请求的标签文件或内置参考标签重新计算，无当前标签时不得复用缓存来源 job 的旧 Dice。
 - SSE 文本进度和 NIfTI 二进制结果保持分离。
 - GUI 底部进度条必须来自 SSE 阶段事件，不得把前端估算动画写成真实 nnUNetv2 内部进度。
 - 长时间推理期间后端应定期发送心跳事件（`heartbeat: true`），前端更新已耗时和资源快照，避免界面显示停滞。
@@ -109,7 +109,7 @@ $env:SEGMENTATION_REFERENCE_CASES_JSON = "D:\BME2026\BME_CT_Seg\segmentation-gui
 $env:SEGMENTATION_DEVICE = "cuda"   # 可选，默认已是 cuda
 $env:SEGMENTATION_PREPROCESS_WORKERS = "2"
 $env:SEGMENTATION_EXPORT_WORKERS = "2"
-$env:SEGMENTATION_PERSISTENT_WORKER = "1"
+$env:SEGMENTATION_PERSISTENT_WORKER = "1"  # 可选实验路径；正式速度结论仍以未缓存实测为准
 python -m uvicorn server.main:app --host 127.0.0.1 --port 8000
 ```
 
@@ -477,9 +477,9 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\checkpoint_best.
 
 | 检查项 | 结果 |
 |---|---|
-| 根因 | `UploadRole` 类型不包含 `"label"`，拖拽不支持标签文件；后端服务需重启以加载新增调试日志代码。 |
+| 根因 | `UploadRole` 类型不包含 `"label"`，拖拽不支持标签文件；当时还通过临时上传文件名日志确认后端服务是否加载了新代码。 |
 | 前端修复 | `UploadRole` 扩展为 `"source" | "result" | "label"`；`processVisualizationFile()` 增加 label 分支；数据操作面板新增"标签 CT 导入"拖放区域。 |
-| 后端修复 | `create_job()` 增加调试日志 `print(f"[create_job] received file=..., label_file=...")`，重启后标签文件正常传输。 |
+| 后端排查 | 曾临时在 `create_job()` 打印接收文件信息，重启后标签文件正常传输；该类上传文件名调试日志已在 2026-05-29 移除，不再作为当前运行要求。 |
 | 在线验证 | job `bf20f0ec4456`：`label_path` 非空，validation 执行成功，标签文件 131 KB 正确保存。 |
 | taxonomy 错位 | FLARE22 label ID 与 AMOS22 checkpoint 语义完全不同，仅 label 2（右肾）一致 Dice=0.945，其余错位 Dice≈0。 |
 | 离线 remap | 器官名重映射后 mean_dice=0.893, min_dice=0.674, fg_dice=0.950。 |
@@ -516,3 +516,29 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\checkpoint_best.
 - 自动 remap 解决的是标签 ID 语义错位，不改变 nnUNetv2 模型输出本身。
 - FLARE22 自动 remap 是跨数据集在线验证证据，仍不能和 AMOS 0117 原生标签指标无条件混算。
 - 当前已知 remap 来源以 FLARE22 为主；新增数据集前应先补充标签表、别名映射、测试和验收记录。
+
+## 2026-05-29 历史 bug 收口验收记录
+
+范围：
+
+- 修复缓存命中时可能复用旧 `validation` 的风险。
+- 修复 `SEGMENTATION_PERSISTENT_WORKER=1` 路径中 stdout reader 线程可能竞争消费事件的问题。
+- 移除前后端上传文件名调试日志，避免病例文件名进入浏览器控制台或后端 stdout。
+- 扩展 FLARE22 自动 taxonomy remap：部分标签在至少两个明确错位 ID 时也可自动识别；单 label 文件仍保持人工判断边界。
+
+验收证据：
+
+| 检查项 | 结果 |
+|---|---|
+| 缓存 validation | 缓存命中只复用预测 NIfTI；当前请求带 `label_file` 时重新 validation，无当前标签且非内置参考病例时 `validation=null`。 |
+| persistent worker reader | 后端为每个 worker 进程维护共享 stdout reader 和 `queue.Queue`，连续读取事件不再新建多个 reader 线程。 |
+| 调试日志 | `src/main.tsx`、`src/inference/inferenceClient.ts`、`server/main.py` 中上传文件名日志已移除。 |
+| 部分标签 remap | FLARE22 `{1, 3}` 这类至少两个明确错位 label 可触发 remap；单个 label ID 不自动推断来源。 |
+| 自动验证 | `node tests/imagingLogic.test.ts`、`python tests/backendState.test.py`、`npm test`、`npm run build` 已在代码修复轮通过。 |
+| worker smoke | 轻量启动 `server/persistent_nnunet_worker.py` 并发送 shutdown，收到 `bye` 且进程退出码为 `0`。 |
+
+行为边界：
+
+- 本轮没有运行真实长耗时 persistent worker 推理；当前只能说明协议和 reader 复用路径稳定性改善，不能写成已验证加速。
+- 预测缓存仍按输入 CT、checkpoint 和推理配置复用；标签文件不进入预测 cache key，但 validation 不再随预测缓存复用。
+- 部分标签 remap 的目标是避免明显 FLARE22 子集被误判为 AMOS 原生标签；未知数据集和单 label 文件仍需要显式数据集 hint 或人工复核。

@@ -1,6 +1,6 @@
 # 分割实验对比
 
-生成日期：2026-05-26
+生成日期：2026-05-29
 
 本文档汇总历史分割实验记录，便于横向比较。它与 `SEGMENTATION_METRICS_SUMMARY.md` 配套使用：后者记录当前指标摘要和命令上下文，本文保留跨轮次对比表。
 
@@ -23,6 +23,7 @@
 - FLARE22 Tr 0009 使用离线器官名映射，把 FLARE22 label 映射到 AMOS label ID。它可以作为跨数据集证据，但不能直接和 AMOS 原生验证混算。
 - `N/A` 表示该标签在预测和参考中均为空。`0.000000` 表示参考中没有该标签，但预测产生了体素。
 - 2026-05-26 的在线推理输入后缀规范化和底部实时进度展示属于工程链路修复，不改变下列历史实验的 Dice、IoU、Hausdorff Distance 或耗时数值。
+- 2026-05-29 的缓存 validation 修复、persistent worker reader 修复、上传文件名日志移除和部分 FLARE22 标签 remap 增强也不改变下列表格中的历史数值。当前语义下，`cached-real-nnunetv2` 只代表预测结果复用；validation 仍必须按当前请求的标签文件或内置参考标签重新计算。
 
 ## 实验名称说明
 
@@ -45,10 +46,10 @@
 | 运行 | Job ID | 病例 | 推理配置/模式 | 状态 | 是否缓存 | 耗时（秒） | 平均 Dice | 最低 Dice | 前景 Dice | 平均 IoU | 体素准确率 | 平均 HD（mm） |
 |---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
 | 旧模型首跑 | `32dfe3117b40` | AMOS 0117 | real-nnUNetv2 | review | false | 359.425 | 0.891305 | 0.555910 | 0.971220 | N/A | N/A | N/A |
-| 旧模型首跑缓存 | `c8cecb040657` | AMOS 0117 | cached-real-nnUNetv2 | review | true | 0.000 | 0.891305 | 0.555910 | 0.971220 | N/A | N/A | N/A |
+| 旧模型首跑缓存 | `c8cecb040657` | AMOS 0117 | cached-real-nnunetv2 | review | true | 0.000 | 0.891305 | 0.555910 | 0.971220 | N/A | N/A | N/A |
 | 旧模型常驻 | `a4b3806cfe1f` | AMOS 0117 | real-nnUNetv2 | review | false | 356.950 | 0.891327 | 0.555985 | 0.971222 | N/A | N/A | N/A |
 | 新权重首跑 | `27216eb73220` | AMOS 0117 | real-nnUNetv2 | passed | false | 1124.327 | 0.924791 | 0.846551 | 0.980316 | 0.865105 | 0.998578 | 7.716048 |
-| 新权重缓存 | `f200f16f47be` | AMOS 0117 | cached-real-nnUNetv2 | passed | true | 0.000 | 0.924791 | 0.846551 | 0.980316 | N/A | N/A | N/A |
+| 新权重缓存 | `f200f16f47be` | AMOS 0117 | cached-real-nnunetv2 | passed | true | 0.000 | 0.924791 | 0.846551 | 0.980316 | N/A | N/A | N/A |
 | 新权重补算 | `685426290aa4` | AMOS 0117 | real-nnUNetv2 | timeout 后补算指标可用 | false | >=1800.785 | 0.924782 | 0.846540 | 0.980316 | 0.865092 | 0.998578 | 7.716048 |
 | 快速预览 | `6802e01f1a73` | AMOS 0117 | fast, TTA off | review | false | 384.345 | 0.777243 | 0.000000 | 0.972898 | 0.713592 | 0.998068 | 10.282058 |
 | 正式质量 | `b3c528cc9e20` | AMOS 0117 | quality, TTA on | passed | false | 1360.398 | 0.924780 | 0.846569 | 0.980317 | 0.865088 | 0.998578 | 7.716048 |
@@ -308,6 +309,14 @@
 - `server/taxonomy.py` 实现 FLARE22 数据集检测和按器官名重映射。
 - `quality`、`fast`、FLARE22 离线 remap 的对比口径不变；FLARE 自动 remap 作为跨数据集在线验证的新基线。
 
+## 2026-05-29 历史 bug 收口审核记录
+
+- 缓存命中不再继承缓存来源 job 的 `validation`；预测 NIfTI 仍可复用，但 Dice 由本次请求的 `label_file` 或内置 AMOS 参考标签重新计算。
+- `SEGMENTATION_PERSISTENT_WORKER=1` 的 stdout reader 改为进程级共享队列，并通过轻量 shutdown smoke；真实长耗时连续推理加速仍未验证。
+- 前端和后端上传文件名调试日志已移除，文档不再要求保留 `console.log` 观察标签传输。
+- FLARE22 自动 remap 支持至少两个明确错位 label 的部分标签文件；单 label 文件仍保持人工判断或后续显式数据集 hint。
+- 本轮不改变历史实验指标，仅修正后续解释和验收口径。
+
 ## 推荐基线
 
 | 用途 | 推荐运行 | 原因 |
@@ -317,3 +326,5 @@
 | 演示/快速预览 | `fast` profile `6802e01f1a73` | 明显更快，但必须标注为需复核。 |
 | 跨数据集证据 | FLARE22 remap `86b0153d0a73` | 适合做外部器官名对齐检查，不能用于 AMOS 原生分数声明。 |
 | 跨数据集在线验证 | FLARE 自动 remap `a717dacf42d3` | 自动 taxonomy remap 上线后，在线验证 mean_dice=0.926，验证通过。 |
+
+补充口径：缓存命中耗时只能用于说明预测结果复用速度，不能替代未缓存推理性能；缓存命中后的 validation 也不能直接引用缓存来源 job，必须看当前请求是否有标签文件或内置参考标签。

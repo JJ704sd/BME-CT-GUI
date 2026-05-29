@@ -2,7 +2,7 @@
 
 本项目是面向腹部 CT 分割验证流程的本地 GUI 原型。前端使用 React + Vite，后端使用 FastAPI 桥接本机 nnUNetv2 环境，目标是完成 CT 浏览、三正交联动、器官 label 说明、真实模型推理回填、结果下载和验收记录。
 
-截至 2026-05-28，项目已经作为独立 GUI 仓库维护；真实 CT、NIfTI、checkpoint 权重和推理输出仍只保留在本机，不提交到 GitHub。
+截至 2026-05-29，项目已经作为独立 GUI 仓库维护；真实 CT、NIfTI、checkpoint 权重和推理输出仍只保留在本机，不提交到 GitHub。
 
 ## 当前状态
 
@@ -11,7 +11,7 @@
 - 后端模式：模型资源齐备时为 `real-nnunetv2`，缺失时为 `unavailable`
 - 当前主要参考病例：AMOS 0117、FLARE22 Tr 0009
 - 当前新权重：`nnunetv2_files/checkpoint_best.pth`
-- 自动 taxonomy remap：已实现，FLARE22 在线验证 mean_dice 从 0.073 提升到 0.926
+- 自动 taxonomy remap：已实现，FLARE22 在线验证 mean_dice 从 0.073 提升到 0.926；部分 FLARE22 标签在至少两个明确错位 label 时也可自动识别，单 label 文件仍保持保守处理
 - 主要进展和实验记录：见 [REVIEW.md](./REVIEW.md)、[ACCEPTANCE.md](./ACCEPTANCE.md) 与 [SEGMENTATION_EXPERIMENT_COMPARISON.md](./SEGMENTATION_EXPERIMENT_COMPARISON.md)
 - 代码讲解材料：见 [CODE_MODULE_GUIDE.md](./CODE_MODULE_GUIDE.md)
 
@@ -28,14 +28,14 @@
 - 后端会按当前模型 `dataset.json.file_ending` 规范化输入文件名；当前模型要求 `.nii.gz`，所以 `.nii` 上传会转为 nnUNet 可识别的 `_0000.nii.gz` 输入。
 - 推理运行中可点击”取消推理”，后端会请求终止当前 nnUNetv2 子进程并通过 SSE 回写取消状态。
 - 长时间推理期间后端会定期发送心跳事件（间隔 10 秒），前端底部进度 rail 更新已耗时和资源快照，避免界面显示停滞。
-- 支持通过"标签 CT 导入"按钮或拖拽上传标签 NIfTI 文件，推理完成后自动执行在线 Dice 验证。当标签 ID 与当前 checkpoint 不一致时（如 FLARE22 vs AMOS22），后端自动检测数据集来源并按器官名重映射标签 ID，validation 结果中 `remap_applied: true` 表示已自动重映射。
+- 支持通过"标签 CT 导入"按钮或拖拽上传标签 NIfTI 文件，推理完成后自动执行在线 Dice 验证。当标签 ID 与当前 checkpoint 不一致时（如 FLARE22 vs AMOS22），后端自动检测数据集来源并按器官名重映射标签 ID，validation 结果中 `remap_applied: true` 表示已自动重映射。当前自动检测也覆盖至少两个明确错位 label 的部分 FLARE22 标签；单 label 文件因证据不足仍需人工判断或后续显式数据集 hint。
 - 持久化 job summary、阶段耗时、结果大小、资源快照和 nnUNetv2 日志尾部。
-- 支持同输入、同 checkpoint、同推理配置的历史结果缓存回填：`cached-real-nnunetv2`。
+- 支持同输入、同 checkpoint、同推理配置的历史预测结果缓存回填：`cached-real-nnunetv2`。缓存只复用 NIfTI 预测结果；validation 会按本次请求的标签文件或内置参考标签重新计算，无当前标签时不复用旧 validation。
 - 支持导出分割报告（HTML / JSON / PDF 三种格式），报告包含概览、验证指标、逐标签指标、器官列表、关键发现、测量点和推理时间线。PDF 导出使用浏览器原生打印，不引入第三方 PDF 库。
 
 ## 在线推理速度策略
 
-当前已验证有效的加速路径是历史结果缓存：同一输入、同一 checkpoint、同一模型配置和同一推理参数重复提交时，后端会返回 `cached-real-nnunetv2`，可把重复演示和复核等待时间降到秒级。
+当前已验证有效的加速路径是历史结果缓存：同一输入、同一 checkpoint、同一模型配置和同一推理参数重复提交时，后端会返回 `cached-real-nnunetv2`，可把重复演示和复核等待时间降到秒级。该缓存语义只覆盖预测结果；Dice/validation 仍绑定当前请求上下文，不再从缓存来源 job 继承旧指标。
 
 未缓存首次推理仍主要受 3D full-res sliding-window 计算影响。AMOS 0117 同脚本单次对照中，`quality` 耗时 `1360.398s` 且验证通过；`fast` 耗时 `384.345s`，但 mean Dice 降到 `0.777243`，并对 label 14/15 产生小体积假阳性。因此默认/正式报告应使用 `quality`，`fast` 只能作为快速预览或演示候选。persistent worker 未证明能加速；当前只作为实验路径保留。
 
@@ -57,7 +57,7 @@ $env:SEGMENTATION_TILE_STEP_SIZE='1.0'
 - `SEGMENTATION_DISABLE_TTA`：显式控制是否关闭 mirroring/TTA。
 - `SEGMENTATION_TILE_STEP_SIZE`：控制 sliding-window 步长，允许 `0.1` 到 `1.0`；越大通常越快但重叠更少。
 - `SEGMENTATION_NOT_ON_DEVICE=1`：关闭 `perform_everything_on_device`，主要用于降低显存压力，不保证更快。
-- `SEGMENTATION_PERSISTENT_WORKER=1`：实验开关，仅建议用于性能对照；当前无缓存实验未证明能加速。
+- `SEGMENTATION_PERSISTENT_WORKER=1`：实验开关，仅建议用于性能对照；2026-05-29 已修复复用 worker 时 stdout reader 竞争消费事件的问题，并通过轻量 shutdown smoke，但当前仍没有真实长耗时推理加速证据。
 
 ## 本地运行
 
@@ -224,7 +224,7 @@ FLARE22 Tr 0009 + 自动 taxonomy remap 在线验证：
 - `GET /api/samples`：本地参考病例列表。
 - `GET /api/samples/{sample_id}/original`：下载参考病例原图。
 - `GET /api/samples/{sample_id}/label`：下载参考病例标准答案。
-- `POST /api/segment/jobs`：创建 nnUNetv2 推理任务；表单字段 `inference_profile=quality|fast` 可按任务选择质量/速度配置。
+- `POST /api/segment/jobs`：创建 nnUNetv2 推理任务；表单字段 `inference_profile=quality|fast` 可按任务选择质量/速度配置，`label_file` 可选上传本次 validation 使用的标签 NIfTI。
 - `GET /api/segment/jobs/{job_id}`：查询任务状态、耗时、资源、验证摘要和最终 `inference_options`。
 - `GET /api/segment/jobs/{job_id}/events`：SSE 推理进度；推理期间每 10 秒发送心跳事件（含已耗时和资源快照）；complete 事件包含最终 `inference_options`。
 - `POST /api/segment/jobs/{job_id}/cancel`：请求取消运行中任务。
@@ -251,5 +251,8 @@ python tools/perf_no_cache_persistent.py --inference-profile fast --disable-tta 
 - `confidenceThreshold` 仍是质控提示，不会真实作用于多标签概率图。
 - `fast` profile 会牺牲一部分 nnUNetv2 默认质量设置。AMOS 0117 对照中 fast 明显更快，但 validation 为 `review`，不能作为正式报告结果。
 - 单个新病例的首次未缓存推理仍可能达到分钟级到十几分钟级。
+- 历史缓存只证明预测结果复用；不同标签文件下的 validation 必须以本次请求重新计算，不能把缓存来源 job 的 Dice 当作当前标签结果。
+- persistent worker 的 reader 复用问题已修复并通过轻量 smoke，但真实连续无缓存推理是否更快仍未验证。
+- FLARE22 部分标签自动 remap 需要至少两个明确错位 label；单 label 文件暂不自动推断数据集来源。
 - 浏览器本身不能启动 Python/FastAPI 后端进程；在线推理前需要本地后端已在 `127.0.0.1:8000` 运行。
 - 当前已有 AMOS 0117 原生标签验收和 FLARE22 Tr 0009 非 AMOS 推理补充（含标签上传在线验证和自动 taxonomy remap）；新增病例后仍应分别记录三正交显示、label 点击、推理耗时、资源快照和标准答案状态。

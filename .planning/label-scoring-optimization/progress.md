@@ -7,7 +7,7 @@
 - `processVisualizationFile()` 增加 label 分支
 - 数据操作面板新增标签拖放区域
 - `startSegmentation()` 增加缺失提示
-- 添加前端和后端调试日志
+- 当时添加前端和后端临时排查日志确认标签链路；2026-05-29 已移除上传文件名日志
 - `npm test` + `npm run build` 通过
 
 **验证：**
@@ -46,3 +46,9 @@
 
 **剩余：**
 - 异常指标提示还可继续增强，例如低覆盖率 remap、未知数据集和 per-label 体素差异提示。
+
+## 2026-05-29：标签链路历史风险收口
+
+- 缓存命中不再复用缓存来源 job 的 validation；当前标签文件会重新计算 Dice，无当前标签时不返回旧 validation。
+- FLARE22 部分标签在至少两个明确错位 ID 时可自动 remap；单 label 文件仍保留人工判断边界。
+- 前后端上传文件名日志已移除，后续观察标签链路改为检查 job state、`label_path`、validation summary 和测试覆盖。

@@ -35,6 +35,8 @@ python tools\segmentation_metrics_summary.py `
 - 本轮 checkpoint 定义 15 个前景标签。AMOS 0117 的参考标签实际只出现 label `1..13`；如果预测也没有 label `14/15`，它们记录为 N/A。如果预测出现 label `14/15` 假阳性，则 Dice/IoU 为 `0` 并应纳入 fast/quality 对照判断。
 - 2026-05-26 后端新增输入后缀规范化，确保 `.nii` 上传会按当前模型 `file_ending=.nii.gz` 进入 nnUNetv2；该工程修复不改变本文件既有指标数值。
 - 2026-05-27 标签文件传输修复后，后端在线 custom label validation 已可用。当上传的标签 ID 与 checkpoint 不一致时，`server/taxonomy.py` 会自动检测数据集来源（如 FLARE22）并按器官名重映射 ID，validation 结果中 `remap_applied: true` 表示已自动重映射。
+- 2026-05-29 缓存命中时不再复用缓存来源 job 的 `validation`；预测 NIfTI 可复用，但 Dice/IoU/Hausdorff 必须来自本次请求的标签文件或内置参考标签。
+- 2026-05-29 自动 remap 支持部分 FLARE22 标签：当至少两个共享 ID 明确语义错位且没有原生匹配时可识别为 FLARE22；单 label 文件仍不自动推断数据集来源。
 
 ## 当前 AMOS 基线运行
 
@@ -195,6 +197,7 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\amos_0117(2).nii
 
 - 该记录证明跨数据集在线 validation 链路已打通，但仍是 FLARE22 标签按器官名重映射后的指标，不是 AMOS 原生标签验证。
 - `remap_applied: true` 是解释指标的关键字段；缺少该字段时，不应把 FLARE22 原始 label ID 直接当作 AMOS22 label ID 解读。
+- 当前部分标签自动 remap 只覆盖至少两个明确错位 ID 的情况；只有单个 label ID 的文件仍应记录为人工判断或等待显式数据集 hint。
 
 Checkpoint 元数据：
 
@@ -240,5 +243,7 @@ Checkpoint 元数据：
 
 - 本文档记录的是 AMOS 0117 参考病例上的指标，不代表所有外部 CT 都具备同等效果。
 - 2026-05-27 标签文件传输修复后，后端在线 custom label validation 链路已打通。job `bf20f0ec4456`（FLARE22 + 标签上传）验证了 `label_path` 非空、validation 正常执行。2026-05-28 实现自动 taxonomy remap 后，job `a717dacf42d3` 在线验证 mean_dice=0.926，验证通过。
+- 2026-05-29 修复缓存 validation 语义后，缓存命中的指标不得解释为缓存来源 job 的旧标签结果；同一 CT 换标签文件时，validation 会重新计算。
+- 2026-05-29 移除上传文件名调试日志后，标签链路排查应依赖 job state、`label_path`、validation summary 和测试覆盖，而不是控制台文件名输出。
 - 没有标准标签的病例不能计算 Dice、IoU 或 Hausdorff Distance，只能记录推理耗时、资源快照和人工复核结论。
 - 后续训练权重应保留每次的 JSON 原始输出，并把关键聚合指标追加到本文档。

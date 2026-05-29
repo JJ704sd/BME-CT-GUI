@@ -1,8 +1,8 @@
 # 下一轮候选任务规划
 
-**范围：** 基于 2026-05-28 项目现状，规划下一轮可执行任务。
+**范围：** 基于 2026-05-29 项目现状，规划下一轮可执行任务。
 
-**当前状态：** 三大目标已接近收口：CT 浏览、三正交联动、在线 nnUNetv2 推理、SSE 进度、取消、缓存、标签上传、自动 taxonomy remap、报告导出和主要验收文档均已落地。最新文档刷新记录见 `.planning/documentation-refresh-20260528/`。
+**当前状态：** 三大目标已接近收口：CT 浏览、三正交联动、在线 nnUNetv2 推理、SSE 进度、取消、预测缓存、标签上传、自动 taxonomy remap、报告导出和主要验收文档均已落地。2026-05-29 已修复缓存 validation 复用、persistent worker reader 竞争、上传文件名调试日志和部分 FLARE22 标签 remap 边界。最新文档刷新记录见 `.planning/documentation-sync-20260529/`。
 
 **本轮已完成（2026-05-28）：**
 
@@ -10,6 +10,13 @@
 - UI 布局美化：顶栏 flex 布局、标签名显示优化、拖放区域三列、ghost-button 交互增强。
 - 自动 taxonomy remap：FLARE22 标签在线验证 mean_dice 从 `0.073` 提升到 `0.926`。
 - 文档同步：`README.md`、`ACCEPTANCE.md`、`REVIEW.md`、`SEGMENTATION_EXPERIMENT_COMPARISON.md`、`SEGMENTATION_METRICS_SUMMARY.md`、`SEGMENTATION_RECENT_ROUNDS.md`、`CODE_MODULE_GUIDE.md`、`AGENTS.md` 和 `.planning/`。
+
+**本轮已完成（2026-05-29）：**
+
+- 缓存命中只复用预测 NIfTI，validation 改为按当前请求标签文件或内置参考标签重新计算。
+- persistent worker stdout reader 改为进程级共享队列，并通过轻量 shutdown smoke；真实长耗时加速仍未证明。
+- 前后端上传文件名调试日志已移除，标签链路观察改为依赖 job state、`label_path` 和 validation summary。
+- FLARE22 部分标签在至少两个明确错位 label 时可自动 remap；单 label 文件仍保守处理。
 
 ---
 
@@ -46,7 +53,7 @@
 - 基于体数据层数或体素数，在 UI 中提示预计耗时和推荐 profile。
 - 继续保留 `quality` 为正式报告路径，`fast` 仅作为预览。
 - 评估 `tile_step_size=0.75`、关闭 TTA、`not_on_device` 等参数对耗时和 Dice 的影响。
-- 明确 persistent worker 只作为实验路径，优先优化缓存命中和结果回填体验。
+- 针对 persistent worker 设计真实小病例或第二个不同输入的连续无缓存对照；2026-05-29 reader 修复只证明事件读取稳定，不证明推理更快。
 
 **风险：** 性能参数可能牺牲 Dice；所有速度结论都必须绑定 job id、输入、checkpoint、profile 和指标。
 
@@ -61,6 +68,7 @@
 **候选改进：**
 
 - 对 remap 覆盖率不足或未知标签 ID 给出明确 UI 警告。
+- 为单 label 或少量标签文件增加显式数据集 hint 入口，避免仅凭一个 ID 误判 AMOS 原生标签或 FLARE22 标签。
 - 在 per-label 表格中标出体素量级差异异常、Dice 为 0 的疑似错位标签。
 - 记录 `remap_mapping` 的用户可读摘要，便于报告导出。
 - 为新增数据集建立标签表、别名映射和后端测试模板。
@@ -106,11 +114,11 @@
 ## 推荐执行顺序
 
 1. **远程推理分体部署实施**：最接近交付部署价值，已有部署规划可接续。
-2. **长耗时病例性能策略**：解决 AMOS 大体数据等待时间问题，但必须严守质量口径。
-3. **跨数据集标签评估增强**：建立新增数据集的可解释评估流程。
+2. **长耗时病例性能策略**：解决 AMOS 大体数据等待时间问题；persistent worker 需重新跑真实无缓存对照，不能沿用旧加速假设。
+3. **跨数据集标签评估增强**：优先补单 label 显式数据集 hint、remap 覆盖率提示和报告映射摘要。
 4. **UI 精细化与报告完善**：提升演示和答辩体验。
 5. **多模型支持准备**：等待新模型或新 checkpoint 后再启动。
 
 ---
 
-*更新日期：2026-05-28*
+*更新日期：2026-05-29*

@@ -4,7 +4,7 @@
 
 - 用户提出：点击在线推理按钮后，希望底部结合前后端实现实时推理进度条展示；本轮先按项目实际写规划文档，后续再操作。
 - 已检查当前 Git 状态：工作树起始为干净状态，分支 `codex/plan-non-amos-acceptance`。
-- 已确认当前基线提交：`c4cabfb fix: keep orthogonal drag views live`。
+- 已确认本规划实施起点提交：`c4cabfb fix: keep orthogonal drag views live`；当前主分支已推进到 2026-05-29 的 validation/cache 修复基线。
 - 已梳理前端：
   - `startSegmentation()` 已使用 `EventSource` 监听后端 job events。
   - 现有 `progress`、`inferenceStatus`、`logs` 可作为底部进度条的数据来源。

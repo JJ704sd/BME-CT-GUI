@@ -32,8 +32,15 @@
 - job `a717dacf42d3` 在线 validation mean Dice `0.926`，状态 `passed`。
 - 该进展把 FLARE22 从“只能离线 remap 对照”推进为“可在线 remap validation”，但仍必须与 AMOS 原生标签指标分开解释。
 
+## 2026-05-29 部分标签与缓存 validation 边界
+
+- FLARE22 部分标签在至少两个明确错位 ID 时可自动 remap；单 label 文件仍需要显式数据集 hint 或人工判断。
+- 缓存命中只复用预测 NIfTI，非 AMOS 或自定义标签 validation 必须以当前请求标签重新计算。
+- 相关文档已要求不把缓存回填耗时写成首次未缓存推理耗时，也不把缓存来源 job 的 Dice 当成当前标签结果。
+
 ## 剩余任务
 
 - 为更多非 AMOS 病例补充 registry、人工 GUI 验收和可解释指标。
 - 为未知数据集设计 remap 覆盖率不足时的 UI 提示。
+- 为单 label 文件设计显式数据集 hint 和报告解释字段。
 - 如需公开截图，先确认脱敏和提交边界。

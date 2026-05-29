@@ -4,7 +4,7 @@
 
 **当前分支：** `main`
 
-**当前基线：** commit `838e77e merge selectable inference profiles`
+**当前基线：** commit `dafe400 fix: close segmentation validation regressions`
 
 **核心规则：** `quality` 仍是默认和正式报告路径；`fast` 只是快速预览路径，必须明确标注“需人工复核”。
 
@@ -86,3 +86,9 @@
 
 - 推理 profile 产品化已完成，当前仍沿用 `quality` 正式、`fast` 预览的口径。
 - 后续在线推理重点转为远程 Linux GPU 部署、长耗时病例性能策略和报告/评估细节打磨。
+
+## 2026-05-29 现状补记
+
+- 缓存命中只复用预测结果，不再复用缓存来源 job 的 validation；在线推理文档中必须继续区分预测缓存耗时和当前标签验证结果。
+- persistent worker reader 竞争问题已修复并通过轻量 shutdown smoke；真实连续无缓存推理速度仍需单独任务验证。
+- 上传文件名调试日志已移除，后续线上排查应使用 job id、结构化状态和 `server/work` 输出。
