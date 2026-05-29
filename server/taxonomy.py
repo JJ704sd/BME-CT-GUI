@@ -88,8 +88,6 @@ def detect_dataset(
     if not ckpt_map:
         return None
 
-    ckpt_name_set = set(ckpt_map.values())
-
     best_match: str | None = None
     best_score = 0
 
@@ -111,8 +109,14 @@ def detect_dataset(
         mismatch_count = len(shared_ids) - match_count
 
         # A strong mismatch (most IDs differ) suggests this is the source dataset
-        # because the reference uses different semantics at the same IDs
-        if mismatch_count > match_count and mismatch_count > 2:
+        # because the reference uses different semantics at the same IDs.
+        # Full-label files need several mismatches; partial labels can still be
+        # decisive when all shared IDs disagree.
+        strong_mismatch = (
+            mismatch_count > match_count and
+            (mismatch_count > 2 or (match_count == 0 and mismatch_count >= 2))
+        )
+        if strong_mismatch:
             score = mismatch_count
             if score > best_score:
                 best_score = score

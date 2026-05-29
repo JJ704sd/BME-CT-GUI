@@ -2277,5 +2277,67 @@ job `a717dacf42d3`（FLARE22 Tr 0009 + 自动 taxonomy remap）：
 
 ---
 
-*文档版本：2026-05-28*
+## 47. 2026-05-29 历史 bug 收口：缓存验证、persistent worker、部分标签 remap
+
+### 47.1 范围
+
+本轮针对项目体检中发现的历史遗留风险做收口：
+
+- 缓存命中时不再复用历史 job 的 validation，避免同一 CT 换标签文件后显示旧 Dice。
+- 常驻 nnUNetv2 worker 的 stdout reader 改为进程级共享队列，避免复用 worker 时旧 reader 线程抢读后续事件。
+- 移除前后端上传文件名调试日志，降低病例文件名泄露风险。
+- 放宽 FLARE22 自动 taxonomy remap 的部分标签检测规则：当少量共享 ID 全部语义错位且至少两个 ID 可判定时，也触发自动 remap。
+
+### 47.2 代码变更
+
+1. **缓存 validation 重新计算**
+   - `find_cached_prediction()` 只返回历史预测结果路径和来源 job，不再返回历史 `validation`。
+   - `complete_cached_job()` 命中缓存后按当前请求上下文决定 validation：
+     - 当前请求带 `label_file`：用当前上传标签重新计算。
+     - 当前请求是内置 AMOS 参考病例：用内置标准答案重新计算。
+     - 其他无标签请求：不返回 validation。
+
+2. **persistent worker reader 复用**
+   - 新增进程级 `persistent_worker_event_queue`、`persistent_worker_stdout_thread` 和 `persistent_worker_reader_process`。
+   - `read_persistent_worker_event()` 与 `_read_worker_event_with_heartbeat()` 共用同一个 stdout reader，避免同一 worker 进程被多个临时 reader 竞争消费。
+   - `close_persistent_worker_locked()` 会同步清理 reader 状态。
+
+3. **部分标签 taxonomy remap**
+   - 完整标签仍采用多数 ID 语义错位的判定。
+   - 部分标签在 `match_count == 0` 且 `mismatch_count >= 2` 时视为明确跨数据集错位，可识别为 FLARE22。
+   - 单个 label ID 仍保持保守处理，因为仅凭一个 ID 无法可靠区分 AMOS 原生标签和 FLARE22 标签。
+
+4. **调试日志收口**
+   - 移除 `src/main.tsx`、`src/inference/inferenceClient.ts` 和 `server/main.py` 中会输出上传文件名或标签文件名的调试日志。
+
+### 47.3 测试覆盖
+
+- `tests/backendState.test.py`：
+  - 缓存命中无当前标签时不复用旧 validation。
+  - 缓存命中且有当前标签时重新 validation。
+  - persistent worker stdout reader 可连续读取同一 worker 的多个事件。
+  - 部分 FLARE22 标签 `{1, 3}` 可识别并构建 remap。
+  - 后端源码不再包含上传文件名调试日志。
+- `tests/imagingLogic.test.ts`：
+  - 前端主流程和 inference client 不再包含上传标签文件名调试日志。
+
+### 47.4 验证
+
+- `node tests/imagingLogic.test.ts`：通过。
+- `python tests/backendState.test.py`：通过。
+- persistent worker 轻量 smoke：启动 `server/persistent_nnunet_worker.py`，发送 `shutdown` JSON，收到 `bye` 事件且进程退出码为 `0`。
+- `SEGMENTATION_PERSISTENT_WORKER=1` 开关检查：`persistent_worker_enabled True`。
+- `npm test`：通过。
+- `npm run build`：通过。
+
+### 47.5 行为边界
+
+- 预测缓存仍按输入 CT、checkpoint 和推理配置复用，不因标签文件变化而重跑 nnUNetv2。
+- validation 是当前请求上下文的一部分，不再作为预测缓存的一部分复用。
+- 本轮没有运行真实长耗时 persistent worker 推理；已完成协议层和后端 reader 层 smoke，真实性能仍需单独用小病例或专门性能任务验证。
+- 部分标签 remap 只处理至少两个明确错位 label 的情况；单 label 文件仍需人工判断或后续引入显式数据集 hint。
+
+---
+
+*文档版本：2026-05-29*
 *更新依据：当前 `src/main.tsx`、`src/components/OrthogonalViewer.tsx`、`src/imaging/voxelMapping.ts`、`src/imaging/sliceRenderer.ts`、`src/data/organDetails.ts`、`src/inference/inferenceClient.ts`、`server/main.py`、`server/taxonomy.py`、`server/persistent_nnunet_worker.py`、`server/requirements.txt`、`tools/perf_no_cache_persistent.py`、`README.md`、`ACCEPTANCE.md`、`SEGMENTATION_METRICS_SUMMARY.md`、`SEGMENTATION_EXPERIMENT_COMPARISON.md`、`SEGMENTATION_RECENT_ROUNDS.md`、`reference_cases.example.json`、`tests/*.test.ts` 与本地运行验证结果。*

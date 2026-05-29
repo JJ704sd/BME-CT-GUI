@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import gzip
+import io
 import json
 import os
 import shutil
@@ -100,6 +101,11 @@ def test_create_job_rejects_when_model_is_not_ready():
 
     assert response.status_code == 503
     assert "plans.json" in response.text
+
+
+def test_server_source_does_not_log_uploaded_filenames():
+    source = SERVER_MAIN.read_text(encoding="utf-8")
+    assert "[create_job] received file=" not in source
 
 
 def test_predict_command_uses_model_folder_and_job_io():
@@ -743,11 +749,78 @@ def test_create_job_reuses_cached_prediction_for_matching_cache_key():
     assert state["status"] == "succeeded"
     assert state["cache_key"] == "cache-key-1"
     assert state["cache_source_job_id"] == cached_job_id
-    assert state["validation"] == validation
+    assert state["validation"] is None
     assert server.jobs[body["job_id"]].events[-1]["cached_result"] is True
     assert server.jobs[body["job_id"]].events[-1]["inference_options"]["profile"] == "quality"
+    assert "validation" not in server.jobs[body["job_id"]].events[-1]
     assert result_response.status_code == 200
     assert result_response.content == b"cached-result"
+
+
+def test_cached_prediction_revalidates_against_current_label_file():
+    server = load_server_module()
+    temp_root = make_test_output_dir("cached-jobs-current-label")
+    cached_job_id = "cached0002"
+    cached_output = temp_root / cached_job_id / "output"
+    cached_output.mkdir(parents=True, exist_ok=True)
+    cached_result = cached_output / f"{cached_job_id}.nii.gz"
+    cached_result.write_bytes(b"cached-result")
+    stale_validation = {"status": "review", "message": "stale validation"}
+    current_validation = {"status": "passed", "message": "current label validation"}
+    (cached_output / "job_summary.json").write_text(json.dumps({
+        "job_id": cached_job_id,
+        "status": "succeeded",
+        "progress": 100,
+        "stage": "历史推理结果已生成",
+        "mode": "real-nnunetv2",
+        "result_ready": True,
+        "result_path": str(cached_result),
+        "result_size_bytes": cached_result.stat().st_size,
+        "cache_key": "cache-key-2",
+        "validation": stale_validation,
+    }, ensure_ascii=False), encoding="utf-8")
+
+    def fail_if_started(*_args, **_kwargs):
+        raise AssertionError("cached jobs must not start a real inference thread")
+
+    validated_label_paths: list[Path] = []
+
+    def fake_validate(result_path, label_path, labels):
+        validated_label_paths.append(label_path)
+        assert result_path.name.endswith(".nii.gz")
+        assert labels == [{"label": 1, "id": "spleen"}]
+        return current_validation
+
+    with patch.object(server, "WORK_DIR", temp_root), \
+         patch.object(server, "get_model_state", return_value={
+             "ready": True,
+             "status": "ready",
+             "mode": "real-nnunetv2",
+             "missing": [],
+         }), \
+         patch.object(server, "build_prediction_cache_key", return_value="cache-key-2"), \
+         patch.object(server, "read_labels", return_value=[{"label": 1, "id": "spleen"}]), \
+         patch.object(server, "validate_against_custom_label", side_effect=fake_validate), \
+         patch.object(server.threading, "Thread", side_effect=fail_if_started):
+        client = TestClient(server.app)
+        response = client.post(
+            "/api/segment/jobs",
+            files={
+                "file": ("case_0000.nii.gz", b"same-input", "application/octet-stream"),
+                "label_file": ("case_label.nii.gz", b"current-label", "application/octet-stream"),
+            },
+            data={"model_id": "abdomen"},
+        )
+        body = response.json()
+        state = client.get(f"/api/segment/jobs/{body['job_id']}").json()
+
+    assert response.status_code == 200
+    assert body["cached_result"] is True
+    assert state["validation"] == current_validation
+    assert state["validation"] != stale_validation
+    assert len(validated_label_paths) == 1
+    assert validated_label_paths[0].name == f"{body['job_id']}_label.nii.gz"
+    assert server.jobs[body["job_id"]].events[-1]["validation"] == current_validation
 
 
 def test_real_job_uses_persistent_worker_when_enabled():
@@ -783,6 +856,24 @@ def test_real_job_uses_persistent_worker_when_enabled():
     assert state["result_ready"] is True
     assert state["phase_timings"]["persistent_worker"] >= 0
     assert state["phase_timings"]["collect_result"] >= 0
+
+
+def test_persistent_worker_stdout_reader_is_reused_across_events():
+    server = load_server_module()
+    job = server.Job(id="worker-reader", status="running", progress=20, stage="worker")
+
+    class FakeProcess:
+        stdout = io.StringIO(
+            '{"type":"complete","message":"first"}\n'
+            '{"type":"complete","message":"second"}\n'
+        )
+
+    process = FakeProcess()
+    first = server._read_worker_event_with_heartbeat(job, process)
+    second = server._read_worker_event_with_heartbeat(job, process)
+
+    assert first["message"] == "first"
+    assert second["message"] == "second"
 
 
 def test_process_log_is_persisted_as_utf8_and_tail_is_returned():
@@ -953,7 +1044,7 @@ def test_e2e_inference_flow_via_api_endpoints():
     assert state_response.status_code == 200
     assert state["status"] == "succeeded"
     assert state["result_ready"] is True
-    assert state["validation"]["status"] == "passed"
+    assert state["validation"] is None
 
     assert result_response.status_code == 200
     assert result_response.content == b"e2e-api-result"
@@ -1115,6 +1206,29 @@ def test_taxonomy_detects_flare22_and_remaps_label_ids():
     assert remapped[4] == 3, f"Label 13 should become 3 (left_kidney), got {remapped[4]}"
 
 
+def test_taxonomy_detects_partial_flare22_labels_when_ids_are_mismatched():
+    """少量 FLARE22 标签只要有明确错位，也应触发自动 remap。"""
+    import sys
+    taxonomy_path = PROJECT_ROOT / "server" / "taxonomy.py"
+    spec = importlib.util.spec_from_file_location("taxonomy", taxonomy_path)
+    taxonomy = importlib.util.module_from_spec(spec)
+    sys.modules["taxonomy"] = taxonomy
+    spec.loader.exec_module(taxonomy)
+
+    amos_labels = [
+        {"label": 1, "id": "spleen", "nameEn": "spleen", "nameZh": "脾脏"},
+        {"label": 3, "id": "left-kidney", "nameEn": "left_kidney", "nameZh": "左肾"},
+        {"label": 6, "id": "liver", "nameEn": "liver", "nameZh": "肝脏"},
+    ]
+
+    detected = taxonomy.detect_dataset({1, 3}, amos_labels)
+    mapping = taxonomy.build_remap_mapping(amos_labels, detected) if detected else {}
+
+    assert detected == "FLARE22"
+    assert mapping[1] == 6
+    assert mapping[3] == 1
+
+
 def test_taxonomy_returns_none_for_amos_native_labels():
     """当 reference 标签与 checkpoint 相同时，不做 remap"""
     import sys
@@ -1137,9 +1251,11 @@ def test_taxonomy_returns_none_for_amos_native_labels():
 
 if __name__ == "__main__":
     test_taxonomy_detects_flare22_and_remaps_label_ids()
+    test_taxonomy_detects_partial_flare22_labels_when_ids_are_mismatched()
     test_taxonomy_returns_none_for_amos_native_labels()
     test_model_state_reports_missing_required_files()
     test_create_job_rejects_when_model_is_not_ready()
+    test_server_source_does_not_log_uploaded_filenames()
     test_predict_command_uses_model_folder_and_job_io()
     test_predict_worker_counts_have_safe_defaults_and_clamps()
     test_fast_inference_profile_controls_nnunet_prediction_flags()
@@ -1161,7 +1277,9 @@ if __name__ == "__main__":
     test_job_summary_json_records_runtime_and_output_size()
     test_job_summary_json_records_resource_snapshots()
     test_create_job_reuses_cached_prediction_for_matching_cache_key()
+    test_cached_prediction_revalidates_against_current_label_file()
     test_real_job_uses_persistent_worker_when_enabled()
+    test_persistent_worker_stdout_reader_is_reused_across_events()
     test_process_log_is_persisted_as_utf8_and_tail_is_returned()
     test_job_state_can_read_persisted_summary_after_restart()
     test_job_state_can_reconstruct_legacy_output_without_summary()

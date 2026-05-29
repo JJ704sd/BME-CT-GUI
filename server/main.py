@@ -171,6 +171,9 @@ persistent_worker_lock = threading.Lock()
 persistent_worker_process: subprocess.Popen[str] | None = None
 persistent_worker_key: tuple[str, str, str, int, int, float, bool, bool] | None = None
 persistent_worker_log_handle: Any | None = None
+persistent_worker_event_queue: queue.Queue[str | None] | None = None
+persistent_worker_stdout_thread: threading.Thread | None = None
+persistent_worker_reader_process: Any | None = None
 
 HEARTBEAT_INTERVAL = 10
 
@@ -1125,6 +1128,7 @@ def get_persistent_worker_key(model_dir: Path, inference_options: dict[str, Any]
 
 def close_persistent_worker_locked() -> None:
   global persistent_worker_process, persistent_worker_key, persistent_worker_log_handle
+  global persistent_worker_event_queue, persistent_worker_stdout_thread, persistent_worker_reader_process
   process = persistent_worker_process
   if process is not None and process.poll() is None:
     process.terminate()
@@ -1141,12 +1145,33 @@ def close_persistent_worker_locked() -> None:
   persistent_worker_process = None
   persistent_worker_key = None
   persistent_worker_log_handle = None
+  persistent_worker_event_queue = None
+  persistent_worker_stdout_thread = None
+  persistent_worker_reader_process = None
+
+
+def ensure_persistent_worker_reader(process: Any) -> queue.Queue[str | None]:
+  global persistent_worker_event_queue, persistent_worker_stdout_thread, persistent_worker_reader_process
+  if process.stdout is None:
+    raise RuntimeError("常驻 nnUNetv2 worker 未打开 stdout。")
+  if (
+    persistent_worker_reader_process is process and
+    persistent_worker_event_queue is not None and
+    persistent_worker_stdout_thread is not None
+  ):
+    return persistent_worker_event_queue
+  q: queue.Queue[str | None] = queue.Queue()
+  reader = threading.Thread(target=_persistent_worker_reader_thread, args=(process.stdout, q), daemon=True)
+  reader.start()
+  persistent_worker_reader_process = process
+  persistent_worker_event_queue = q
+  persistent_worker_stdout_thread = reader
+  return q
 
 
 def read_persistent_worker_event(process: subprocess.Popen[str]) -> dict[str, Any]:
-  if process.stdout is None:
-    raise RuntimeError("常驻 nnUNetv2 worker 未打开 stdout。")
-  line = process.stdout.readline()
+  q = ensure_persistent_worker_reader(process)
+  line = q.get()
   if not line:
     raise RuntimeError("常驻 nnUNetv2 worker 已退出。")
   try:
@@ -1218,11 +1243,7 @@ def _persistent_worker_reader_thread(stdout: Any, q: queue.Queue[str | None]) ->
 
 
 def _read_worker_event_with_heartbeat(job: Job, process: subprocess.Popen[str]) -> dict[str, Any]:
-  if process.stdout is None:
-    raise RuntimeError("常驻 nnUNetv2 worker 未打开 stdout。")
-  q: queue.Queue[str | None] = queue.Queue()
-  reader = threading.Thread(target=_persistent_worker_reader_thread, args=(process.stdout, q), daemon=True)
-  reader.start()
+  q = ensure_persistent_worker_reader(process)
   while True:
     try:
       line = q.get(timeout=HEARTBEAT_INTERVAL)
@@ -1333,7 +1354,6 @@ def find_cached_prediction(cache_key: str, input_path: Path, current_job_id: str
         return {
           "job_id": job_dir.name,
           "result_path": result_path,
-          "validation": summary.get("validation"),
           "legacy": False,
         }
 
@@ -1346,14 +1366,9 @@ def find_cached_prediction(cache_key: str, input_path: Path, current_job_id: str
     legacy_summary and
     legacy_summary.get("cache_key") == cache_key
   ):
-    validation = None
-    validation_path = legacy_result.parent / "validation_summary.json"
-    if validation_path.exists():
-      validation = json.loads(validation_path.read_text(encoding="utf-8"))
     return {
       "job_id": legacy_job_id,
       "result_path": legacy_result,
-      "validation": validation,
       "legacy": True,
     }
   return None
@@ -1375,10 +1390,10 @@ def complete_cached_job(job: Job, input_path: Path, cache: dict[str, Any]) -> No
   start_job_phase(job, "cache_hit")
   output_dir = input_path.parent.parent / "output"
   result_path = copy_cached_result(cache, output_dir, job.id)
-  validation = cache.get("validation")
-  if validation is None and job.label_path and job.label_path.exists():
+  validation = None
+  if job.label_path and job.label_path.exists():
     validation = validate_against_custom_label(result_path, job.label_path, read_labels())
-  elif validation is None and is_debug_original_upload(input_path):
+  elif is_debug_original_upload(input_path):
     validation = validate_against_debug_label(result_path)
   if validation is not None:
     write_validation_summary(output_dir, validation)
@@ -1640,7 +1655,6 @@ async def create_job(
   postprocess: str = Form("{}"),
   inference_profile: str | None = Form(None),
 ) -> dict[str, Any]:
-  print(f"[create_job] received file={file.filename}, label_file={label_file.filename if label_file else None}", flush=True)
   if not file.filename or not file.filename.lower().endswith((".nii", ".nii.gz")):
     raise HTTPException(status_code=400, detail="请上传 .nii 或 .nii.gz 格式的 CT 原图。")
   model_state = get_model_state()

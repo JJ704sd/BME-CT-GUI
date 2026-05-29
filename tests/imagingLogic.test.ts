@@ -20,6 +20,7 @@ import { DEFAULT_REFERENCE_CASES, getReferenceCaseOriginalUrl, normalizeReferenc
 import { getVoxelCoordDragCommit, getVoxelCoordForSelectedSliceSync, shouldUpdateVoxelCoord } from "../src/viewerLogic.ts";
 
 const mainSource = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
+const inferenceClientSource = readFileSync(new URL("../src/inference/inferenceClient.ts", import.meta.url), "utf8");
 const orthogonalViewerSource = readFileSync(new URL("../src/components/OrthogonalViewer.tsx", import.meta.url), "utf8");
 const stylesSource = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
 
@@ -40,6 +41,8 @@ assert.equal(mainSource.includes("inference-progress-track"), true, "bottom cons
 assert.equal(mainSource.includes("parsed.log_tail"), true, "failed SSE events should preserve backend log_tail for review");
 assert.equal(mainSource.includes("parsed.heartbeat"), true, "SSE handler should distinguish heartbeat events from normal progress");
 assert.equal(mainSource.includes("setInferenceStartedAt"), true, "heartbeat events should sync frontend elapsed timer with backend reality");
+assert.equal(mainSource.includes("[inference] labelFile"), false, "front-end should not log uploaded label filenames");
+assert.equal(inferenceClientSource.includes("console.log"), false, "inference client should not log uploaded filenames or label presence");
 assert.equal(mainSource.includes("const idleProgress = inferenceTimeline.length ? clampedProgress : 0"), true, "waiting progress rail should not show the previous 100% baseline before any inference event");
 for (const mockCaseId of ["Case_FLARE_024", "Case_LUNG_112", "Case_PANC_038"]) {
   assert.equal(mainSource.includes(mockCaseId), false, `top case selector should not expose mock case ${mockCaseId}`);

@@ -1017,7 +1017,6 @@ function App() {
 
     try {
       const endpoint = API_ENDPOINT;
-      console.log("[inference] labelFile:", labelFile?.name ?? null, "size:", labelFile?.size ?? 0);
       const job = await createInferenceJob(endpoint, sourceImage.file!, {
         modelId: selectedModelId,
         confidenceThreshold,

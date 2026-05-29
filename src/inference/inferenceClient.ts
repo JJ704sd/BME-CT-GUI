@@ -315,9 +315,6 @@ export async function createInferenceJob(
   formData.append("file", file, file.name);
   if (options.labelFile) {
     formData.append("label_file", options.labelFile, options.labelFile.name);
-    console.log("[createInferenceJob] label_file appended:", options.labelFile.name, options.labelFile.size);
-  } else {
-    console.log("[createInferenceJob] no labelFile provided");
   }
   formData.append("model_id", options.modelId);
   formData.append("confidence_threshold", String(options.confidenceThreshold));
