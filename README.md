@@ -14,6 +14,8 @@
 - 自动 taxonomy remap：已实现，FLARE22 在线验证 mean_dice 从 0.073 提升到 0.926；部分 FLARE22 标签在至少两个明确错位 label 时也可自动识别，单 label 文件仍保持保守处理
 - 主要进展和实验记录：见 [REVIEW.md](./REVIEW.md)、[ACCEPTANCE.md](./ACCEPTANCE.md) 与 [SEGMENTATION_EXPERIMENT_COMPARISON.md](./SEGMENTATION_EXPERIMENT_COMPARISON.md)
 - 代码讲解材料：见 [CODE_MODULE_GUIDE.md](./CODE_MODULE_GUIDE.md)
+- 服务器 runtime 部署包：`deployment-packages/server-runtime-package-20260530.zip`，配套最短操作清单见 `deployment-packages/server-runtime-quickstart-20260530.md`。该包只包含后端运行代码、工具脚本和说明文档，不包含真实 CT/NIfTI、checkpoint、`.env`、日志或推理输出。
+- 当前推荐部署顺序：先做校园网 API 直连和 Ubuntu 22.04 真实 5GPU smoke test；若校园网互访不稳定，再考虑 Tailscale / WireGuard；外网浏览器入口需在真实服务器推理跑通后再配置 HTTPS、鉴权、大文件上传和 SSE 反代。
 
 ## 主要功能
 

@@ -38,6 +38,7 @@ python tools\segmentation_metrics_summary.py `
 - 2026-05-29 缓存命中时不再复用缓存来源 job 的 `validation`；预测 NIfTI 可复用，但 Dice/IoU/Hausdorff 必须来自本次请求的标签文件或内置参考标签。
 - 2026-05-29 自动 remap 支持部分 FLARE22 标签：当至少两个共享 ID 明确语义错位且没有原生匹配时可识别为 FLARE22；单 label 文件仍不自动推断数据集来源。
 - 2026-05-30 新增 `runtime_target=local|server` 和局域网访问配置后，本文件中的历史 AMOS/FLARE 指标不变；本地 fold0、服务器 5-fold ensemble 和不同 profile 的指标必须分开记录，不能混算。
+- 2026-05-30 准备的 `deployment-packages/server-runtime-package-20260530.zip` 与 `server-runtime-quickstart-20260530.md` 只属于部署准备，不产生新的 Dice、IoU、Hausdorff 或耗时指标；真实服务器指标需等 Ubuntu 22.04 + 5GPU smoke test 完成后另行记录。
 
 ## 当前 AMOS 基线运行
 

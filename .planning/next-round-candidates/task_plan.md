@@ -2,7 +2,7 @@
 
 **范围：** 基于 2026-05-30 项目现状，规划下一轮可执行任务。
 
-**当前状态：** 三大目标已接近收口：CT 浏览、三正交联动、在线 nnUNetv2 推理、SSE 进度、取消、预测缓存、标签上传、自动 taxonomy remap、报告导出和主要验收文档均已落地。2026-05-29 已修复缓存 validation 复用、persistent worker reader 竞争、上传文件名调试日志和部分 FLARE22 标签 remap 边界。2026-05-30 已增加 `本地在线推理` / `服务器云端推理` 运行位置、局域网配置化和服务器 5-fold soft ensemble 编排入口；真实第二台局域网设备与 Linux 服务器端到端推理仍需单独验收。最新局域网规划记录见 `.planning/lan-direct-and-tunnel/`。
+**当前状态：** 三大目标已接近收口：CT 浏览、三正交联动、在线 nnUNetv2 推理、SSE 进度、取消、预测缓存、标签上传、自动 taxonomy remap、报告导出和主要验收文档均已落地。2026-05-29 已修复缓存 validation 复用、persistent worker reader 竞争、上传文件名调试日志和部分 FLARE22 标签 remap 边界。2026-05-30 已增加 `本地在线推理` / `服务器云端推理` 运行位置、局域网配置化、服务器 5-fold soft ensemble 编排入口、校园网访问 planning 和服务器 runtime 包；真实校园网 API 直连与 Linux 服务器端到端推理仍需单独验收。最新校园网规划记录见 `.planning/campus-network-and-public-access/`，早期局域网/穿透方案记录见 `.planning/lan-direct-and-tunnel/`。
 
 **本轮已完成（2026-05-28）：**
 
@@ -23,6 +23,8 @@
 - 前端 API 地址支持 `VITE_API_ENDPOINT`，`package.json` 新增 `dev:lan`，后端 CORS 支持 `SEGMENTATION_ALLOWED_ORIGINS`。
 - 前端分割控制支持 `runtime_target=server|local`，后端把本地路径和服务器 5-fold soft ensemble 编排路径分开。
 - 本机局域网 IP smoke 已验证前端 200、后端 health 200 和 CORS allow-origin；第二台真实设备完整推理链路仍待验收。
+- 新增 `.planning/campus-network-and-public-access/`，明确当前推荐顺序为校园网 API 直连、Ubuntu 22.04 真实 5GPU smoke test、必要时 Tailscale/WireGuard，最后才做公网浏览器入口。
+- 新增 `deployment-packages/server-runtime-package-20260530.zip` 和 `deployment-packages/server-runtime-quickstart-20260530.md`，用于服务器后端 runtime 部署准备；该准备不等同于真实服务器推理验收通过。
 - 穿透方案阶段性推荐 Tailscale / WireGuard；frp + HTTPS 只在必须提供无客户端公网浏览器入口时考虑。
 
 ---

@@ -10,9 +10,10 @@
 4. 到 `src/inference/inferenceClient.ts` 讲前端如何创建 job、监听 SSE、下载结果。
 5. 到 `src/report/exportReport.ts` 讲报告导出：HTML/JSON/PDF 三种格式、自包含 HTML 模板和数据收集。
 6. 到 `server/main.py`、`server/server_inference.py` 和 `server/persistent_nnunet_worker.py` 讲 FastAPI 后端如何桥接 nnUNetv2、管理任务、缓存、validation，以及如何按 `runtime_target` 选择本地保底路径或服务器 5-fold soft ensemble 路径。
-7. 到 `server/taxonomy.py` 讲跨数据集标签 taxonomy 检测与自动重映射：FLARE22 标签定义、器官名别名映射、`detect_dataset()` 自动识别数据集来源、`build_remap_mapping()` 按器官名建立 ID 映射、`apply_remap()` 用查找表重排参考标签数组。
-8. 到 `tools/segmentation_metrics_summary.py` 讲 Dice、IoU、Voxel Accuracy 和 Hausdorff Distance 指标如何离线复算。
-9. 最后用 `tests/` 和文档说明验收边界：AMOS 原生 validation 与 FLARE22 自动 taxonomy-remap validation 的区别。
+7. 到 `deployment-packages/server-runtime-quickstart-20260530.md` 讲服务器 runtime 包的解压、环境变量、CORS 和校园网 API 直连 smoke test 边界。
+8. 到 `server/taxonomy.py` 讲跨数据集标签 taxonomy 检测与自动重映射：FLARE22 标签定义、器官名别名映射、`detect_dataset()` 自动识别数据集来源、`build_remap_mapping()` 按器官名建立 ID 映射、`apply_remap()` 用查找表重排参考标签数组。
+9. 到 `tools/segmentation_metrics_summary.py` 讲 Dice、IoU、Voxel Accuracy 和 Hausdorff Distance 指标如何离线复算。
+10. 最后用 `tests/` 和文档说明验收边界：AMOS 原生 validation 与 FLARE22 自动 taxonomy-remap validation 的区别。
 
 ## 2. 前端入口：`src/main.tsx`
 
@@ -205,7 +206,17 @@
 - 服务器路径只负责命令构造和进程编排，job 生命周期、SSE、取消、结果下载、cache key 和 validation 仍由 `server/main.py` 统一管理。
 - 真实 Linux 服务器端到端推理尚需单独 smoke test；在完成前，文档不能把服务器模式写成已完成质量验收。
 
-## 11. 常驻推理 worker：`server/persistent_nnunet_worker.py`
+## 11. 服务器部署包：`deployment-packages/`
+
+`deployment-packages/server-runtime-package-20260530.zip` 是给 Ubuntu 22.04 服务器使用的最小后端运行包，配套 `deployment-packages/server-runtime-quickstart-20260530.md` 说明解压、依赖、CORS、`SEGMENTATION_SERVER_*` 和启动命令。
+
+讲解重点：
+
+- 该包用于让服务器运行 FastAPI 后端并接收本地电脑 GUI 的 API 请求，然后在服务器侧启动 5GPU / 5-fold nnUNetv2 推理。
+- 包内不包含真实 CT/NIfTI、checkpoint、`.env`、日志或推理输出；服务器仍必须已有 CUDA/PyTorch/nnUNetv2、模型目录和真实数据路径。
+- 当前推荐先做校园网 API 直连；公网浏览器入口必须等真实服务器 smoke test 通过后，再补 HTTPS、鉴权、大文件上传限制和 SSE 反代配置。
+
+## 12. 常驻推理 worker：`server/persistent_nnunet_worker.py`
 
 该脚本承接后端启动的 persistent worker 路径，用于减少部分模型加载开销。
 
@@ -216,7 +227,7 @@
 - 常驻 worker 读取响应时使用进程级共享 `_persistent_worker_reader_thread()` + `queue.Queue` 实现非阻塞读取，超时后自动发送心跳，不阻塞主线程。2026-05-29 修复前，复用 worker 时每次读事件都会新建 stdout reader 线程，存在旧线程抢读后续事件的风险；当前 reader 状态会随 worker 进程创建和关闭统一维护。
 - 目前只通过轻量 shutdown smoke 验证 worker 协议和 reader 清理，未重新完成真实长耗时无缓存推理加速验收。
 
-## 12. 指标与性能工具
+## 13. 指标与性能工具
 
 相关文件：
 
@@ -228,7 +239,7 @@
 - 指标脚本可以用于 AMOS 原生 label，也可以用于 FLARE22 remapped reference，但文档必须明确区分解释边界。
 - 对外报告时，应优先引用 `SEGMENTATION_METRICS_SUMMARY.md` 中已经整理过的指标，而不是直接引用临时输出。
 
-## 13. 测试结构：`tests/`
+## 14. 测试结构：`tests/`
 
 主要测试：
 
@@ -253,7 +264,7 @@ npm test
 npm run build
 ```
 
-## 14. 本轮性能优化的讲解口径
+## 15. 本轮性能优化的讲解口径
 
 分屏模式说明：
 

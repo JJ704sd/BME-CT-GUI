@@ -83,6 +83,171 @@ def test_model_state_reports_missing_required_files():
     assert state["ready"] is False
 
 
+def test_server_inference_config_reads_luozheng_runtime_env():
+    server = load_server_module()
+
+    with patch.dict(os.environ, {
+        "SEGMENTATION_SERVER_GPUS": "0,1,2,3,4",
+        "SEGMENTATION_SERVER_FOLDS": "0,1,2,3,4",
+        "SEGMENTATION_SERVER_DATASET_ID": "1",
+        "SEGMENTATION_SERVER_CONFIG": "3d_fullres",
+        "SEGMENTATION_SERVER_PLANS": "nnUNetResEncUNetXLPlans",
+        "SEGMENTATION_SERVER_NNUNET_RAW": "/mnt/data0/LUO_Zheng/nnUNet_raw",
+        "SEGMENTATION_SERVER_NNUNET_PREPROCESSED": "/mnt/data0/LUO_Zheng/nnUNet_preprocessed",
+        "SEGMENTATION_SERVER_NNUNET_RESULTS": "/mnt/data0/LUO_Zheng/nnUNet_results",
+        "SEGMENTATION_SERVER_OUTPUT_ROOT": "/mnt/data0/LUO_Zheng/result/gui_jobs",
+        "SEGMENTATION_SERVER_EVALUATE_SCRIPT": "/mnt/data0/LUO_Zheng/evaluate_full.py",
+        "SEGMENTATION_SERVER_LABELS_DIR": "/mnt/data0/LUO_Zheng/amos22/amos22/labelsVa",
+        "SEGMENTATION_SERVER_DATASET_JSON": "/mnt/data0/LUO_Zheng/nnUNet_results/Dataset001_AMOS22/nnUNetTrainer__nnUNetResEncUNetXLPlans__3d_fullres/dataset.json",
+        "SEGMENTATION_SERVER_PREPROCESS_WORKERS": "4",
+        "SEGMENTATION_SERVER_ENSEMBLE_PROCESSES": "8",
+    }, clear=True):
+        config = server.get_server_inference_config()
+
+    assert config.gpus == ("0", "1", "2", "3", "4")
+    assert config.folds == ("0", "1", "2", "3", "4")
+    assert config.dataset_id == "1"
+    assert config.configuration == "3d_fullres"
+    assert config.plans == "nnUNetResEncUNetXLPlans"
+    assert config.nnunet_raw == Path("/mnt/data0/LUO_Zheng/nnUNet_raw")
+    assert config.nnunet_preprocessed == Path("/mnt/data0/LUO_Zheng/nnUNet_preprocessed")
+    assert config.nnunet_results == Path("/mnt/data0/LUO_Zheng/nnUNet_results")
+    assert config.output_root == Path("/mnt/data0/LUO_Zheng/result/gui_jobs")
+    assert config.evaluate_script == Path("/mnt/data0/LUO_Zheng/evaluate_full.py")
+    assert config.labels_dir == Path("/mnt/data0/LUO_Zheng/amos22/amos22/labelsVa")
+    assert config.dataset_json == Path("/mnt/data0/LUO_Zheng/nnUNet_results/Dataset001_AMOS22/nnUNetTrainer__nnUNetResEncUNetXLPlans__3d_fullres/dataset.json")
+    assert config.preprocess_workers == 4
+    assert config.ensemble_processes == 8
+
+
+def test_model_state_checks_server_required_files_only_for_server_runtime():
+    server = load_server_module()
+
+    base = make_test_output_dir("server-runtime-required-files")
+    local_model = base / "local-model"
+    local_model.mkdir(parents=True, exist_ok=True)
+    dataset_json = local_model / "dataset.json"
+    plans_json = local_model / "plans.json"
+    checkpoint = local_model / "checkpoint_best.pth"
+    predict_command = base / "python.exe"
+    for path in [dataset_json, plans_json, checkpoint, predict_command]:
+        path.write_text("ok", encoding="utf-8")
+
+    missing_eval = base / "missing-evaluate_full.py"
+    missing_server_dataset = base / "missing-server-dataset.json"
+
+    with patch.dict(os.environ, {
+        "SEGMENTATION_RUNTIME_TARGET": "server",
+        "SEGMENTATION_SERVER_EVALUATE_SCRIPT": str(missing_eval),
+        "SEGMENTATION_SERVER_DATASET_JSON": str(missing_server_dataset),
+    }, clear=True), \
+         patch.object(server, "FLARE_DATASET_JSON", dataset_json), \
+         patch.object(server, "FLARE_PLANS_JSON", plans_json), \
+         patch.object(server, "FLARE_CHECKPOINT", checkpoint), \
+         patch.object(server, "PROJECT_CHECKPOINT", checkpoint), \
+         patch.object(server, "NNUNET_PYTHON_COMMAND", predict_command, create=True), \
+         patch.object(server, "load_checkpoint_init_args", return_value=AMOS_CHECKPOINT_ARGS):
+        server_state = server.get_model_state()
+
+    with patch.dict(os.environ, {
+        "SEGMENTATION_RUNTIME_TARGET": "local",
+        "SEGMENTATION_SERVER_EVALUATE_SCRIPT": str(missing_eval),
+        "SEGMENTATION_SERVER_DATASET_JSON": str(missing_server_dataset),
+    }, clear=True), \
+         patch.object(server, "FLARE_DATASET_JSON", dataset_json), \
+         patch.object(server, "FLARE_PLANS_JSON", plans_json), \
+         patch.object(server, "FLARE_CHECKPOINT", checkpoint), \
+         patch.object(server, "PROJECT_CHECKPOINT", checkpoint), \
+         patch.object(server, "NNUNET_PYTHON_COMMAND", predict_command, create=True), \
+         patch.object(server, "load_checkpoint_init_args", return_value=AMOS_CHECKPOINT_ARGS):
+        local_state = server.get_model_state()
+
+    assert server_state["runtime_target"] == "server"
+    assert server_state["status"] == "incomplete"
+    assert set(server_state["missing"]) == {"server_evaluate_full.py", "server_dataset.json"}
+    assert server_state["server_inference"]["evaluate_script"] == str(missing_eval)
+    assert server_state["server_inference"]["dataset_json"] == str(missing_server_dataset)
+
+    assert local_state["runtime_target"] == "local"
+    assert local_state["status"] == "ready"
+    assert local_state["missing"] == []
+
+
+def test_health_and_models_expose_server_runtime_config():
+    server = load_server_module()
+
+    model_state = {
+        "ready": True,
+        "status": "ready",
+        "mode": "real-nnunetv2",
+        "runtime_target": "server",
+        "missing": [],
+        "checkpoint": "checkpoint_best.pth",
+        "confidence_threshold_effective": False,
+        "server_inference": {
+            "dataset_id": "1",
+            "configuration": "3d_fullres",
+            "plans": "nnUNetResEncUNetXLPlans",
+            "folds": ["0", "1", "2", "3", "4"],
+            "gpus": ["0", "1", "2", "3", "4"],
+            "output_root": "/mnt/data0/LUO_Zheng/result/gui_jobs",
+            "evaluate_script": "/mnt/data0/LUO_Zheng/evaluate_full.py",
+            "dataset_json": "/mnt/data0/LUO_Zheng/nnUNet_results/Dataset001_AMOS22/nnUNetTrainer__nnUNetResEncUNetXLPlans__3d_fullres/dataset.json",
+        },
+    }
+
+    with patch.object(server, "get_model_state", return_value=model_state), \
+         patch.object(server, "read_labels", return_value=[]):
+        client = TestClient(server.app)
+        health = client.get("/api/health").json()
+        models = client.get("/api/models").json()
+
+    assert health["model_status"]["runtime_target"] == "server"
+    assert health["model_status"]["server_inference"]["gpus"] == ["0", "1", "2", "3", "4"]
+    assert models["models"][0]["runtime_target"] == "server"
+    assert models["models"][0]["server_inference"]["plans"] == "nnUNetResEncUNetXLPlans"
+
+
+def test_create_server_job_rejects_missing_server_runtime_files():
+    server = load_server_module()
+
+    base = make_test_output_dir("server-job-missing-runtime-files")
+    local_model = base / "local-model"
+    local_model.mkdir(parents=True, exist_ok=True)
+    dataset_json = local_model / "dataset.json"
+    plans_json = local_model / "plans.json"
+    checkpoint = local_model / "checkpoint_best.pth"
+    predict_command = base / "python.exe"
+    for path in [dataset_json, plans_json, checkpoint, predict_command]:
+        path.write_text("ok", encoding="utf-8")
+
+    missing_eval = base / "missing-evaluate_full.py"
+    missing_server_dataset = base / "missing-server-dataset.json"
+
+    with patch.dict(os.environ, {
+        "SEGMENTATION_SERVER_EVALUATE_SCRIPT": str(missing_eval),
+        "SEGMENTATION_SERVER_DATASET_JSON": str(missing_server_dataset),
+    }, clear=True), \
+         patch.object(server, "WORK_DIR", base / "work"), \
+         patch.object(server, "FLARE_DATASET_JSON", dataset_json), \
+         patch.object(server, "FLARE_PLANS_JSON", plans_json), \
+         patch.object(server, "FLARE_CHECKPOINT", checkpoint), \
+         patch.object(server, "PROJECT_CHECKPOINT", checkpoint), \
+         patch.object(server, "NNUNET_PYTHON_COMMAND", predict_command, create=True), \
+         patch.object(server, "load_checkpoint_init_args", return_value=AMOS_CHECKPOINT_ARGS):
+        client = TestClient(server.app)
+        response = client.post(
+            "/api/segment/jobs",
+            files={"file": ("case_0000.nii.gz", b"nifti", "application/octet-stream")},
+            data={"model_id": "abdomen", "runtime_target": "server"},
+        )
+
+    assert response.status_code == 503
+    body = response.json()["detail"]
+    assert body["model_status"]["runtime_target"] == "server"
+    assert set(body["missing"]) == {"server_evaluate_full.py", "server_dataset.json"}
+
+
 def test_create_job_rejects_when_model_is_not_ready():
     server = load_server_module()
 
@@ -636,6 +801,99 @@ def test_running_job_can_be_cancelled_and_process_is_terminated():
     assert server.jobs[job_id].events[-1]["stage"] == "正在取消本地 nnUNetv2 任务"
 
 
+def test_running_server_job_cancel_terminates_child_processes():
+    server = load_server_module()
+
+    class FakeProcess:
+        def __init__(self):
+            self.terminated = False
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            self.terminated = True
+
+    job_id = "servercancel0001"
+    child_processes = [FakeProcess(), FakeProcess(), FakeProcess(), FakeProcess(), FakeProcess()]
+    with server.jobs_lock:
+        server.jobs[job_id] = server.Job(
+            id=job_id,
+            status="running",
+            progress=35,
+            stage="5-fold 并行推理中",
+            runtime_target="server",
+            child_processes=child_processes,
+        )
+
+    client = TestClient(server.app)
+    response = client.post(f"/api/segment/jobs/{job_id}/cancel")
+    state = response.json()
+
+    assert response.status_code == 200
+    assert state["status"] == "cancelling"
+    assert state["cancel_requested"] is True
+    assert all(child.terminated for child in child_processes)
+    assert server.jobs[job_id].events[-1]["stage"] == "正在取消服务器 5-fold 推理任务"
+
+
+def test_prediction_cache_key_changes_with_runtime_target():
+    server = load_server_module()
+    base_state = {
+        "checkpoint_dataset_name": "Dataset001_AMOS22",
+        "checkpoint_configuration": "3d_fullres",
+        "labels_source": "checkpoint",
+        "inference_options": {
+            "profile": "quality",
+            "tile_step_size": 0.5,
+            "disable_tta": False,
+            "not_on_device": False,
+        },
+    }
+
+    with patch.object(server, "get_checkpoint_sha256", return_value="checkpoint-sha"):
+        local_key = server.build_prediction_cache_key("input-sha", {**base_state, "runtime_target": "local"})
+        server_key = server.build_prediction_cache_key("input-sha", {**base_state, "runtime_target": "server"})
+
+    assert local_key != server_key
+
+
+def test_server_complete_event_contains_runtime_validation_timings_and_resource():
+    server = load_server_module()
+    temp_root = make_test_output_dir("server-complete-event-fields")
+    job_id = "serverevent0001"
+    input_dir = temp_root / job_id / "input"
+    output_dir = temp_root / job_id / "output"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    input_path = input_dir / f"{job_id}_0000.nii.gz"
+    input_path.write_bytes(b"server-event-input")
+    validation = {"status": "passed", "message": "server complete validation"}
+
+    def fake_server_pipeline(job, _input_dir, output_dir_arg, _case_name):
+        server.start_job_phase(job, "server_ensemble")
+        server.finish_job_phase(job, "server_ensemble")
+        result_path = output_dir_arg / f"{job.id}.nii.gz"
+        output_dir_arg.mkdir(parents=True, exist_ok=True)
+        result_path.write_bytes(b"server-event-result")
+        return result_path, validation, [("soft_ensemble", subprocess.CompletedProcess(args=["ensemble"], returncode=0, stdout="ok", stderr=""))]
+
+    with server.jobs_lock:
+        server.jobs[job_id] = server.Job(id=job_id, cache_key="server-event-cache", runtime_target="server")
+
+    with patch.object(server, "WORK_DIR", temp_root), \
+         patch.object(server, "run_server_job_pipeline", side_effect=fake_server_pipeline):
+        server.run_real_job(job_id, input_path)
+
+    complete_event = server.jobs[job_id].events[-1]
+    assert complete_event["type"] == "complete"
+    assert complete_event["runtime_target"] == "server"
+    assert complete_event["validation"] == validation
+    assert complete_event["phase_timings"]["server_ensemble"] >= 0
+    assert complete_event["inference_options"] is None
+    assert complete_event["resource_latest"]["phase"] == "completed"
+    assert complete_event["result_size_bytes"] == len(b"server-event-result")
+
+
 def test_job_summary_json_records_runtime_and_output_size():
     server = load_server_module()
     output_dir = make_test_output_dir("job-summary")
@@ -1053,6 +1311,194 @@ def test_e2e_inference_flow_via_api_endpoints():
     event_types = [e["type"] for e in job.events]
     assert event_types[-1] == "complete"
     assert job.events[-1]["cached_result"] is True
+
+
+def test_server_fold_ensemble_and_evaluate_commands_match_5gpu_script():
+    server = load_server_module()
+
+    config = server.get_server_inference_config({
+        "SEGMENTATION_SERVER_GPUS": "0,1,2,3,4",
+        "SEGMENTATION_SERVER_FOLDS": "0,1,2,3,4",
+        "SEGMENTATION_SERVER_DATASET_ID": "1",
+        "SEGMENTATION_SERVER_CONFIG": "3d_fullres",
+        "SEGMENTATION_SERVER_PLANS": "nnUNetResEncUNetXLPlans",
+        "SEGMENTATION_SERVER_NNUNET_RAW": "/mnt/data0/LUO_Zheng/nnUNet_raw",
+        "SEGMENTATION_SERVER_NNUNET_PREPROCESSED": "/mnt/data0/LUO_Zheng/nnUNet_preprocessed",
+        "SEGMENTATION_SERVER_NNUNET_RESULTS": "/mnt/data0/LUO_Zheng/nnUNet_results",
+        "SEGMENTATION_SERVER_OUTPUT_ROOT": "/mnt/data0/LUO_Zheng/result/gui_jobs",
+        "SEGMENTATION_SERVER_EVALUATE_SCRIPT": "/mnt/data0/LUO_Zheng/evaluate_full.py",
+        "SEGMENTATION_SERVER_LABELS_DIR": "/mnt/data0/LUO_Zheng/amos22/amos22/labelsVa",
+        "SEGMENTATION_SERVER_DATASET_JSON": "/mnt/data0/LUO_Zheng/nnUNet_results/Dataset001_AMOS22/nnUNetTrainer__nnUNetResEncUNetXLPlans__3d_fullres/dataset.json",
+        "SEGMENTATION_SERVER_PREPROCESS_WORKERS": "4",
+        "SEGMENTATION_SERVER_ENSEMBLE_PROCESSES": "8",
+    })
+
+    input_dir = Path("/mnt/data0/LUO_Zheng/gui_jobs/job001/input")
+    output_prefix = Path("/mnt/data0/LUO_Zheng/result/gui_jobs/job001/job001")
+    fold_commands = server.build_server_fold_commands(config, input_dir, output_prefix)
+
+    assert [(item.fold, item.gpu) for item in fold_commands] == [
+        ("0", "0"),
+        ("1", "1"),
+        ("2", "2"),
+        ("3", "3"),
+        ("4", "4"),
+    ]
+    assert fold_commands[0].command == [
+        "nnUNetv2_predict",
+        "-d", "1",
+        "-c", "3d_fullres",
+        "-p", "nnUNetResEncUNetXLPlans",
+        "-i", str(input_dir),
+        "-o", str(output_prefix) + "_f0",
+        "-f", "0",
+        "-npp", "4",
+        "--save_probabilities",
+    ]
+    assert fold_commands[0].env["CUDA_VISIBLE_DEVICES"] == "0"
+    assert fold_commands[4].env["CUDA_VISIBLE_DEVICES"] == "4"
+    assert fold_commands[4].output_dir == Path(str(output_prefix) + "_f4")
+
+    ensemble_dir = Path("/mnt/data0/LUO_Zheng/result/gui_jobs/job001/ensemble")
+    ensemble_command = server.build_server_ensemble_command(config, [item.output_dir for item in fold_commands], ensemble_dir)
+    assert ensemble_command == [
+        "nnUNetv2_ensemble",
+        "-i",
+        str(output_prefix) + "_f0",
+        str(output_prefix) + "_f1",
+        str(output_prefix) + "_f2",
+        str(output_prefix) + "_f3",
+        str(output_prefix) + "_f4",
+        "-o", str(ensemble_dir),
+        "-np", "8",
+    ]
+
+    evaluate_command = server.build_server_evaluate_command(config, ensemble_dir)
+    assert evaluate_command == [
+        "python",
+        "/mnt/data0/LUO_Zheng/evaluate_full.py",
+        str(ensemble_dir),
+        "/mnt/data0/LUO_Zheng/amos22/amos22/labelsVa",
+        "--dataset_json",
+        "/mnt/data0/LUO_Zheng/nnUNet_results/Dataset001_AMOS22/nnUNetTrainer__nnUNetResEncUNetXLPlans__3d_fullres/dataset.json",
+        "--np", "8",
+    ]
+
+
+def test_server_runtime_job_uses_server_pipeline_and_records_complete_event():
+    server = load_server_module()
+    temp_root = make_test_output_dir("server-runtime-job")
+    job_id = "serverjob0001"
+    input_dir = temp_root / job_id / "input"
+    output_dir = temp_root / job_id / "output"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    input_path = input_dir / f"{job_id}_0000.nii.gz"
+    input_path.write_bytes(b"server-input")
+    server_result = output_dir / f"{job_id}.nii.gz"
+    validation = {"status": "passed", "message": "server validation"}
+
+    def fake_server_pipeline(job, input_dir_arg, output_dir_arg, case_name_arg):
+        assert job.runtime_target == "server"
+        assert input_dir_arg == input_dir
+        assert output_dir_arg == output_dir
+        assert case_name_arg == job_id
+        output_dir_arg.mkdir(parents=True, exist_ok=True)
+        server_result.write_bytes(b"server-result")
+        server.start_job_phase(job, "server_fold_predict")
+        server.finish_job_phase(job, "server_fold_predict")
+        return server_result, validation, [
+            ("fold_0_gpu_0", subprocess.CompletedProcess(args=["fold0"], returncode=0, stdout="fold done", stderr="")),
+            ("soft_ensemble", subprocess.CompletedProcess(args=["ensemble"], returncode=0, stdout="ensemble done", stderr="")),
+        ]
+
+    with server.jobs_lock:
+        server.jobs[job_id] = server.Job(id=job_id, cache_key="server-cache", runtime_target="server")
+
+    with patch.object(server, "WORK_DIR", temp_root), \
+         patch.object(server, "run_server_job_pipeline", side_effect=fake_server_pipeline), \
+         patch.object(server, "run_local_job_pipeline", side_effect=AssertionError("server runtime must not use local pipeline")):
+        server.run_real_job(job_id, input_path)
+
+    job = server.jobs[job_id]
+    summary = server.build_job_summary(job)
+    complete_event = job.events[-1]
+
+    assert summary["status"] == "succeeded"
+    assert summary["runtime_target"] == "server"
+    assert summary["result_ready"] is True
+    assert summary["validation"] == validation
+    assert summary["phase_timings"]["server_fold_predict"] >= 0
+    assert complete_event["type"] == "complete"
+    assert complete_event["stage"] == "服务器 5-fold soft ensemble 推理结果已生成"
+    assert complete_event["runtime_target"] == "server"
+    assert complete_event["validation"] == validation
+    assert complete_event["result_size_bytes"] == len(b"server-result")
+
+
+def test_create_server_runtime_job_via_api_records_runtime_and_result():
+    server = load_server_module()
+    temp_root = make_test_output_dir("server-runtime-api-job")
+    validation = {"status": "passed", "message": "server api validation"}
+
+    class ImmediateThread:
+        def __init__(self, target, args=(), kwargs=None, **_unused):
+            self.target = target
+            self.args = args
+            self.kwargs = kwargs or {}
+
+        def start(self):
+            self.target(*self.args, **self.kwargs)
+
+    def fake_server_pipeline(job, input_dir_arg, output_dir_arg, case_name_arg):
+        assert job.runtime_target == "server"
+        result_path = output_dir_arg / f"{job.id}.nii.gz"
+        output_dir_arg.mkdir(parents=True, exist_ok=True)
+        result_path.write_bytes(b"server-api-result")
+        return result_path, validation, [
+            ("fold_0_gpu_0", subprocess.CompletedProcess(args=["fold0"], returncode=0, stdout="fold done", stderr="")),
+            ("soft_ensemble", subprocess.CompletedProcess(args=["ensemble"], returncode=0, stdout="ensemble done", stderr="")),
+        ]
+
+    model_state = {
+        "ready": True,
+        "status": "ready",
+        "mode": "real-nnunetv2",
+        "runtime_target": "server",
+        "missing": [],
+        "model_file_ending": ".nii.gz",
+        "confidence_threshold_effective": False,
+        "checkpoint_dataset_name": "Dataset001_AMOS22",
+        "checkpoint_configuration": "3d_fullres",
+        "labels_source": "checkpoint",
+        "inference_options": {"profile": "quality", "tile_step_size": 0.5, "disable_tta": False, "not_on_device": False},
+        "server_inference": {},
+    }
+
+    with patch.object(server, "WORK_DIR", temp_root), \
+         patch.object(server, "get_model_state", return_value=model_state), \
+         patch.object(server, "get_checkpoint_sha256", return_value="checkpoint-sha"), \
+         patch.object(server, "find_cached_prediction", return_value=None), \
+         patch.object(server, "run_server_job_pipeline", side_effect=fake_server_pipeline), \
+         patch.object(server, "run_local_job_pipeline", side_effect=AssertionError("server runtime must not use local pipeline")), \
+         patch.object(server.threading, "Thread", ImmediateThread):
+        client = TestClient(server.app)
+        create_response = client.post(
+            "/api/segment/jobs",
+            files={"file": ("case_0000.nii.gz", b"server-api-input", "application/octet-stream")},
+            data={"model_id": "abdomen", "runtime_target": "server", "inference_profile": "quality"},
+        )
+        body = create_response.json()
+        state = client.get(f"/api/segment/jobs/{body['job_id']}").json()
+        result_response = client.get(f"/api/segment/jobs/{body['job_id']}/result")
+
+    assert create_response.status_code == 200
+    assert body["runtime_target"] == "server"
+    assert body["cached_result"] is False
+    assert state["status"] == "succeeded"
+    assert state["runtime_target"] == "server"
+    assert state["validation"] == validation
+    assert result_response.status_code == 200
+    assert result_response.content == b"server-api-result"
 
 
 def test_e2e_inference_failure_flow():

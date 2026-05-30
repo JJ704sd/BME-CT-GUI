@@ -2,7 +2,7 @@
 
 **范围：** 针对当前在线推理、局域网访问和云服务器迁移做准备。
 
-**当前状态：** 前端已支持 `VITE_API_ENDPOINT`，后端已支持 `SEGMENTATION_ALLOWED_ORIGINS`，在线推理已拆分为 `runtime_target=local|server` 两条路径。每次发布前仍需重新运行 `npm test`、`npm run build` 和 `git diff --check`。
+**当前状态：** 前端已支持 `VITE_API_ENDPOINT`，后端已支持 `SEGMENTATION_ALLOWED_ORIGINS`，在线推理已拆分为 `runtime_target=local|server` 两条路径。`deployment-packages/server-runtime-package-20260530.zip` 与 `deployment-packages/server-runtime-quickstart-20260530.md` 已准备完成；每次发布前仍需重新运行 `npm test`、`npm run build` 和 `git diff --check`。
 
 ## 关注点分析
 
@@ -31,6 +31,8 @@
 ### 2. Linux / 云服务器部署
 
 **目标：** 让后端可以稳定迁移到云服务器，并保持当前 GUI 的 job / SSE / result 体验不变。
+
+**当前部署材料：** `deployment-packages/server-runtime-package-20260530.zip` 是服务器 runtime 包；`deployment-packages/server-runtime-quickstart-20260530.md` 是解压后最短操作清单。它们只提供后端代码和操作说明，不包含真实 CT/NIfTI、checkpoint、`.env`、日志或推理输出。
 
 #### 2.1 服务器迁移的最小前提
 

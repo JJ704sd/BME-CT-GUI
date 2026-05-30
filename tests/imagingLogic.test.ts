@@ -277,6 +277,32 @@ assert.deepEqual(parseInferenceEvent('data: {"type":"complete","progress":100,"s
     validation: 2.1
   }
 });
+assert.deepEqual(parseInferenceEvent('data: {"type":"complete","progress":100,"stage":"服务器 5-fold soft ensemble 推理结果已生成","runtime_target":"server","validation":{"status":"review","sample_id":"case_001","mean_dice":0.82,"accepted":false},"phase_timings":{"server_fold_predict":240.5,"server_ensemble":18.2,"server_validation":6.4},"resource_latest":{"phase":"completed","device":"cuda","gpu":{"name":"NVIDIA A100","memory_used_mib":20340,"memory_total_mib":40960}}}\n\n'), {
+  type: "complete",
+  progress: 100,
+  stage: "服务器 5-fold soft ensemble 推理结果已生成",
+  runtime_target: "server",
+  validation: {
+    status: "review",
+    sample_id: "case_001",
+    mean_dice: 0.82,
+    accepted: false
+  },
+  phase_timings: {
+    server_fold_predict: 240.5,
+    server_ensemble: 18.2,
+    server_validation: 6.4
+  },
+  resource_latest: {
+    phase: "completed",
+    device: "cuda",
+    gpu: {
+      name: "NVIDIA A100",
+      memory_used_mib: 20340,
+      memory_total_mib: 40960
+    }
+  }
+});
 assert.deepEqual(parseInferenceEvent('data: {"type":"complete","progress":100,"stage":"完成","inference_options":{"profile":"fast","tile_step_size":1,"disable_tta":true,"not_on_device":false}}\n\n'), {
   type: "complete",
   progress: 100,

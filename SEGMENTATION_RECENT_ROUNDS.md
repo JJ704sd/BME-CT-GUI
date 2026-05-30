@@ -120,6 +120,8 @@
 
 - 前端“分割控制”支持 `服务器云端推理` / `本地在线推理`，提交 job 时显式携带 `runtime_target=server|local`。
 - 后端已保留本地 nnUNetv2 路径，并新增 Linux 服务器 5-GPU 5-fold soft ensemble 编排入口；真实服务器端到端推理仍需单独验收。
+- 已新增 `.planning/campus-network-and-public-access/`，当前执行顺序为校园网 API 直连、真实 5GPU smoke test、必要时 Tailscale/WireGuard，最后才考虑带 HTTPS 和鉴权的公网浏览器入口。
+- 已准备 `deployment-packages/server-runtime-package-20260530.zip` 和 `deployment-packages/server-runtime-quickstart-20260530.md`，用于服务器解压后启动 FastAPI 后端；该部署准备不新增任何 Dice、IoU、耗时或质量验收结论。
 - 局域网访问已支持 `VITE_API_ENDPOINT`、`npm run dev:lan` 和 `SEGMENTATION_ALLOWED_ORIGINS`；当前仅完成本机 IP 直连与 CORS 检查，第二台真实局域网设备上传、SSE、取消、下载和标签 validation 仍待 smoke test。
 - 本轮不改变 AMOS 0117、FLARE22 Tr 0009 的 Dice、耗时或推荐基线。
 

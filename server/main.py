@@ -1113,14 +1113,15 @@ def model_ready() -> bool:
   return bool(get_model_state()["ready"])
 
 
-def get_model_state() -> dict[str, Any]:
+def get_model_state(runtime_target: str | None = None) -> dict[str, Any]:
   checkpoint_source = get_checkpoint_source()
   checkpoint_args = load_checkpoint_init_args()
   checkpoint_plans = checkpoint_args.get("plans") if checkpoint_args else None
   inference_options = get_inference_options()
   server_config = get_server_inference_config()
+  normalized_runtime_target = normalize_runtime_target(runtime_target)
   server_required_files = []
-  if normalize_runtime_target() == "server":
+  if normalized_runtime_target == "server":
     server_required_files = [
       ("server_evaluate_full.py", server_config.evaluate_script),
       ("server_dataset.json", server_config.dataset_json),
@@ -1138,7 +1139,7 @@ def get_model_state() -> dict[str, Any]:
     "ready": ready,
     "status": "ready" if ready else "incomplete",
     "mode": "real-nnunetv2" if ready else "unavailable",
-    "runtime_target": normalize_runtime_target(),
+    "runtime_target": normalized_runtime_target,
     "missing": missing,
     "model_dir": str(FLARE_MODEL_DIR),
     "dataset_json": str(FLARE_DATASET_JSON),
@@ -1906,6 +1907,8 @@ def models() -> dict[str, Any]:
         "missing": model_state["missing"],
         "checkpoint": model_state["checkpoint"],
         "confidence_threshold_effective": model_state["confidence_threshold_effective"],
+        "runtime_target": model_state["runtime_target"],
+        "server_inference": model_state["server_inference"],
         "labels": read_labels(),
       }
     ]
@@ -1950,7 +1953,7 @@ async def create_job(
   if not file.filename or not file.filename.lower().endswith((".nii", ".nii.gz")):
     raise HTTPException(status_code=400, detail="请上传 .nii 或 .nii.gz 格式的 CT 原图。")
   runtime = normalize_runtime_target(runtime_target)
-  model_state = {**get_model_state(), "runtime_target": runtime}
+  model_state = get_model_state(runtime)
   if not model_state["ready"]:
     raise HTTPException(status_code=503, detail={
       "message": "本地 nnUNetv2 模型配置不完整，无法创建真实推理任务。",

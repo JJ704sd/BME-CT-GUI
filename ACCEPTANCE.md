@@ -135,8 +135,10 @@ npm run build
 ## 当前边界
 
 - 本仓库不提交真实 CT、NIfTI、checkpoint 权重或推理输出。
+- `deployment-packages/server-runtime-package-20260530.zip` 只是服务器后端运行包，需在 Ubuntu 22.04 服务器具备 nnUNetv2、CUDA/PyTorch、模型目录和真实 `SEGMENTATION_SERVER_*` 路径后按 `deployment-packages/server-runtime-quickstart-20260530.md` 启动。
 - 当前本地可直接验收的真实 NIfTI 主要是 AMOS 0117。
 - 新增 FLARE 或其他数据集病例后，应先登记到 `reference_cases.example.json` 的同结构配置，再补充本文件中的人工验收记录。
+- 真实服务器模式需按校园网 smoke test 单独记录 `/api/health`、`/api/models`、上传、SSE、取消、5GPU/fold 映射、ensemble、evaluate、下载、前端回填和 validation；在完成前不得把 server runtime 包准备等同于推理验收通过。
 - 没有标准答案的病例只能验收浏览、推理回填和人工复核流程，不能记录自动 Dice 通过。
 
 ## 2026-05-24 运行态记录

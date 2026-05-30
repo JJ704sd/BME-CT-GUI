@@ -2397,7 +2397,40 @@ job `a717dacf42d3`（FLARE22 Tr 0009 + 自动 taxonomy remap）：
 - 局域网当前只完成本机 IP、health 和 CORS 检查；第二台真实设备上的上传、SSE、取消、下载和标签 validation 仍待验收。
 - `AGENTS.md` 属于 agent instruction 文件，当前自动权限拒绝直接覆盖；若需要统一中文主体，需要单独取得用户授权后处理。
 
+## 50. 2026-05-30 校园网访问 planning 与服务器 runtime 包准备
+
+### 50.1 本轮目标
+
+本轮不新增推理指标，也不宣称服务器模式已完成质量验收。目标是把下一步真实服务器在线推理的执行路径收敛为可交付材料：先校园网 API 直连，再做 Ubuntu 22.04 真实 5GPU smoke test，最后才视需求进入 VPN/Mesh 或公网入口。
+
+### 50.2 本轮已完成
+
+1. **校园网与公网访问 planning**
+   - 新增 `.planning/campus-network-and-public-access/task_plan.md`、`findings.md`、`progress.md`。
+   - 规划结论为：优先验证本地电脑前端连接校园网 Ubuntu FastAPI 后端；若校园网互访不稳定，再试 Tailscale / WireGuard；只有真实服务器推理稳定后，才评估 frp、Cloudflare Tunnel、ngrok 或 VPS + HTTPS + 鉴权。
+   - planning 明确公网入口不能裸露未授权 FastAPI 端口，需要 HTTPS、鉴权、大文件上传限制、SSE 反代 timeout/buffering 配置和日志脱敏。
+
+2. **服务器 runtime 部署包**
+   - 新增 `deployment-packages/server-runtime-package-20260530.zip`，用于服务器解压后运行当前 FastAPI 后端和 server 推理编排代码。
+   - 新增 `deployment-packages/server-runtime-quickstart-20260530.md`，记录解压、进入 nnUNet 环境、安装 FastAPI 依赖、配置 CORS、配置 `SEGMENTATION_SERVER_*`、检查路径、启动 `uvicorn`、本地前端连接和最小验收标准。
+   - 部署包不包含真实 CT/NIfTI、checkpoint、`.env`、日志或推理输出；服务器仍必须具备 CUDA/PyTorch/nnUNetv2、模型目录、数据目录和真实评估脚本路径。
+
+3. **替代服务器能力边界**
+   - 如果服务器不放当前后端代码，则必须已有等价推理 API、SSH 执行层或共享文件系统 + 调度系统。
+   - 等价 API 至少要支持上传、创建 job、状态查询、SSE 或轮询进度、取消、结果下载、label validation/evaluate、5GPU / 5-fold soft ensemble，并最好兼容当前 GUI 的 `/api/health`、`/api/models`、`/api/segment/jobs`、events、cancel 和 result 接口。
+
+### 50.3 当前未完成
+
+- 真实校园网 API 直连尚未执行。
+- 真实 Ubuntu 22.04 服务器 5GPU / 5-fold E2E smoke test 尚未执行。
+- 第二台真实局域网设备的大文件上传、SSE 长连接、取消、下载、validation 和前端回填尚未验收。
+- 公网浏览器入口尚未实施，不能写成已具备公网访问能力。
+
+### 50.4 文档同步
+
+已同步 `README.md`、`ACCEPTANCE.md`、`CODE_MODULE_GUIDE.md`、`SEGMENTATION_RECENT_ROUNDS.md`、`SEGMENTATION_EXPERIMENT_COMPARISON.md` 和 `SEGMENTATION_METRICS_SUMMARY.md`，统一口径为：server runtime 包是部署准备，真实服务器质量和性能结论必须等 Linux 服务器 smoke test 后再记录。
+
 ---
 
 *文档版本：2026-05-30*
-*更新依据：当前 `src/main.tsx`、`src/inference/inferenceClient.ts`、`server/main.py`、`server/server_inference.py`、`package.json`、`README.md`、`ACCEPTANCE.md`、`SEGMENTATION_METRICS_SUMMARY.md`、`SEGMENTATION_EXPERIMENT_COMPARISON.md`、`SEGMENTATION_RECENT_ROUNDS.md`、`CODE_MODULE_GUIDE.md` 与 `.planning/lan-direct-and-tunnel/`。*
+*更新依据：当前 `src/main.tsx`、`src/inference/inferenceClient.ts`、`server/main.py`、`server/server_inference.py`、`package.json`、`README.md`、`ACCEPTANCE.md`、`SEGMENTATION_METRICS_SUMMARY.md`、`SEGMENTATION_EXPERIMENT_COMPARISON.md`、`SEGMENTATION_RECENT_ROUNDS.md`、`CODE_MODULE_GUIDE.md`、`.planning/lan-direct-and-tunnel/`、`.planning/campus-network-and-public-access/` 与 `deployment-packages/`。*
