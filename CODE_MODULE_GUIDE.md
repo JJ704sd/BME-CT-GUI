@@ -10,7 +10,7 @@
 4. 到 `src/inference/inferenceClient.ts` 讲前端如何创建 job、监听 SSE、下载结果。
 5. 到 `src/report/exportReport.ts` 讲报告导出：HTML/JSON/PDF 三种格式、自包含 HTML 模板和数据收集。
 6. 到 `server/main.py`、`server/server_inference.py` 和 `server/persistent_nnunet_worker.py` 讲 FastAPI 后端如何桥接 nnUNetv2、管理任务、缓存、validation，以及如何按 `runtime_target` 选择本地保底路径或服务器 5-fold soft ensemble 路径。
-7. 到 `deployment-packages/server-runtime-quickstart-20260530.md` 讲服务器 runtime 包的解压、环境变量、CORS 和校园网 API 直连 smoke test 边界。
+7. 到 `deployment-packages/server-runtime-quickstart-20260530.md` 讲服务器 runtime 包的解压、环境变量、CORS、校园网 API 直连 smoke test，以及已跑通后仍需修正的 taxonomy/gating 边界。
 8. 到 `server/taxonomy.py` 讲跨数据集标签 taxonomy 检测与自动重映射：FLARE22 标签定义、器官名别名映射、`detect_dataset()` 自动识别数据集来源、`build_remap_mapping()` 按器官名建立 ID 映射、`apply_remap()` 用查找表重排参考标签数组。
 9. 到 `tools/segmentation_metrics_summary.py` 讲 Dice、IoU、Voxel Accuracy 和 Hausdorff Distance 指标如何离线复算。
 10. 最后用 `tests/` 和文档说明验收边界：AMOS 原生 validation 与 FLARE22 自动 taxonomy-remap validation 的区别。
@@ -186,7 +186,7 @@
 讲解重点：
 
 - `nnunetv2_files/`、`.test-output/`、`server/work/` 都是本地私有或临时输出，不进入 Git。
-- 自动 validation 的前提是 label taxonomy 与 checkpoint 原生一致，或后端能通过 `server/taxonomy.py` 识别并自动 remap。FLARE22 已支持在线自动 remap；部分标签需至少两个明确错位 ID，单 label 文件仍需人工判断或后续显式数据集 hint。
+- 自动 validation 的前提是 label taxonomy 与 checkpoint 原生一致，或后端能通过 `server/taxonomy.py` 识别并自动 remap。FLARE22 已支持在线自动 remap；但最新服务器 AMOS 轮次出现 AMOS 原生标签疑似被判为 FLARE22 的风险，后续应增加显式 `label_taxonomy=auto|AMOS22|FLARE22`，避免只靠自动推断。
 - 心跳事件的 `heartbeat: true` 字段可用于前端区分心跳和真正的阶段进度；心跳失败不会中断推理。
 
 ## 10. 服务器推理编排：`server/server_inference.py`
@@ -204,7 +204,7 @@
 
 - 服务器模式是正式推理候选路径，目标是 5 张 GPU 并行跑 5 个 fold 后做 soft ensemble；本地模式仍作为开发调试和服务器不可用时的保底。
 - 服务器路径只负责命令构造和进程编排，job 生命周期、SSE、取消、结果下载、cache key 和 validation 仍由 `server/main.py` 统一管理。
-- 真实 Linux 服务器端到端推理尚需单独 smoke test；在完成前，文档不能把服务器模式写成已完成质量验收。
+- 真实 Linux 服务器端到端推理已完成校园网 smoke：前端可提交 job、服务器执行 5-fold/soft ensemble 并回填 GUI；但 server/local gating、AMOS/FLARE 显式 taxonomy、取消和失败恢复仍需继续验收，不能写成完整质量验收。
 
 ## 11. 服务器部署包：`deployment-packages/`
 
@@ -299,7 +299,15 @@ npm run build
 - `npm run build` 通过。
 - 浏览器烟测在 `http://127.0.0.1:5173/` 快速拖动三视图后无控制台错误，三视图图片非空白。
 
-## 15. 数据与文档边界
+## 15. 当前下一轮规划入口
+
+最新 planning 文档位于 `.planning/label-taxonomy-server-validation/`。讲解时应把它作为“服务器链路跑通后的下一轮工程任务”，重点包括：
+
+- `label_taxonomy=auto|AMOS22|FLARE22`：解决 AMOS 原生标签被自动误判为 FLARE22 后错误 remap 的风险。
+- `runtime_target=server` gating：服务器云端推理创建 job 时不应依赖本地 Windows 的 `dataset.json/plans/checkpoint/python.exe`。
+- 证据收集：保留 job summary、validation summary、后端日志、label/prediction unique IDs、spacing/affine 和 voxel count。
+
+## 16. 数据与文档边界
 
 - 真实 NIfTI、checkpoint、推理输出和私有 registry 不提交。
 - 局域网运行时，前端 API 地址由 `VITE_API_ENDPOINT` 配置，Vite 通过 `npm run dev:lan` 监听局域网地址，后端通过 `SEGMENTATION_ALLOWED_ORIGINS` 放行实际浏览器来源；不应长期使用无限制公网来源。

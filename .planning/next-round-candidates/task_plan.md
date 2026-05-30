@@ -2,7 +2,7 @@
 
 **范围：** 基于 2026-05-30 项目现状，规划下一轮可执行任务。
 
-**当前状态：** 三大目标已接近收口：CT 浏览、三正交联动、在线 nnUNetv2 推理、SSE 进度、取消、预测缓存、标签上传、自动 taxonomy remap、报告导出和主要验收文档均已落地。2026-05-29 已修复缓存 validation 复用、persistent worker reader 竞争、上传文件名调试日志和部分 FLARE22 标签 remap 边界。2026-05-30 已增加 `本地在线推理` / `服务器云端推理` 运行位置、局域网配置化、服务器 5-fold soft ensemble 编排入口、校园网访问 planning 和服务器 runtime 包；真实校园网 API 直连与 Linux 服务器端到端推理仍需单独验收。最新校园网规划记录见 `.planning/campus-network-and-public-access/`，早期局域网/穿透方案记录见 `.planning/lan-direct-and-tunnel/`。
+**当前状态：** 三大目标已接近收口：CT 浏览、三正交联动、在线 nnUNetv2 推理、SSE 进度、取消、预测缓存、标签上传、自动 taxonomy remap、报告导出和主要验收文档均已落地。2026-05-29 已修复缓存 validation 复用、persistent worker reader 竞争、上传文件名调试日志和部分 FLARE22 标签 remap 边界。2026-05-30 已增加 `本地在线推理` / `服务器云端推理` 运行位置、局域网配置化、服务器 5-fold soft ensemble 编排入口、校园网访问 planning 和服务器 runtime 包。2026-05-31 已完成 Windows 前端通过校园网调用 Ubuntu FastAPI 后端的 5-fold + soft ensemble + GUI 回填 smoke；当前阻塞点转为 AMOS 原生标签可能被误判为 FLARE22、以及 `runtime_target=server` 创建任务不应依赖本地 nnUNet 文件。最新执行规划见 `.planning/label-taxonomy-server-validation/`。
 
 **本轮已完成（2026-05-28）：**
 
@@ -24,51 +24,51 @@
 - 前端分割控制支持 `runtime_target=server|local`，后端把本地路径和服务器 5-fold soft ensemble 编排路径分开。
 - 本机局域网 IP smoke 已验证前端 200、后端 health 200 和 CORS allow-origin；第二台真实设备完整推理链路仍待验收。
 - 新增 `.planning/campus-network-and-public-access/`，明确当前推荐顺序为校园网 API 直连、Ubuntu 22.04 真实 5GPU smoke test、必要时 Tailscale/WireGuard，最后才做公网浏览器入口。
-- 新增 `deployment-packages/server-runtime-package-20260530.zip` 和 `deployment-packages/server-runtime-quickstart-20260530.md`，用于服务器后端 runtime 部署准备；该准备不等同于真实服务器推理验收通过。
+- 2026-05-31 已完成 Windows 前端通过校园网调用 Ubuntu FastAPI 后端的 5-fold + soft ensemble + GUI 回填 smoke；FLARE 轮次可作为链路证据，AMOS 轮次因疑似 taxonomy 误判暂不作为质量基线。
+- 新增 `deployment-packages/server-runtime-package-20260530.zip` 和 `deployment-packages/server-runtime-quickstart-20260530.md`，用于服务器后端 runtime 部署准备；该准备本身不等同于质量验收通过。
 - 穿透方案阶段性推荐 Tailscale / WireGuard；frp + HTTPS 只在必须提供无客户端公网浏览器入口时考虑。
 
 ---
 
 ## 推荐下一轮任务
 
-### 1. 真实局域网与 Tailscale / WireGuard smoke test
+### 1. 显式标签体系选择与 server gating 修复
 
 **优先级：** 高
 
-**前置文档：** `.planning/lan-direct-and-tunnel/`
+**前置文档：** `.planning/label-taxonomy-server-validation/`
 
-**目标：** 用第二台真实设备完成局域网直连或 VPN/Mesh 访问，验证前端打开、后端 API、上传、SSE、取消、下载和标签 validation 全链路。
+**目标：** 在服务器在线推理已跑通后，避免 AMOS 原生标签被自动误判为 FLARE22，并让 `runtime_target=server` 创建任务只检查 server runtime 必需路径。
 
 **关键步骤：**
 
-1. 用真实前端机器 IP 和后端机器 IP 启动 `npm run dev:lan` 与 `uvicorn --host 0.0.0.0`。
-2. 设置 `VITE_API_ENDPOINT=http://<后端IP>:8000` 和 `SEGMENTATION_ALLOWED_ORIGINS=http://<前端IP>:5173`。
-3. 从第二台设备打开 `http://<前端IP>:5173`，检查 `/api/health`、`/api/models` 和浏览器 CORS。
-4. 执行上传 CT、创建 job、SSE 进度、取消任务、下载结果和标签 validation smoke test。
-5. 如果跨网络访问，优先用 Tailscale / WireGuard 复用同一套配置；只有必须公网普通浏览器入口时才评估 frp + HTTPS。
+1. 在前端和后端新增 `label_taxonomy=auto|AMOS22|FLARE22`。
+2. `AMOS22` hint 下跳过 FLARE remap，`FLARE22` hint 下强制 FLARE22 → AMOS22 remap，`auto` 保留现有检测逻辑。
+3. `runtime_target=server` 创建 job 时只检查服务器配置路径，不再要求本地 Windows `dataset.json/plans/checkpoint/python.exe`。
+4. 复跑 AMOS 原图 + AMOS label，确认 `remap_applied=false` 后再判断真实器官 Dice。
+5. 复跑 FLARE 原图 + FLARE label，确认 `remap_applied=true`、`remap_source=FLARE22`。
 
-**风险：** 真实网络、防火墙、浏览器来源和大文件上传限制可能与本机 smoke 不同。
+**风险：** 该修复只影响 validation/remap 解释和 server gating，不改变 nnUNet 原始预测输出。
 
 ---
 
-### 2. Linux 服务器 5-fold ensemble 端到端验证
+### 2. 服务器在线推理稳定性补验
 
 **优先级：** 高
 
-**前置文档：** `.planning/deployment-preparation/task_plan.md`
+**前置文档：** `.planning/label-taxonomy-server-validation/`
 
-**目标：** 验证“服务器云端推理”从 GUI 提交到 Linux 服务器 5 张 GPU 并行 fold、soft ensemble、结果下载和 validation 的完整链路。
+**目标：** 在 2026-05-31 校园网服务器端到端 smoke 已跑通的基础上，补齐取消、失败恢复、更多病例 validation 和长期稳定性记录。
 
 **关键步骤：**
 
 1. 在 Linux 服务器确认 nnUNetv2、CUDA、`nnUNet_raw/preprocessed/results` 和 checkpoint 目录可用。
-2. 配置 `SEGMENTATION_SERVER_*` 环境变量、fold/GPU 映射和输出目录。
-3. 选择 `服务器云端推理` + `质量推理` 提交一个小病例或 FLARE22 Tr 0009 job。
-4. 观察 5 个 fold 进程是否分别绑定 GPU，`nnUNetv2_ensemble` 是否生成最终 NIfTI。
-5. 下载结果回填 GUI；带标签文件时确认 validation 和自动 taxonomy remap 仍正确。
-6. 取消运行中 job，确认 5 个 fold、ensemble 或 evaluate 子进程都退出。
+2. 保留成功 job 的 `job_summary.json`、`validation_summary.json`、预测 NIfTI 和后端日志。
+3. 对 AMOS/FLARE 分别记录 label/prediction unique IDs、voxel count、shape 和 spacing/affine。
+4. 下载结果回填 GUI；带标签文件时确认显式 taxonomy hint 与 validation message 一致。
+5. 取消运行中 job，确认 5 个 fold、ensemble 或 evaluate 子进程都退出。
 
-**风险：** 服务器路径已经有命令编排入口，但尚未完成真实 Linux 端到端推理；不要提前写成质量验收通过。
+**风险：** 服务器链路可运行不等于质量基线已完成；AMOS 服务器指标必须先排除 taxonomy 误判。
 
 ---
 
@@ -143,7 +143,7 @@
 ## 推荐执行顺序
 
 1. **真实局域网与 Tailscale / WireGuard smoke test**：最贴近当前待验收项。
-2. **Linux 服务器 5-fold ensemble 端到端验证**：验证新增服务器编排入口是否真实可用。
+2. **服务器在线推理稳定性补验**：在已跑通的服务器链路上补齐取消、失败恢复、更多病例 validation 和长期稳定性证据。
 3. **长耗时病例性能策略**：继续优化 AMOS 大体数据等待时间。
 4. **跨数据集标签评估增强**：补单 label hint、remap 覆盖率提示和报告摘要。
 5. **文档与验收口径再同步**：确保文档持续跟随代码变化。

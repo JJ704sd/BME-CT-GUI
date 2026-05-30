@@ -2,7 +2,7 @@
 
 > 基于 `segmentation-gui-prototype` 当前代码、运行中的本地服务以及 `nnunetv2_files` 资源整理。
 > 目标是把这个原型收敛成一个可浏览 CT、可联动三正交视图、可点击器官说明、可连接本地分割后端的工作型 GUI。
-> 当前结论：前端已经具备三正交浏览、13 类器官说明、真实病例入口、结果对比视图和报告导出功能；后端已接入本地 nnUNetv2 model folder 与真实推理命令，并会在配置不完整时明确拒绝创建任务。AMOS 0117 已形成原生标签质量基线，FLARE22 Tr 0009 已完成未缓存 `quality` 在线推理和自动 taxonomy-remap 验证（job `a717dacf42d3`，mean_dice=0.926，验证通过）。GUI 支持 HTML / JSON / PDF 三种格式的分割报告导出。
+> 当前结论：前端已经具备三正交浏览、13 类器官说明、真实病例入口、结果对比视图和报告导出功能；后端已接入本地 nnUNetv2 model folder 与真实推理命令，并会在配置不完整时明确拒绝创建任务。AMOS 0117 已形成原生标签质量基线，FLARE22 Tr 0009 已完成未缓存 `quality` 在线推理和自动 taxonomy-remap 验证（job `a717dacf42d3`，mean_dice=0.926，验证通过）。2026-05-31 的校园网服务器 smoke 进一步证明：Ubuntu 服务器 5GPU / 5-fold soft ensemble 已能被 Windows GUI 调用；但 AMOS 服务器轮次出现 `mean_dice=0.076015`、`foreground_dice=0.979808` 且 `remap_source=FLARE22` 的异常，说明还需要显式 `label_taxonomy=auto|AMOS22|FLARE22` 和 server gating 收口。GUI 支持 HTML / JSON / PDF 三种格式的分割报告导出。
 
 ---
 
@@ -2365,12 +2365,12 @@ job `a717dacf42d3`（FLARE22 Tr 0009 + 自动 taxonomy remap）：
 
 ### 49.1 范围
 
-本轮核对并同步 2026-05-30 的工程链路变化：
+本轮核对并同步 2026-05-30 的工程链路变化，后续在 2026-05-31 已完成校园网服务器端到端 smoke：
 
 - 前端在线推理增加 `服务器云端推理` / `本地在线推理` 两个运行位置。
 - 后端按 `runtime_target=server|local` 分流本地 nnUNetv2 路径和服务器 5-fold soft ensemble 编排路径。
 - 局域网访问改为配置化，避免前端和 CORS 只绑定本机 localhost。
-- 文档同步说明当前边界：本轮不新增真实分割指标，真实第二台局域网设备和 Linux 服务器端到端推理仍需单独 smoke test。
+- 2026-05-31 校园网链路已能从 Windows 前端提交到 Ubuntu FastAPI 后端，完成 5-fold 推理、soft ensemble、结果下载和 GUI 回填；但 AMOS validation 暴露自动 taxonomy 误判风险，仍不能写成完整质量验收通过。
 
 ### 49.2 代码与配置状态
 
@@ -2382,26 +2382,26 @@ job `a717dacf42d3`（FLARE22 Tr 0009 + 自动 taxonomy remap）：
 
 ### 49.3 文档同步
 
-- `README.md`：补充局域网运行、运行位置、服务器 5-fold soft ensemble 配置和 API 字段说明。
-- `ACCEPTANCE.md`：补充 2026-05-30 验收边界，明确真实第二台局域网设备和 Linux 服务器推理仍待验收。
-- `SEGMENTATION_METRICS_SUMMARY.md`：说明运行位置和局域网更新不改变历史 AMOS/FLARE 指标。
-- `SEGMENTATION_EXPERIMENT_COMPARISON.md`：新增 2026-05-30 审核记录，保持推荐基线不变。
-- `SEGMENTATION_RECENT_ROUNDS.md`：新增非推理链路更新段落，不替换近三轮成功推理数据。
-- `CODE_MODULE_GUIDE.md`：补充 `runtime_target`、`server/server_inference.py` 和局域网配置讲解。
-- `.planning/lan-direct-and-tunnel/`：保留局域网直连与穿透方案的 task plan、findings 和 progress 记录。
+- `README.md`：补充局域网运行、运行位置、服务器 5-fold soft ensemble 配置、服务器 smoke 结果和 AMOS taxonomy 风险。
+- `ACCEPTANCE.md`：补充 2026-05-31 服务器在线推理 smoke 与 validation 风险，明确完整质量验收仍需显式 taxonomy hint 和更多稳定性记录。
+- `SEGMENTATION_METRICS_SUMMARY.md`：把服务器 FLARE/AMOS 轮次与本地 AMOS quality 基线分开记录。
+- `SEGMENTATION_EXPERIMENT_COMPARISON.md`：新增服务器 FLARE smoke 与服务器 AMOS 异常行，避免把 AMOS 异常误写成模型失败。
+- `SEGMENTATION_RECENT_ROUNDS.md`：更新近三轮记录，突出服务器 AMOS taxonomy 异常和 FLARE remap 正常。
+- `CODE_MODULE_GUIDE.md`：补充 `runtime_target`、`server/server_inference.py`、局域网配置和下一轮 taxonomy/gating 规划入口。
+- `.planning/label-taxonomy-server-validation/`：记录显式 `label_taxonomy=auto|AMOS22|FLARE22` 与 server gating 的下一轮任务。
 
 ### 49.4 行为边界
 
 - 当前推荐正式 AMOS 基线仍是 `quality` profile `b3c528cc9e20`；跨数据集在线验证基线仍是 FLARE 自动 remap job `a717dacf42d3`。
-- 服务器模式已经具备后端编排入口，但不能写成已完成 Linux 服务器真实质量验收。
-- 局域网当前只完成本机 IP、health 和 CORS 检查；第二台真实设备上的上传、SSE、取消、下载和标签 validation 仍待验收。
+- 服务器端到端链路已完成阶段性 smoke，可作为工程进展；服务器 AMOS 质量指标必须等 `label_taxonomy=AMOS22` 复跑并确认 `remap_applied=false` 后再纳入正式基线。
+- `runtime_target=server` 创建 job 仍需修复 gating：服务器云端推理不应依赖本地 Windows 的 `dataset.json/plans/checkpoint/python.exe`。
 - `AGENTS.md` 属于 agent instruction 文件，当前自动权限拒绝直接覆盖；若需要统一中文主体，需要单独取得用户授权后处理。
 
 ## 50. 2026-05-30 校园网访问 planning 与服务器 runtime 包准备
 
 ### 50.1 本轮目标
 
-本轮不新增推理指标，也不宣称服务器模式已完成质量验收。目标是把下一步真实服务器在线推理的执行路径收敛为可交付材料：先校园网 API 直连，再做 Ubuntu 22.04 真实 5GPU smoke test，最后才视需求进入 VPN/Mesh 或公网入口。
+本轮当时不新增推理指标，也不宣称服务器模式已完成质量验收。目标是把真实服务器在线推理的执行路径收敛为可交付材料：先校园网 API 直连，再做 Ubuntu 22.04 真实 5GPU smoke test，最后才视需求进入 VPN/Mesh 或公网入口。2026-05-31 后，校园网服务器 smoke 已完成，剩余重点转为 AMOS/FLARE 显式 taxonomy、server/local gating、取消、失败恢复和长期稳定性验收。
 
 ### 50.2 本轮已完成
 
@@ -2421,14 +2421,15 @@ job `a717dacf42d3`（FLARE22 Tr 0009 + 自动 taxonomy remap）：
 
 ### 50.3 当前未完成
 
-- 真实校园网 API 直连尚未执行。
-- 真实 Ubuntu 22.04 服务器 5GPU / 5-fold E2E smoke test 尚未执行。
-- 第二台真实局域网设备的大文件上传、SSE 长连接、取消、下载、validation 和前端回填尚未验收。
+- AMOS 服务器轮次需要在显式 `label_taxonomy=AMOS22` 下复跑，确认 `remap_applied=false` 后才能纳入正式质量基线。
+- FLARE 服务器轮次需要在显式 `label_taxonomy=FLARE22` 下复跑，确认 `remap_applied=true`、`remap_source=FLARE22`。
+- `runtime_target=server` 的 job 创建 gating 仍需修复，避免服务器云端推理依赖本地 Windows nnUNet 文件。
+- 第二台真实局域网设备的大文件上传、SSE 长连接、取消、下载、validation 和前端回填仍需补充记录。
 - 公网浏览器入口尚未实施，不能写成已具备公网访问能力。
 
 ### 50.4 文档同步
 
-已同步 `README.md`、`ACCEPTANCE.md`、`CODE_MODULE_GUIDE.md`、`SEGMENTATION_RECENT_ROUNDS.md`、`SEGMENTATION_EXPERIMENT_COMPARISON.md` 和 `SEGMENTATION_METRICS_SUMMARY.md`，统一口径为：server runtime 包是部署准备，真实服务器质量和性能结论必须等 Linux 服务器 smoke test 后再记录。
+已同步 `README.md`、`ACCEPTANCE.md`、`CODE_MODULE_GUIDE.md`、`SEGMENTATION_RECENT_ROUNDS.md`、`SEGMENTATION_EXPERIMENT_COMPARISON.md` 和 `SEGMENTATION_METRICS_SUMMARY.md`，统一口径为：server runtime 包完成了部署准备，2026-05-31 校园网服务器端到端 smoke 已跑通；FLARE 轮次可作为链路证据，AMOS 轮次因疑似 taxonomy 误判暂不作为模型失败或质量基线。
 
 ---
 

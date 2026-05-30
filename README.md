@@ -2,7 +2,7 @@
 
 本项目是面向腹部 CT 分割验证流程的本地 GUI 原型。前端使用 React + Vite，后端使用 FastAPI 桥接本机 nnUNetv2 环境，目标是完成 CT 浏览、三正交联动、器官 label 说明、真实模型推理回填、结果下载和验收记录。
 
-截至 2026-05-30，项目已经作为独立 GUI 仓库维护；真实 CT、NIfTI、checkpoint 权重和推理输出仍只保留在本机，不提交到 GitHub。当前已完成本地在线推理、标签上传、自动 taxonomy remap、报告导出和服务器 runtime 部署准备，但真实校园网直连与 Linux 服务器 5GPU / 5-fold 端到端验收仍需单独执行。
+截至 2026-05-31，项目已经作为独立 GUI 仓库维护；真实 CT、NIfTI、checkpoint 权重和推理输出仍只保留在本机，不提交到 GitHub。当前已完成本地在线推理、标签上传、自动 taxonomy remap、报告导出、服务器 runtime 部署准备，以及校园网内 Windows 前端直连 Ubuntu 服务器 FastAPI 后端的 5GPU / 5-fold soft ensemble 在线推理回填。最新服务器运行显示：FLARE22 标签经自动 remap 后 Dice 较高，AMOS 原生标签被误判为 FLARE22 后 mean Dice 异常偏低；下一轮重点是显式 `label_taxonomy=auto|AMOS22|FLARE22` 和 server 模式 gating 收口。
 
 ## 当前状态
 
@@ -11,11 +11,11 @@
 - 后端模式：模型资源齐备时为 `real-nnunetv2`，缺失时为 `unavailable`
 - 当前主要参考病例：AMOS 0117、FLARE22 Tr 0009
 - 当前新权重：`nnunetv2_files/checkpoint_best.pth`
-- 自动 taxonomy remap：已实现，FLARE22 在线验证 mean_dice 从 0.073 提升到 0.926；部分 FLARE22 标签在至少两个明确错位 label 时也可自动识别，单 label 文件仍保持保守处理
+- 自动 taxonomy remap：已实现，FLARE22 在线验证 mean_dice 从 0.073 提升到 0.926；服务器最新 FLARE 轮次约 `mean Dice=0.891`、`foreground Dice=0.951`。但 AMOS 原生标签若被自动误判为 FLARE22 会导致 `mean Dice=0.076`、`foreground Dice=0.980` 这类“前景重合但器官 ID 错位”的异常，因此下一步需增加显式 `label_taxonomy=auto|AMOS22|FLARE22`。
 - 主要进展和实验记录：见 [REVIEW.md](./REVIEW.md)、[ACCEPTANCE.md](./ACCEPTANCE.md) 与 [SEGMENTATION_EXPERIMENT_COMPARISON.md](./SEGMENTATION_EXPERIMENT_COMPARISON.md)
 - 代码讲解材料：见 [CODE_MODULE_GUIDE.md](./CODE_MODULE_GUIDE.md)
 - 服务器 runtime 部署包：`deployment-packages/server-runtime-package-20260530.zip`，配套最短操作清单见 `deployment-packages/server-runtime-quickstart-20260530.md`。该包只包含后端运行代码、工具脚本和说明文档，不包含真实 CT/NIfTI、checkpoint、`.env`、日志或推理输出。
-- 当前推荐部署顺序：先做校园网 API 直连和 Ubuntu 22.04 真实 5GPU smoke test；若校园网互访不稳定，再考虑 Tailscale / WireGuard；外网浏览器入口需在真实服务器推理跑通后再配置 HTTPS、鉴权、大文件上传和 SSE 反代。
+- 当前推荐部署顺序：校园网 API 直连和 Ubuntu 22.04 真实 5GPU smoke test 已初步跑通；后续先修正 AMOS/FLARE label taxonomy 显式选择和 server 模式 gating，再考虑 Tailscale / WireGuard 或公网 HTTPS、鉴权、大文件上传和 SSE 反代。
 
 ## 主要功能
 
@@ -236,6 +236,17 @@ FLARE22 Tr 0009 + 自动 taxonomy remap 在线验证：
 | 验证状态 | `passed` |
 
 自动 taxonomy remap 上线后，FLARE22 标签在线验证从 mean_dice=0.073 提升到 0.926。后端 `server/taxonomy.py` 自动检测 FLARE22 数据集并按器官名重映射标签 ID，无需手动干预。跨数据集在线验证链路正式打通。
+
+## 2026-05-31 服务器在线推理补充
+
+校园网链路已经从“部署准备”推进到“可运行 smoke”：Windows 前端通过 `VITE_API_ENDPOINT=http://10.102.1.202:8000` 调用 Ubuntu FastAPI 后端，服务器执行 5-fold 并行推理、soft ensemble，并把 NIfTI 结果下载回 GUI 三视图。
+
+| 轮次 | 结果 | 解读 |
+|---|---|---|
+| FLARE22 + 标签 | mean Dice 约 `0.891`，foreground Dice 约 `0.951`，约 `3分48秒` | 自动 FLARE22 → AMOS22 remap 后指标合理，可作为服务器链路跑通证据。 |
+| AMOS 0117 + AMOS 标签 | mean Dice `0.076015`，foreground Dice `0.979808`，约 `9分46秒` | 前景 Dice 很高但逐器官 Dice 大面积为 0，且报告显示 `remap_source=FLARE22`，更像 AMOS 标签被误 remap，不应解读为模型完全失败。 |
+
+下一轮代码计划已记录在 `.planning/label-taxonomy-server-validation/`：增加显式 `label_taxonomy=auto|AMOS22|FLARE22`，并修复 `runtime_target=server` 创建任务不应依赖本地 Windows nnUNet 文件的 gating 问题。
 
 ## 三视图拖动体验
 

@@ -1,10 +1,69 @@
 # 近三轮分割推理滚动记录
 
-> 本文档按时间滚动覆写，只保留最近三轮成功推理的数据。历史完整记录见 `SEGMENTATION_EXPERIMENT_COMPARISON.md`。
+> 本文档按时间滚动覆写，只保留最近三轮成功或具备诊断价值的推理数据。历史完整记录见 `SEGMENTATION_EXPERIMENT_COMPARISON.md`。
 
-最近更新：2026-05-30
+最近更新：2026-05-31
 
-## 第 1 轮（最新）— FLARE22 + 自动 Taxonomy Remap 在线验证
+## 第 1 轮（最新）— 服务器 AMOS 0117 validation 异常
+
+| 项目 | 值 |
+|---|---|
+| job_id | `5d8f5eee7b75` |
+| 日期 | 2026-05-30 |
+| 病例 | AMOS 0117 |
+| 运行位置 | Ubuntu 服务器，5GPU / 5-fold soft ensemble |
+| 前端接入 | Windows GUI 通过校园网 API endpoint |
+| 模式 | `real-nnunetv2` |
+| 缓存 | 否 |
+| 推理配置 | quality / tile_step=0.5 / TTA on |
+| 总耗时 | `586.453s`（约 9分46秒） |
+| 主要阶段 | `server_fold_predict=449.5s`, `server_ensemble=131.116s`, `validation=5.51s` |
+| 结果大小 | `141986 bytes` |
+| remap_applied | `true` |
+| remap_source | `FLARE22` |
+
+**验证结果：**
+
+| 指标 | 值 | 状态 |
+|---|---:|---|
+| 平均 Dice | `0.076015` | 未通过 |
+| 最低 Dice | `0.000000` | 未通过 |
+| 前景 Dice | `0.979808` | 前景总体高度重合 |
+| validation status | `review` | 建议人工复核 |
+
+**结论：** 服务器推理、soft ensemble、下载和 GUI 回填链路已跑通。该轮 Dice 异常不应直接解读为模型完全失败，因为 foreground Dice 很高，但报告显示 AMOS 标签被自动当作 FLARE22 执行 remap。下一步需用显式 `label_taxonomy=AMOS22` 复跑，并确认 `remap_applied=false`。
+
+---
+
+## 第 2 轮 — 服务器 FLARE22 + 自动 remap 在线验证
+
+| 项目 | 值 |
+|---|---|
+| 日期 | 2026-05-30 |
+| 病例 | FLARE22 |
+| 运行位置 | Ubuntu 服务器，5GPU / 5-fold soft ensemble |
+| 前端接入 | Windows GUI 通过校园网 API endpoint |
+| 模式 | `real-nnunetv2` |
+| 缓存 | 否 |
+| 推理配置 | quality / tile_step=0.5 / TTA on |
+| 总耗时 | 约 `3分48秒` |
+| 瓶颈阶段 | 服务器 5-fold 推理约 `2分55.3秒` |
+| 结果大小 | 约 `117.2 KB` |
+| remap | FLARE22 → 当前 AMOS 模型 |
+
+**验证结果（自动重映射后）：**
+
+| 指标 | 值 | 状态 |
+|---|---:|---|
+| 平均 Dice | 约 `0.891` | 可用，仍需复核最低标签 |
+| 最低 Dice | 约 `0.657` | 低于 0.70，建议人工复核 |
+| 前景 Dice | 约 `0.951` | 前景重合良好 |
+
+**结论：** FLARE 服务器轮次说明服务器模式下 5-fold 推理、soft ensemble、自动 taxonomy remap、validation 和前端回填均可工作。该结果是服务器链路跑通证据，但仍应与 AMOS 原生标签质量基线分开解释。
+
+---
+
+## 第 3 轮 — FLARE22 + 自动 Taxonomy Remap 在线验证（本地/既有基线）
 
 | 项目 | 值 |
 |---|---|
@@ -21,143 +80,52 @@
 **验证结果（自动重映射后）：**
 
 | 指标 | 值 | 阈值 | 状态 |
-|---|---|---|---|
-| 平均 Dice | 0.926 | ≥ 0.85 | 通过 |
+|---|---:|---:|---|
+| 平均 Dice | `0.926` | ≥ 0.85 | 通过 |
 | 验证状态 | passed | — | 自动验证通过 |
 
 **结论：** 自动 taxonomy remap 上线后，FLARE22 标签在线验证从 mean_dice=0.073 提升到 0.926。后端自动检测 FLARE22 数据集并按器官名重映射标签 ID，无需手动干预。跨数据集在线验证链路正式打通。
 
 ---
 
-## 第 2 轮 — FLARE22 + 标签上传 + 在线验证（taxonomy 错位）
-
-| 项目 | 值 |
-|---|---|
-| job_id | `bf20f0ec4456` |
-| 日期 | 2026-05-27 23:00 |
-| 病例 | FLARE22 Tr 0009 |
-| 标签文件 | 已上传（`bf20f0ec4456_label.nii.gz`，131 KB） |
-| 模式 | real-nnunetv2 |
-| 缓存 | 否 |
-| 推理配置 | quality / tile_step=0.5 / TTA on |
-| 总耗时 | 222.6s |
-| 瓶颈阶段 | nnunet_process 221.2s |
-| 结果大小 | 120,748 bytes (117.9 KB) |
-| GPU | RTX 4060 Laptop, 峰值 ~7,800/8,188 MiB, 100% |
-| 磁盘可用 | 95.1 GB |
-
-**验证结果：**
-
-| 指标 | 值 | 阈值 | 状态 |
-|---|---|---|---|
-| 平均 Dice | 0.07276 | ≥ 0.85 | 未通过 |
-| 最低 Dice | 0.000 | ≥ 0.70 | 未通过 |
-| 前景 Dice | 0.949908 | — | — |
-| taxonomy_match | True | — | — |
-| 验证状态 | review | — | 建议人工复核 |
-
-**逐标签 Dice（AMOS22 标签 ID vs FLARE22 语义）：**
-
-| ID | AMOS22 名称 | FLARE22 实际含义 | Dice | 说明 |
-|---|---|---|---|---|
-| 1 | 脾脏 | 肝脏 | 0.000000 | 语义错位 |
-| 2 | 右肾 | 右肾 | **0.945249** | 恰好一致 |
-| 3 | 左肾 | 脾脏 | 0.000000 | 语义错位 |
-| 4 | 胆囊 | 右肾上腺 | 0.000000 | 语义错位 |
-| 5 | 食管 | 左肾上腺 | 0.000000 | 语义错位 |
-| 6 | 肝脏 | 胆囊 | 0.000635 | 语义错位 |
-| 7 | 胃 | 食管 | 0.000000 | 语义错位 |
-| 8 | 主动脉 | 胃 | 0.000000 | 语义错位 |
-| 9 | 下腔静脉 | 主动脉 | 0.000000 | 语义错位 |
-| 10 | 胰腺 | 下腔静脉 | 0.000000 | 语义错位 |
-| 11 | 右肾上腺 | 胰腺 | 0.000000 | 语义错位 |
-| 12 | 左肾上腺 | 十二指肠 | 0.000000 | 语义错位 |
-| 13 | 十二指肠 | 左肾 | 0.000000 | 语义错位 |
-| 14 | 膀胱 | — | N/A | 该例无此标签 |
-| 15 | 前列腺/子宫 | — | N/A | 该例无此标签 |
-
-**结论：** 模型推理正常，标签传输链路修复成功。Dice 极低是因为 FLARE22 标签 ID 与 AMOS22 checkpoint 语义不匹配，非模型质量问题。此问题已在第 1 轮通过自动 taxonomy remap 解决。
-
----
-
-## 第 3 轮 — AMOS 0117 新权重首次推理
-
-| 项目 | 值 |
-|---|---|
-| job_id | `b6e04914f852` |
-| 日期 | 2026-05-27 20:45 |
-| 病例 | AMOS 0117 |
-| 标签文件 | 内置参考病例 |
-| 模式 | real-nnunetv2 |
-| 缓存 | 否 |
-| 推理配置 | quality |
-| 总耗时 | 1054.3s（~17.6 分钟） |
-| 瓶颈阶段 | nnunet_process 1054.2s |
-| 结果大小 | 141,576 bytes (138.3 KB) |
-| GPU | RTX 4060 Laptop, 峰值 ~871/8,188 MiB |
-
-**验证结果：** 未在本轮 job 中记录（可能在隔离测试目录中）
-
-**结论：** AMOS 0117 推理耗时明显长于 FLARE22（1054s vs 214s），因为 AMOS 体数据有 568 层切片 vs FLARE22 的 87 层。
-
----
-
 ## 近三轮趋势
 
-| 维度 | 第 1 轮 (FLARE 自动 remap) | 第 2 轮 (FLARE+标签) | 第 3 轮 (AMOS) |
+| 维度 | 第 1 轮（服务器 AMOS 异常） | 第 2 轮（服务器 FLARE） | 第 3 轮（FLARE 自动 remap 基线） |
 |---|---|---|---|
-| 耗时 | ~220s | 223s | 1054s |
-| 结果大小 | ~118 KB | 118 KB | 138 KB |
-| 验证状态 | passed | review | 未记录 |
-| mean_dice | 0.926 | 0.073 | — |
-| 核心问题 | 已解决 | taxonomy 错位（已通过自动 remap 解决） | 耗时长 |
+| 耗时 | 586s | 约 228s | 约 220s |
+| 结果大小 | 138.7 KB | 117.2 KB | 约 118 KB |
+| 验证状态 | review | review / 可用 | passed |
+| mean_dice | 0.076 | 约 0.891 | 0.926 |
+| foreground_dice | 0.980 | 约 0.951 | 未记录 |
+| 核心问题 | AMOS 可能被误判为 FLARE22 并错误 remap | 最低标签仍需人工复核 | 已解决 FLARE taxonomy 错位 |
 
 ---
-
-## 2026-05-30 非推理链路更新
-
-本轮新增运行位置选择和局域网访问配置，不替换上方近三轮真实推理记录：
-
-- 前端“分割控制”支持 `服务器云端推理` / `本地在线推理`，提交 job 时显式携带 `runtime_target=server|local`。
-- 后端已保留本地 nnUNetv2 路径，并新增 Linux 服务器 5-GPU 5-fold soft ensemble 编排入口；真实服务器端到端推理仍需单独验收。
-- 已新增 `.planning/campus-network-and-public-access/`，当前执行顺序为校园网 API 直连、真实 5GPU smoke test、必要时 Tailscale/WireGuard，最后才考虑带 HTTPS 和鉴权的公网浏览器入口。
-- 已准备 `deployment-packages/server-runtime-package-20260530.zip` 和 `deployment-packages/server-runtime-quickstart-20260530.md`，用于服务器解压后启动 FastAPI 后端；该部署准备不新增任何 Dice、IoU、耗时或质量验收结论。
-- 局域网访问已支持 `VITE_API_ENDPOINT`、`npm run dev:lan` 和 `SEGMENTATION_ALLOWED_ORIGINS`；当前仅完成本机 IP 直连与 CORS 检查，第二台真实局域网设备上传、SSE、取消、下载和标签 validation 仍待 smoke test。
-- 本轮不改变 AMOS 0117、FLARE22 Tr 0009 的 Dice、耗时或推荐基线。
-
----
-
-## 已解决问题
-
-### 问题 1：FLARE22 taxonomy 错位导致 Dice 无意义 ✅ 已解决
-
-**现状：** 2026-05-28 实现自动 taxonomy remap。后端 `server/taxonomy.py` 自动检测 FLARE22 数据集并按器官名重映射标签 ID，job `a717dacf42d3` 在线验证 mean_dice=0.926，验证通过。2026-05-29 补充支持至少两个明确错位 label 的 FLARE22 部分标签 remap；单 label 文件仍保持人工判断边界。
-
-### 问题 2：GUI 评估面板对跨数据集结果的展示 ✅ 已解决
-
-**现状：** 评估面板已支持 `remap_applied` 标签展示。当自动重映射生效时，显示"已自动重映射标签 ID（FLARE22 → 当前模型）"。
 
 ## 待解决问题
 
-### 问题 3：AMOS 0117 推理耗时过长（1054s）
+### 问题 1：AMOS 原生标签可能被误判为 FLARE22
 
-**现状：** AMOS 568 层切片在 RTX 4060 Laptop (8GB) 上需要 ~17 分钟。
-
-**行动：**
-- 考虑 `fast` profile 作为默认预览模式（耗时 ~384s）
-- 调查 `tile_step_size` 对耗时和质量的影响
-- 单独设计真实连续无缓存推理对照，确认 persistent worker 是否改善第二个不同输入的等待时间；2026-05-29 只完成 reader 复用修复和轻量 smoke，不能写成已验证加速
-
-### 问题 4：标签文件传输稳定性观察 ✅ 已收口
-
-**现状：** 标签上传入口、FormData `label_file`、后端保存路径和在线 validation 已有回归覆盖。2026-05-29 已移除前后端上传文件名调试日志，避免病例文件名泄露到控制台或 stdout。
+**现状：** 服务器 AMOS 轮次出现 `foreground_dice=0.979808` 但 `mean_dice=0.076015`，同时报告记录 `remap_applied=true`、`remap_source=FLARE22`。这更像 label taxonomy 误判，而不是模型完全失败。
 
 **行动：**
-- 后续观察改为检查 job summary、`label_path` 和 validation 结果，不再依赖 `console.log`。
 
-### 问题 5：缓存命中 validation 语义 ✅ 已解决
+- 增加显式 `label_taxonomy=auto|AMOS22|FLARE22`。
+- AMOS22：禁止 FLARE remap，直接按当前 AMOS checkpoint label ID 验证。
+- FLARE22：强制 FLARE22 → AMOS22 remap。
+- auto：保留当前检测逻辑，但 message 必须明确检测来源和 remap 状态。
 
-**现状：** 2026-05-29 修复后，`cached-real-nnunetv2` 只表示预测 NIfTI 复用。缓存命中时如果当前请求带标签文件，会重新 validation；如果没有当前标签且不是内置参考病例，则不返回旧 validation。
+### 问题 2：server 模式 gating 仍需收口
+
+**现状：** `/api/models` 默认仍可能显示 `runtime_target=local` 并报告本地 Windows nnUNet 文件缺失；服务器云端推理创建 job 时不应依赖本地 `dataset.json/plans/checkpoint/python.exe`。
 
 **行动：**
-- 文档和验收记录中继续把“预测缓存”和“validation 当前请求上下文”分开描述。
+
+- `runtime_target=server` 只检查 server runtime 必需路径。
+- `runtime_target=local` 才检查本地 nnUNet 文件。
+- 保留 `/api/models` 和 job summary 中的最终 runtime target，避免误读当前运行位置。
+
+### 问题 3：标签文件传输和缓存 validation 语义已收口
+
+**现状：** 标签上传入口、FormData `label_file`、后端保存路径和在线 validation 已有回归覆盖；缓存命中只复用预测 NIfTI，不复用旧 validation。
+
+**行动：** 后续观察改为检查 job summary、`label_path`、`validation_summary.json` 和 validation 结果，不再依赖控制台文件名日志。

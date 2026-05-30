@@ -24,8 +24,8 @@
 - `N/A` 表示该标签在预测和参考中均为空。`0.000000` 表示参考中没有该标签，但预测产生了体素。
 - 2026-05-26 的在线推理输入后缀规范化和底部实时进度展示属于工程链路修复，不改变下列历史实验的 Dice、IoU、Hausdorff Distance 或耗时数值。
 - 2026-05-29 的缓存 validation 修复、persistent worker reader 修复、上传文件名日志移除和部分 FLARE22 标签 remap 增强也不改变下列表格中的历史数值。当前语义下，`cached-real-nnunetv2` 只代表预测结果复用；validation 仍必须按当前请求的标签文件或内置参考标签重新计算。
-- 2026-05-30 新增 `runtime_target=local|server`、局域网配置化和服务器 5-fold soft ensemble 编排入口后，本表仍只保留已实测完成的 AMOS/FLARE 指标；服务器模式真实指标需在 Linux 服务器端到端 smoke test 之后单独新增。
-- 2026-05-30 准备的 `deployment-packages/server-runtime-package-20260530.zip` 与配套 quickstart 是服务器部署准备，不改变本表任何历史实验数值，也不能替代真实 5GPU 服务器验收。
+- 2026-05-30 新增 `runtime_target=local|server`、局域网配置化和服务器 5-fold soft ensemble 编排入口。
+- 2026-05-31 校园网 Linux 服务器端到端 smoke 已跑通：FLARE 服务器轮次 Dice 合理，AMOS 服务器轮次暴露自动 taxonomy 误判风险；服务器指标必须与本地 fold0/quality 基线分开解释。
 
 ## 实验名称说明
 
@@ -42,6 +42,8 @@
 | 跨数据集 FLARE | FLARE22 病例按器官名 remap 到 AMOS 标签后的离线对照 | 排查模型在非 AMOS 数据上的泛化趋势；不能直接和 AMOS 原生验证混算 | `flare22-tr-0009-quality-20260526`, job `86b0153d0a73` |
 | FLARE+标签在线 | 标签文件传输修复后，FLARE22 在线 validation 链路首次打通 | 验证标签文件传输和在线 validation 可用；taxonomy 错位导致 Dice 无意义 | job `bf20f0ec4456` |
 | FLARE 自动 remap | 2026-05-28 自动 taxonomy remap 上线后，在线验证自动重映射标签 ID | 跨数据集在线验证正式打通，mean_dice=0.926，验证通过 | job `a717dacf42d3` |
+| 服务器 FLARE smoke | 校园网服务器 5GPU/5-fold soft ensemble，FLARE 标签自动 remap | 服务器链路跑通证据，mean Dice 约 0.891 | 报告 `1780153055202` |
+| 服务器 AMOS 异常 | 校园网服务器 5GPU/5-fold soft ensemble，AMOS 标签疑似被误判为 FLARE22 | taxonomy 误判证据，不作为模型失败基线 | job `5d8f5eee7b75` |
 
 ## 实验总览
 
@@ -58,6 +60,8 @@
 | 跨数据集 FLARE | `86b0153d0a73` | FLARE22 Tr 0009 | quality，离线 remap | 仅作对照 | false | 237.323 | 0.893127 | 0.673730 | 0.949908 | 0.815941 | 0.991879 | 12.595149 |
 | FLARE+标签在线 | `bf20f0ec4456` | FLARE22 Tr 0009 | quality，taxonomy 错位 | review | false | 222.6 | 0.073 | 0.000 | 0.950 | N/A | N/A | N/A |
 | FLARE 自动 remap | `a717dacf42d3` | FLARE22 Tr 0009 | quality，自动 remap | passed | false | ~220 | 0.926 | — | — | — | — | — |
+| 服务器 FLARE smoke | `—` | FLARE22 | server quality，5-fold soft ensemble，自动 remap | review/可用 | false | ~228 | ~0.891 | ~0.657 | ~0.951 | — | — | — |
+| 服务器 AMOS 异常 | `5d8f5eee7b75` | AMOS 0117 | server quality，5-fold soft ensemble，疑似误 remap | review | false | 586.453 | 0.076015 | 0.000 | 0.979808 | — | — | — |
 
 ## 逐标签 Dice 对比
 
@@ -275,6 +279,21 @@
 
 结论：自动 remap 后，在线 validation 会先按器官名把 FLARE22 标签 ID 重映射到当前 AMOS22 checkpoint 标签 ID，再计算 Dice。该运行证明跨数据集在线验证链路已打通，但仍应与 AMOS 0117 原生标签指标分开解释。
 
+## 2026-05-31 服务器在线推理 smoke 记录
+
+| 项目 | FLARE 服务器轮次 | AMOS 服务器轮次 |
+|---|---|---|
+| 运行位置 | Ubuntu 服务器，5GPU/5-fold soft ensemble | Ubuntu 服务器，5GPU/5-fold soft ensemble |
+| 前端接入 | Windows GUI 通过校园网 API endpoint | Windows GUI 通过校园网 API endpoint |
+| 总耗时 | 约 `3分48秒` | `586.453s` / 约 `9分46秒` |
+| 主要阶段 | 5-fold 推理约 `2分55.3秒` | `server_fold_predict=449.5s`, `server_ensemble=131.116s` |
+| 结果大小 | 约 `117.2 KB` | `141986 bytes` |
+| mean Dice | 约 `0.891` | `0.076015` |
+| foreground Dice | 约 `0.951` | `0.979808` |
+| remap | FLARE22 → 当前 AMOS 模型，符合预期 | 报告显示 FLARE22 → 当前模型，但输入疑似 AMOS 原生标签 |
+
+结论：服务器在线推理主链路已经能完成提交、5-fold 并行推理、soft ensemble、validation 和前端回填。FLARE 轮次说明跨数据集 remap 在服务器模式可用；AMOS 轮次的高 foreground Dice + 低 mean Dice + `remap_source=FLARE22` 更像标签体系误判，需要显式 `label_taxonomy=AMOS22` 复跑后再纳入正式质量对比。
+
 ## 结论解读
 
 - 新 checkpoint 是历史结果中的主要提升点。AMOS 最弱标签从旧模型胃 Dice 约 `0.556` 提升到新权重和正式质量配置中的约 `0.8465`。
@@ -324,7 +343,7 @@
 - 前端已支持 `runtime_target=local|server`，用于区分本地 fold0 保底推理和服务器 5-GPU 5-fold soft ensemble 推理。
 - `runtime_target` 和 `inference_options` 已纳入 job state、SSE complete 事件、`job_summary.json` 和缓存语义，避免本地结果、服务器 ensemble 结果、`fast`/`quality` 结果混用。
 - 局域网访问已配置化：前端通过 `VITE_API_ENDPOINT` 指向后端，`npm run dev:lan` 监听 `0.0.0.0:5173`，后端通过 `SEGMENTATION_ALLOWED_ORIGINS` 放行实际浏览器来源。
-- 本轮没有新增真实分割指标；第二台局域网设备 smoke test 和 Linux 服务器端到端推理完成前，当前推荐基线仍沿用 AMOS `quality` profile `b3c528cc9e20` 与 FLARE 自动 remap `a717dacf42d3`。
+- 2026-05-31 校园网服务器端到端 smoke 已跑通；当前推荐基线仍沿用 AMOS `quality` profile `b3c528cc9e20` 与 FLARE 自动 remap `a717dacf42d3`。服务器 FLARE 轮次可作为链路证据，服务器 AMOS 轮次因疑似 taxonomy 误判暂不替换正式 AMOS 基线。
 
 ## 推荐基线
 

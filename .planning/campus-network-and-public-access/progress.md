@@ -20,12 +20,20 @@
 3. 如果校园网互访不稳定，再试 Tailscale / WireGuard。
 4. 如果必须外网浏览器直接访问，再做 frp / Cloudflare Tunnel / VPS + HTTPS + 鉴权。
 
+## 2026-05-31：校园网服务器端到端 smoke 已跑通
+
+**完成：**
+
+- Windows 前端已通过校园网 API endpoint 调用 Ubuntu FastAPI 后端。
+- `runtime_target=server` 已能进入 5-fold 并行推理、soft ensemble、结果下载和 GUI 回填。
+- FLARE 服务器轮次在自动 remap 后 Dice 合理，可作为服务器链路跑通证据。
+- AMOS 服务器轮次出现 `mean_dice=0.076015`、`foreground_dice=0.979808` 且 `remap_source=FLARE22`，更像 AMOS 原生标签被误 remap。
+
 **当前状态：**
 
-- 代码侧已经支持 `VITE_API_ENDPOINT`、`SEGMENTATION_ALLOWED_ORIGINS` 和 `runtime_target=local|server`。
-- server job 生命周期、SSE、取消、下载、validation、缓存隔离已有测试级覆盖。
-- 真实校园网 API 直连尚未执行。
-- 真实 Ubuntu 22.04 服务器 5GPU E2E smoke test 尚未执行。
+- 校园网 API 直连和服务器 5GPU E2E smoke 已完成阶段性验证。
+- 下一轮重点转为 `.planning/label-taxonomy-server-validation/`：显式 `label_taxonomy=auto|AMOS22|FLARE22`、server mode gating、AMOS/FLARE 复跑验证。
+- 第二台真实局域网设备的大文件上传、SSE 长连接、取消、下载、validation 和前端回填仍需补充记录。
 - 外网浏览器入口尚未实施，不应写成已验收通过。
 
 ## 待执行清单

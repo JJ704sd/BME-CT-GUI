@@ -6,7 +6,7 @@
 
 ## 2026-05-30：当前阶段应先做校园网 API 直连
 
-**判断：** 当前 GUI 项目的代码侧已经支持远端 API 地址、CORS 白名单和 `runtime_target=server`，因此下一步重点不是继续大改 GUI，而是用真实校园网和真实 Ubuntu 22.04 服务器做 smoke test。
+**判断：** 当前 GUI 项目的远端 API 地址、CORS 白名单和 `runtime_target=server` 已通过校园网服务器端到端 smoke；下一步重点转为修复 AMOS/FLARE label taxonomy 显式选择和 server mode gating，而不是继续扩大公网入口。
 
 **依据：**
 

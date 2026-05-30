@@ -1,6 +1,6 @@
 # 三大目标验收包
 
-本文档用于把当前 GUI 的三个目标从”功能接近完成”推进到”可复现验收”。当前证据包含 AMOS 0117 原生标签验证，以及 FLARE22 Tr 0009 的非 AMOS 在线推理和 taxonomy-remap 指标。2026-05-28 实现自动 taxonomy remap 后，FLARE22 在线验证已能自动重映射标签 ID 并得到有意义的跨数据集指标（job `a717dacf42d3`，mean_dice=0.926，验证通过）。2026-05-29 已收口缓存 validation、persistent worker reader、上传文件名调试日志和部分 FLARE22 标签 remap 的历史风险。2026-05-30 已增加 `本地在线推理` / `服务器云端推理` 运行位置选择、局域网访问配置化和服务器 5-fold soft ensemble 编排入口；真实第二台局域网设备与 Linux 服务器端到端推理仍需按 smoke test 单独验收。
+本文档用于把当前 GUI 的三个目标从”功能接近完成”推进到”可复现验收”。当前证据包含 AMOS 0117 原生标签验证，以及 FLARE22 Tr 0009 的非 AMOS 在线推理和 taxonomy-remap 指标。2026-05-28 实现自动 taxonomy remap 后，FLARE22 在线验证已能自动重映射标签 ID 并得到有意义的跨数据集指标（job `a717dacf42d3`，mean_dice=0.926，验证通过）。2026-05-29 已收口缓存 validation、persistent worker reader、上传文件名调试日志和部分 FLARE22 标签 remap 的历史风险。2026-05-30 已增加 `本地在线推理` / `服务器云端推理` 运行位置选择、局域网访问配置化和服务器 5-fold soft ensemble 编排入口；2026-05-31 已通过校园网完成 Windows 前端调用 Ubuntu 服务器后端的 5-fold + soft ensemble + 前端回填 smoke，但 AMOS 标签 validation 暴露自动 taxonomy 误判风险，完整验收仍需补显式标签体系选择和 server gating 修复。
 
 ## 目标 1：CT 可浏览、三正交可联动
 
@@ -138,8 +138,20 @@ npm run build
 - `deployment-packages/server-runtime-package-20260530.zip` 只是服务器后端运行包，需在 Ubuntu 22.04 服务器具备 nnUNetv2、CUDA/PyTorch、模型目录和真实 `SEGMENTATION_SERVER_*` 路径后按 `deployment-packages/server-runtime-quickstart-20260530.md` 启动。
 - 当前本地可直接验收的真实 NIfTI 主要是 AMOS 0117。
 - 新增 FLARE 或其他数据集病例后，应先登记到 `reference_cases.example.json` 的同结构配置，再补充本文件中的人工验收记录。
-- 真实服务器模式需按校园网 smoke test 单独记录 `/api/health`、`/api/models`、上传、SSE、取消、5GPU/fold 映射、ensemble、evaluate、下载、前端回填和 validation；在完成前不得把 server runtime 包准备等同于推理验收通过。
+- 真实服务器模式已完成校园网端到端 smoke：可提交服务器 job、进入 5-fold 推理、完成 soft ensemble、下载并回填 GUI。后续仍需单独记录取消、失败恢复、server/local gating、AMOS/FLARE 显式 taxonomy、更多病例 validation 和长期稳定性。
 - 没有标准答案的病例只能验收浏览、推理回填和人工复核流程，不能记录自动 Dice 通过。
+
+## 2026-05-31 服务器在线推理 smoke 与 validation 风险
+
+| 项目 | FLARE22 服务器轮次 | AMOS 服务器轮次 |
+|---|---|---|
+| 运行方式 | Windows 前端 → Ubuntu FastAPI → 5GPU/5-fold soft ensemble | Windows 前端 → Ubuntu FastAPI → 5GPU/5-fold soft ensemble |
+| 推理状态 | 结果已回填 GUI | 结果已回填 GUI |
+| validation | mean Dice 约 `0.891`，foreground Dice 约 `0.951` | mean Dice `0.076015`，foreground Dice `0.979808` |
+| remap | FLARE22 → AMOS22，符合预期 | 报告显示 FLARE22 → AMOS22，但输入疑似 AMOS 原生标签 |
+| 结论 | 服务器推理链路和 FLARE remap 可用 | 高前景 Dice + 低逐器官 Dice 更像标签体系误判，不应判定为模型完全失败 |
+
+验收口径：服务器端到端链路已可作为阶段性进展记录；质量验收仍必须先确认上传 label 的 unique ID、spacing/affine 与 prediction 是否一致，并提供显式 `label_taxonomy=AMOS22|FLARE22|auto` 避免 AMOS 原生标签被错误 remap。
 
 ## 2026-05-24 运行态记录
 
