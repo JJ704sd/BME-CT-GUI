@@ -17,6 +17,12 @@
 - 内网穿透：Tailscale / WireGuard、frp + HTTPS、Cloudflare Tunnel 等方案的适用边界。
 - 安全要求：HTTPS 或 VPN、访问控制、不裸露后端公网端口、SSE 与大文件上传验证。
 
+**文档归档：**
+
+- `.planning/lan-api-access-and-nat-traversal.md` 与 `.planning/lan-direct-and-tunnel-implementation-plan.md` 是早期散落在 `.planning/` 根目录的同主题草案。
+- 当前有效版本已收敛到 `.planning/lan-direct-and-tunnel/` 目录下的 `task_plan.md`、`findings.md` 和 `progress.md`。
+- 早期根目录草案已删除，避免重复维护和审阅入口混乱。
+
 ## 2026-05-30：局域网配置化代码侧状态
 
 **已完成：**
