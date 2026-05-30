@@ -37,6 +37,7 @@ python tools\segmentation_metrics_summary.py `
 - 2026-05-27 标签文件传输修复后，后端在线 custom label validation 已可用。当上传的标签 ID 与 checkpoint 不一致时，`server/taxonomy.py` 会自动检测数据集来源（如 FLARE22）并按器官名重映射 ID，validation 结果中 `remap_applied: true` 表示已自动重映射。
 - 2026-05-29 缓存命中时不再复用缓存来源 job 的 `validation`；预测 NIfTI 可复用，但 Dice/IoU/Hausdorff 必须来自本次请求的标签文件或内置参考标签。
 - 2026-05-29 自动 remap 支持部分 FLARE22 标签：当至少两个共享 ID 明确语义错位且没有原生匹配时可识别为 FLARE22；单 label 文件仍不自动推断数据集来源。
+- 2026-05-30 新增 `runtime_target=local|server` 和局域网访问配置后，本文件中的历史 AMOS/FLARE 指标不变；本地 fold0、服务器 5-fold ensemble 和不同 profile 的指标必须分开记录，不能混算。
 
 ## 当前 AMOS 基线运行
 
@@ -245,5 +246,6 @@ Checkpoint 元数据：
 - 2026-05-27 标签文件传输修复后，后端在线 custom label validation 链路已打通。job `bf20f0ec4456`（FLARE22 + 标签上传）验证了 `label_path` 非空、validation 正常执行。2026-05-28 实现自动 taxonomy remap 后，job `a717dacf42d3` 在线验证 mean_dice=0.926，验证通过。
 - 2026-05-29 修复缓存 validation 语义后，缓存命中的指标不得解释为缓存来源 job 的旧标签结果；同一 CT 换标签文件时，validation 会重新计算。
 - 2026-05-29 移除上传文件名调试日志后，标签链路排查应依赖 job state、`label_path`、validation summary 和测试覆盖，而不是控制台文件名输出。
+- 2026-05-30 的运行位置选择、局域网配置和服务器 5-fold soft ensemble 编排入口属于工程链路更新；在真实 Linux 服务器端到端推理和第二台局域网设备 smoke test 完成前，不新增服务器质量指标，也不替换当前 AMOS `quality` 基线。
 - 没有标准标签的病例不能计算 Dice、IoU 或 Hausdorff Distance，只能记录推理耗时、资源快照和人工复核结论。
 - 后续训练权重应保留每次的 JSON 原始输出，并把关键聚合指标追加到本文档。

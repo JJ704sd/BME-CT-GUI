@@ -20,6 +20,22 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 
+try:
+  from server.server_inference import (
+    build_server_ensemble_command,
+    build_server_evaluate_command,
+    build_server_fold_commands,
+    get_server_inference_config,
+  )
+except ModuleNotFoundError:
+  sys.path.insert(0, str(Path(__file__).resolve().parent))
+  from server_inference import (
+    build_server_ensemble_command,
+    build_server_evaluate_command,
+    build_server_fold_commands,
+    get_server_inference_config,
+  )
+
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = ROOT.parent
 NNUNET_FILES = ROOT / "nnunetv2_files"
@@ -160,8 +176,10 @@ class Job:
   resource_snapshots: list[dict[str, Any]] = field(default_factory=list)
   resource_log_path: Path | None = None
   label_path: Path | None = None
+  runtime_target: str = "local"
   cancel_requested: bool = False
   process: subprocess.Popen[str] | None = field(default=None, repr=False, compare=False)
+  child_processes: list[subprocess.Popen[str]] = field(default_factory=list, repr=False, compare=False)
   events: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -203,10 +221,20 @@ class JobCancelled(RuntimeError):
     super().__init__("推理任务已取消。")
     self.process = process
 
+def get_allowed_origins() -> list[str] | None:
+  raw = os.environ.get("SEGMENTATION_ALLOWED_ORIGINS", "").strip()
+  if not raw:
+    return None
+  origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
+  return origins or None
+
+
+allowed_origins = get_allowed_origins()
 app = FastAPI(title="Segmentation GUI nnUNetv2 Bridge")
 app.add_middleware(
   CORSMiddleware,
-  allow_origin_regex=r"http://(127\.0\.0\.1|localhost):\d+",
+  allow_origins=allowed_origins or [],
+  allow_origin_regex=None if allowed_origins else r"http://(127\.0\.0\.1|localhost):\d+",
   allow_credentials=True,
   allow_methods=["*"],
   allow_headers=["*"],
@@ -551,6 +579,7 @@ def build_job_summary(job: Job) -> dict[str, Any]:
     "progress": job.progress,
     "stage": job.stage,
     "mode": job.mode,
+    "runtime_target": job.runtime_target,
     "error": job.error,
     "started_at": job.started_at,
     "completed_at": job.completed_at,
@@ -590,23 +619,6 @@ def write_job_summary(output_dir: Path, job: Job) -> Path:
   return summary_path
 
 
-def write_process_log(output_dir: Path, process: subprocess.CompletedProcess[str]) -> tuple[Path, str]:
-  output_dir.mkdir(parents=True, exist_ok=True)
-  log_path = output_dir / "nnunetv2_process.log"
-  log_text = "\n".join([
-    f"COMMAND: {' '.join(str(part) for part in process.args)}",
-    f"RETURN_CODE: {process.returncode}",
-    "",
-    "STDOUT:",
-    process.stdout or "",
-    "",
-    "STDERR:",
-    process.stderr or "",
-  ])
-  log_path.write_text(log_text, encoding="utf-8")
-  return log_path, get_process_tail(process)
-
-
 def run_process_with_cancel(job: Job, command: list[str]) -> subprocess.CompletedProcess[str]:
   process = subprocess.Popen(
     command,
@@ -618,6 +630,151 @@ def run_process_with_cancel(job: Job, command: list[str]) -> subprocess.Complete
     encoding="utf-8",
     errors="replace",
   )
+  return wait_for_process_with_cancel(job, process, command, "nnunet_process")
+
+
+def run_command_with_cancel(
+  job: Job,
+  command: list[str],
+  *,
+  env: dict[str, str] | None = None,
+  cwd: Path | None = None,
+  heartbeat_phase: str = "nnunet_process",
+) -> subprocess.CompletedProcess[str]:
+  process = subprocess.Popen(
+    command,
+    cwd=str(cwd or PROJECT_ROOT),
+    env=env or get_predict_environment(),
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+    text=True,
+    encoding="utf-8",
+    errors="replace",
+  )
+  return wait_for_process_with_cancel(job, process, command, heartbeat_phase)
+
+
+def run_parallel_processes_with_cancel(
+  job: Job,
+  commands: list[tuple[str, list[str], dict[str, str]]],
+  *,
+  heartbeat_phase: str,
+) -> list[subprocess.CompletedProcess[str]]:
+  processes: list[tuple[str, list[str], subprocess.Popen[str]]] = []
+  for label, command, env in commands:
+    process = subprocess.Popen(
+      command,
+      cwd=str(PROJECT_ROOT),
+      env=env,
+      stdout=subprocess.PIPE,
+      stderr=subprocess.PIPE,
+      text=True,
+      encoding="utf-8",
+      errors="replace",
+    )
+    processes.append((label, command, process))
+  with jobs_lock:
+    job.child_processes = [process for _label, _command, process in processes]
+  record_job_resource_snapshot(job, f"{heartbeat_phase}_started")
+  last_heartbeat = time.monotonic()
+  completed: dict[str, subprocess.CompletedProcess[str]] = {}
+  try:
+    while len(completed) < len(processes):
+      for label, command, process in processes:
+        if label in completed:
+          continue
+        return_code = process.poll()
+        if return_code is None:
+          continue
+        stdout, stderr = process.communicate()
+        result = subprocess.CompletedProcess(command, return_code, stdout, stderr)
+        completed[label] = result
+        if result.returncode != 0:
+          for _label, _command, running_process in processes:
+            if running_process is not process and running_process.poll() is None:
+              running_process.terminate()
+          for remaining_label, remaining_command, remaining_process in processes:
+            if remaining_label in completed:
+              continue
+            try:
+              remaining_stdout, remaining_stderr = remaining_process.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+              remaining_process.kill()
+              remaining_stdout, remaining_stderr = remaining_process.communicate()
+            completed[remaining_label] = subprocess.CompletedProcess(
+              remaining_command,
+              remaining_process.returncode if remaining_process.returncode is not None else -1,
+              remaining_stdout,
+              remaining_stderr,
+            )
+          return [completed[item_label] for item_label, _item_command, _item_process in processes if item_label in completed]
+      if len(completed) == len(processes):
+        break
+      now = time.monotonic()
+      if now - last_heartbeat >= HEARTBEAT_INTERVAL:
+        last_heartbeat = now
+        push_heartbeat(job, heartbeat_phase)
+      if job.cancel_requested:
+        for _label, _command, process in processes:
+          if process.poll() is None:
+            process.terminate()
+        results: list[subprocess.CompletedProcess[str]] = []
+        for _label, command, process in processes:
+          try:
+            stdout, stderr = process.communicate(timeout=5)
+          except subprocess.TimeoutExpired:
+            process.kill()
+            stdout, stderr = process.communicate()
+          results.append(subprocess.CompletedProcess(
+            command,
+            process.returncode if process.returncode is not None else -1,
+            stdout,
+            stderr,
+          ))
+        raise JobCancelled(subprocess.CompletedProcess(
+          args=["server-multi-fold-predict"],
+          returncode=-1,
+          stdout="",
+          stderr="推理任务已取消",
+        ))
+      time.sleep(0.5)
+    return [completed[label] for label, _command, _process in processes]
+  finally:
+    with jobs_lock:
+      job.child_processes = []
+
+
+def write_process_log(output_dir: Path, process: subprocess.CompletedProcess[str]) -> tuple[Path, str]:
+  return write_multi_process_log(output_dir, [("process", process)])
+
+
+def write_multi_process_log(
+  output_dir: Path,
+  sections: list[tuple[str, subprocess.CompletedProcess[str]]],
+) -> tuple[Path, str]:
+  output_dir.mkdir(parents=True, exist_ok=True)
+  log_path = output_dir / "nnunetv2_process.log"
+  chunks: list[str] = []
+  for label, process in sections:
+    chunks.extend([
+      f"=== {label} ===",
+      f"COMMAND: {' '.join(str(part) for part in process.args)}",
+      f"RETURN_CODE: {process.returncode}",
+      "",
+      "STDOUT:",
+      process.stdout or "",
+      "",
+      "STDERR:",
+      process.stderr or "",
+      "",
+    ])
+  log_path.write_text("\n".join(chunks).rstrip() + "\n", encoding="utf-8")
+  tail_source = sections[-1][1] if sections else subprocess.CompletedProcess([], 0, "", "")
+  return log_path, get_process_tail(tail_source)
+
+
+
+def wait_for_process_with_cancel(job: Job, process: subprocess.Popen[str], command: list[str], heartbeat_phase: str) -> subprocess.CompletedProcess[str]:
   with jobs_lock:
     job.process = process
   record_job_resource_snapshot(job, "process_started")
@@ -634,7 +791,7 @@ def run_process_with_cancel(job: Job, command: list[str]) -> subprocess.Complete
         now = time.monotonic()
         if now - last_heartbeat >= HEARTBEAT_INTERVAL:
           last_heartbeat = now
-          push_heartbeat(job, "nnunet_process")
+          push_heartbeat(job, heartbeat_phase)
         if job.cancel_requested:
           if process.poll() is None:
             process.terminate()
@@ -664,11 +821,15 @@ def request_job_cancel(job_id: str) -> Job | None:
       return job
     job.cancel_requested = True
     job.status = "cancelling"
-    job.stage = "正在取消本地 nnUNetv2 任务"
+    job.stage = "正在取消推理任务"
     process = job.process
+    child_processes = list(job.child_processes)
+  for child in child_processes:
+    if child.poll() is None:
+      child.terminate()
   if process and process.poll() is None:
     process.terminate()
-  push_event(job, {"type": "progress", "progress": job.progress, "stage": "正在取消本地 nnUNetv2 任务"})
+  push_event(job, {"type": "progress", "progress": job.progress, "stage": "正在取消本地 nnUNetv2 任务" if job.runtime_target == "local" else "正在取消服务器 5-fold 推理任务"})
   return job
 
 
@@ -957,11 +1118,19 @@ def get_model_state() -> dict[str, Any]:
   checkpoint_args = load_checkpoint_init_args()
   checkpoint_plans = checkpoint_args.get("plans") if checkpoint_args else None
   inference_options = get_inference_options()
+  server_config = get_server_inference_config()
+  server_required_files = []
+  if normalize_runtime_target() == "server":
+    server_required_files = [
+      ("server_evaluate_full.py", server_config.evaluate_script),
+      ("server_dataset.json", server_config.dataset_json),
+    ]
   required_files = [
     ("dataset.json", FLARE_DATASET_JSON),
     ("plans.json", FLARE_PLANS_JSON),
     ("checkpoint_best.pth", checkpoint_source),
     ("nnUNetv2_python", NNUNET_PYTHON_COMMAND),
+    *[(name, path) for name, path in server_required_files if path is not None],
   ]
   missing = [name for name, path in required_files if not path.exists()]
   ready = not missing
@@ -969,6 +1138,7 @@ def get_model_state() -> dict[str, Any]:
     "ready": ready,
     "status": "ready" if ready else "incomplete",
     "mode": "real-nnunetv2" if ready else "unavailable",
+    "runtime_target": normalize_runtime_target(),
     "missing": missing,
     "model_dir": str(FLARE_MODEL_DIR),
     "dataset_json": str(FLARE_DATASET_JSON),
@@ -997,6 +1167,19 @@ def get_model_state() -> dict[str, Any]:
       "preprocess": get_predict_worker_counts()[0],
       "export": get_predict_worker_counts()[1],
     },
+    "server_inference": {
+      "dataset_id": server_config.dataset_id,
+      "configuration": server_config.configuration,
+      "plans": server_config.plans,
+      "folds": list(server_config.folds),
+      "gpus": list(server_config.gpus),
+      "output_root": str(server_config.output_root),
+      "nnunet_raw": str(server_config.nnunet_raw),
+      "nnunet_preprocessed": str(server_config.nnunet_preprocessed),
+      "nnunet_results": str(server_config.nnunet_results),
+      "evaluate_script": str(server_config.evaluate_script) if server_config.evaluate_script else "",
+      "dataset_json": str(server_config.dataset_json) if server_config.dataset_json else "",
+    },
     "inference_options": inference_options,
   }
 
@@ -1004,6 +1187,11 @@ def get_model_state() -> dict[str, Any]:
 def get_predict_device() -> str:
   device = os.environ.get("SEGMENTATION_DEVICE", "cuda").strip().lower()
   return device if device in {"cpu", "cuda", "mps"} else "cuda"
+
+
+def normalize_runtime_target(value: str | None = None) -> str:
+  target = (value or os.environ.get("SEGMENTATION_RUNTIME_TARGET", "local")).strip().lower()
+  return target if target in {"local", "server"} else "local"
 
 
 def get_env_int(name: str, default: int, minimum: int = 1, maximum: int = 8) -> int:
@@ -1329,12 +1517,14 @@ def get_checkpoint_sha256() -> str | None:
 
 def build_prediction_cache_key(input_sha256: str, model_state: dict[str, Any] | None = None) -> str:
   state = model_state or get_model_state()
+  runtime_target = state.get("runtime_target")
   payload = {
     "input_sha256": input_sha256,
     "checkpoint_sha256": get_checkpoint_sha256(),
     "checkpoint_dataset_name": state.get("checkpoint_dataset_name"),
     "checkpoint_configuration": state.get("checkpoint_configuration"),
     "labels_source": state.get("labels_source"),
+    "runtime_target": normalize_runtime_target(str(runtime_target)) if runtime_target else normalize_runtime_target(),
     "inference_options": state.get("inference_options") or get_inference_options(),
   }
   encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
@@ -1421,6 +1611,7 @@ def complete_cached_job(job: Job, input_path: Path, cache: dict[str, Any]) -> No
     "phase_timings": job.phase_timings,
     "cached_result": True,
     "cache_source_job_id": job.cache_source_job_id,
+    "runtime_target": job.runtime_target,
     "inference_options": job.inference_options,
   }
   if validation is not None:
@@ -1478,6 +1669,140 @@ def get_process_tail(process: subprocess.CompletedProcess[str]) -> str:
   return "\n".join(lines[-8:]) if lines else "nnUNetv2 未输出错误详情"
 
 
+def get_server_process_env(config: Any) -> dict[str, str]:
+  env = os.environ.copy()
+  env["nnUNet_raw"] = str(config.nnunet_raw)
+  env["nnUNet_preprocessed"] = str(config.nnunet_preprocessed)
+  env["nnUNet_results"] = str(config.nnunet_results)
+  return env
+
+
+def copy_server_result_to_job_output(result_path: Path, output_dir: Path, job_id: str) -> Path:
+  suffix = ".nii.gz" if result_path.name.lower().endswith(".nii.gz") else ".nii"
+  target_path = output_dir / f"{job_id}{suffix}"
+  output_dir.mkdir(parents=True, exist_ok=True)
+  shutil.copy2(result_path, target_path)
+  return target_path
+
+
+def run_server_job_pipeline(job: Job, input_dir: Path, output_dir: Path, case_name: str) -> tuple[Path, dict[str, Any] | None, list[tuple[str, subprocess.CompletedProcess[str]]]]:
+  config = get_server_inference_config()
+  server_job_dir = config.output_root / job.id
+  server_job_dir.mkdir(parents=True, exist_ok=True)
+  output_prefix = server_job_dir / job.id
+  ensemble_output_dir = server_job_dir / "ensemble"
+  sections: list[tuple[str, subprocess.CompletedProcess[str]]] = []
+
+  push_event(job, {"type": "progress", "progress": 8, "stage": "任务已提交到服务器 5-GPU 推理队列"})
+  start_job_phase(job, "server_fold_predict")
+  fold_commands = build_server_fold_commands(config, input_dir, output_prefix)
+  push_event(job, {"type": "progress", "progress": 20, "stage": "5-fold 并行推理中"})
+  fold_results = run_parallel_processes_with_cancel(
+    job,
+    [(f"fold_{item.fold}_gpu_{item.gpu}", item.command, item.env) for item in fold_commands],
+    heartbeat_phase="server_fold_predict",
+  )
+  finish_job_phase(job, "server_fold_predict")
+  for fold_command, result in zip(fold_commands, fold_results):
+    sections.append((f"fold_{fold_command.fold}_gpu_{fold_command.gpu}", result))
+    if result.returncode != 0:
+      raise RuntimeError(f"服务器 fold {fold_command.fold} 推理失败（退出码 {result.returncode}）：{get_process_tail(result)}")
+
+  push_event(job, {"type": "progress", "progress": 76, "stage": "softmax 概率图集成中"})
+  start_job_phase(job, "server_ensemble")
+  ensemble_command = build_server_ensemble_command(config, [item.output_dir for item in fold_commands], ensemble_output_dir)
+  ensemble_result = run_command_with_cancel(
+    job,
+    ensemble_command,
+    env=get_server_process_env(config),
+    heartbeat_phase="server_ensemble",
+  )
+  finish_job_phase(job, "server_ensemble")
+  sections.append(("soft_ensemble", ensemble_result))
+  if ensemble_result.returncode != 0:
+    raise RuntimeError(f"服务器 soft ensemble 失败（退出码 {ensemble_result.returncode}）：{get_process_tail(ensemble_result)}")
+
+  push_event(job, {"type": "progress", "progress": 90, "stage": "整理服务器 nnUNetv2 输出"})
+  start_job_phase(job, "collect_result")
+  candidates = sorted(ensemble_output_dir.glob(f"{case_name}*.nii*"))
+  if not candidates:
+    candidates = sorted(ensemble_output_dir.glob("*.nii*"))
+  if not candidates:
+    raise RuntimeError("服务器 soft ensemble 已结束，但未找到输出 NIfTI 结果。")
+  result_path = copy_server_result_to_job_output(candidates[0], output_dir, job.id)
+  finish_job_phase(job, "collect_result")
+
+  validation = None
+  if job.label_path and job.label_path.exists():
+    push_event(job, {"type": "progress", "progress": 96, "stage": "使用用户提供的标签验证服务器结果"})
+    start_job_phase(job, "validation")
+    validation = validate_against_custom_label(result_path, job.label_path, read_labels())
+    write_validation_summary(output_dir, validation)
+    evaluate_command = build_server_evaluate_command(config, ensemble_output_dir, job.label_path)
+    if evaluate_command:
+      evaluate_result = run_command_with_cancel(job, evaluate_command, env=get_server_process_env(config), heartbeat_phase="server_validation")
+      sections.append(("server_evaluate", evaluate_result))
+      if evaluate_result.returncode != 0:
+        validation = {**validation, "status": "review", "message": f"{validation.get('message') or ''} 服务器 evaluate_full.py 退出码 {evaluate_result.returncode}。".strip()}
+        write_validation_summary(output_dir, validation)
+    finish_job_phase(job, "validation")
+  elif is_debug_original_upload(input_dir / f"{case_name}_0000.nii.gz") or is_debug_original_upload(input_dir / f"{case_name}_0000.nii"):
+    push_event(job, {"type": "progress", "progress": 96, "stage": "使用 AMOS 标准答案验证服务器结果"})
+    start_job_phase(job, "validation")
+    validation = validate_against_debug_label(result_path)
+    write_validation_summary(output_dir, validation)
+    finish_job_phase(job, "validation")
+
+  return result_path, validation, sections
+
+
+def run_local_job_pipeline(job: Job, input_path: Path, input_dir: Path, output_dir: Path, case_name: str) -> tuple[Path, dict[str, Any] | None, list[tuple[str, subprocess.CompletedProcess[str]]]]:
+  push_event(job, {"type": "progress", "progress": 8, "stage": "任务已提交到本地 nnUNetv2"})
+  start_job_phase(job, "prepare_runtime_model")
+  model_dir = prepare_runtime_model_dir()
+  finish_job_phase(job, "prepare_runtime_model")
+  push_event(job, {"type": "progress", "progress": 14, "stage": "已准备项目指定训练权重"})
+  if persistent_worker_enabled():
+    push_event(job, {"type": "progress", "progress": 20, "stage": "常驻 nnUNetv2 worker 推理中"})
+    start_job_phase(job, "persistent_worker")
+    process = run_persistent_worker_prediction(job, input_dir, output_dir, model_dir)
+    finish_job_phase(job, "persistent_worker")
+  else:
+    start_job_phase(job, "build_predict_command")
+    command = build_predict_command(input_dir, output_dir, model_dir=model_dir, inference_options=job.inference_options)
+    finish_job_phase(job, "build_predict_command")
+    push_event(job, {"type": "progress", "progress": 20, "stage": "nnUNetv2 命令运行中"})
+    start_job_phase(job, "nnunet_process")
+    process = run_process_with_cancel(job, command)
+    finish_job_phase(job, "nnunet_process")
+  if process.returncode != 0:
+    raise RuntimeError(f"nnUNetv2 推理失败（退出码 {process.returncode}）：{get_process_tail(process)}")
+
+  push_event(job, {"type": "progress", "progress": 90, "stage": "整理 nnUNetv2 输出"})
+  start_job_phase(job, "collect_result")
+  candidates = sorted(output_dir.glob(f"{case_name}*.nii*"))
+  if not candidates:
+    raise RuntimeError("nnUNetv2 命令已结束，但未找到输出 NIfTI 结果。")
+  result_path = candidates[0]
+  finish_job_phase(job, "collect_result")
+
+  validation = None
+  if job.label_path and job.label_path.exists():
+    push_event(job, {"type": "progress", "progress": 96, "stage": "使用用户提供的标签验证推理结果"})
+    start_job_phase(job, "validation")
+    validation = validate_against_custom_label(result_path, job.label_path, read_labels())
+    write_validation_summary(output_dir, validation)
+    finish_job_phase(job, "validation")
+  elif is_debug_original_upload(input_path):
+    push_event(job, {"type": "progress", "progress": 96, "stage": "使用 AMOS 标准答案验证推理结果"})
+    start_job_phase(job, "validation")
+    validation = validate_against_debug_label(result_path)
+    write_validation_summary(output_dir, validation)
+    finish_job_phase(job, "validation")
+
+  return result_path, validation, [("local_nnunetv2", process)]
+
+
 def run_real_job(job_id: str, input_path: Path) -> None:
   with jobs_lock:
     job = jobs[job_id]
@@ -1490,51 +1815,16 @@ def run_real_job(job_id: str, input_path: Path) -> None:
   case_name = input_path.name.replace("_0000.nii.gz", "").replace("_0000.nii", "")
 
   try:
-    push_event(job, {"type": "progress", "progress": 8, "stage": "任务已提交到本地 nnUNetv2"})
-    start_job_phase(job, "prepare_runtime_model")
-    model_dir = prepare_runtime_model_dir()
-    finish_job_phase(job, "prepare_runtime_model")
-    push_event(job, {"type": "progress", "progress": 14, "stage": "已准备项目指定训练权重"})
-    if persistent_worker_enabled():
-      push_event(job, {"type": "progress", "progress": 20, "stage": "常驻 nnUNetv2 worker 推理中"})
-      start_job_phase(job, "persistent_worker")
-      process = run_persistent_worker_prediction(job, input_dir, output_dir, model_dir)
-      finish_job_phase(job, "persistent_worker")
+    if job.runtime_target == "server":
+      result_path, validation, sections = run_server_job_pipeline(job, input_dir, output_dir, case_name)
+      complete_stage = "服务器 5-fold soft ensemble 推理结果已生成"
     else:
-      start_job_phase(job, "build_predict_command")
-      command = build_predict_command(input_dir, output_dir, model_dir=model_dir, inference_options=job.inference_options)
-      finish_job_phase(job, "build_predict_command")
-      push_event(job, {"type": "progress", "progress": 20, "stage": "nnUNetv2 命令运行中"})
-      start_job_phase(job, "nnunet_process")
-      process = run_process_with_cancel(job, command)
-      finish_job_phase(job, "nnunet_process")
-    process_log_path, log_tail = write_process_log(output_dir, process)
+      result_path, validation, sections = run_local_job_pipeline(job, input_path, input_dir, output_dir, case_name)
+      complete_stage = "真实 nnUNetv2 推理结果已生成"
+    process_log_path, log_tail = write_multi_process_log(output_dir, sections)
     with jobs_lock:
       job.process_log_path = process_log_path
       job.log_tail = log_tail
-    if process.returncode != 0:
-      raise RuntimeError(f"nnUNetv2 推理失败（退出码 {process.returncode}）：{get_process_tail(process)}")
-
-    push_event(job, {"type": "progress", "progress": 90, "stage": "整理 nnUNetv2 输出"})
-    start_job_phase(job, "collect_result")
-    candidates = sorted(output_dir.glob(f"{case_name}*.nii*"))
-    if not candidates:
-      raise RuntimeError("nnUNetv2 命令已结束，但未找到输出 NIfTI 结果。")
-    result_path = candidates[0]
-    finish_job_phase(job, "collect_result")
-    validation = None
-    if job.label_path and job.label_path.exists():
-      push_event(job, {"type": "progress", "progress": 96, "stage": "使用用户提供的标签验证推理结果"})
-      start_job_phase(job, "validation")
-      validation = validate_against_custom_label(result_path, job.label_path, read_labels())
-      write_validation_summary(output_dir, validation)
-      finish_job_phase(job, "validation")
-    elif is_debug_original_upload(input_path):
-      push_event(job, {"type": "progress", "progress": 96, "stage": "使用 AMOS 标准答案验证推理结果"})
-      start_job_phase(job, "validation")
-      validation = validate_against_debug_label(result_path)
-      write_validation_summary(output_dir, validation)
-      finish_job_phase(job, "validation")
 
     record_job_resource_snapshot(job, "completed")
     with jobs_lock:
@@ -1546,11 +1836,12 @@ def run_real_job(job_id: str, input_path: Path) -> None:
     complete_event: dict[str, Any] = {
       "type": "complete",
       "progress": 100,
-      "stage": "真实 nnUNetv2 推理结果已生成",
+      "stage": complete_stage,
       "duration_seconds": get_job_duration_seconds(job),
       "result_size_bytes": get_result_size_bytes(job),
       "phase_timings": job.phase_timings,
       "inference_options": job.inference_options,
+      "runtime_target": job.runtime_target,
     }
     if validation is not None:
       complete_event["validation"] = validation
@@ -1654,10 +1945,12 @@ async def create_job(
   confidence_threshold: str = Form("72"),
   postprocess: str = Form("{}"),
   inference_profile: str | None = Form(None),
+  runtime_target: str | None = Form(None),
 ) -> dict[str, Any]:
   if not file.filename or not file.filename.lower().endswith((".nii", ".nii.gz")):
     raise HTTPException(status_code=400, detail="请上传 .nii 或 .nii.gz 格式的 CT 原图。")
-  model_state = get_model_state()
+  runtime = normalize_runtime_target(runtime_target)
+  model_state = {**get_model_state(), "runtime_target": runtime}
   if not model_state["ready"]:
     raise HTTPException(status_code=503, detail={
       "message": "本地 nnUNetv2 模型配置不完整，无法创建真实推理任务。",
@@ -1690,6 +1983,7 @@ async def create_job(
     cache_key=cache_key,
     inference_options=inference_options,
     label_path=custom_label_path,
+    runtime_target=runtime,
   )
   with jobs_lock:
     jobs[job_id] = job
@@ -1703,6 +1997,7 @@ async def create_job(
       "confidence_threshold_effective": False,
       "postprocess": postprocess,
       "mode": job.mode,
+      "runtime_target": job.runtime_target,
       "model_status": model_state,
       "cached_result": True,
       "cache_source_job_id": job.cache_source_job_id,
@@ -1718,6 +2013,7 @@ async def create_job(
     "confidence_threshold_effective": False,
     "postprocess": postprocess,
     "mode": job.mode,
+    "runtime_target": job.runtime_target,
     "model_status": model_state,
     "cached_result": False,
     "inference_profile": job.inference_options.get("profile"),

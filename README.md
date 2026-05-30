@@ -2,7 +2,7 @@
 
 本项目是面向腹部 CT 分割验证流程的本地 GUI 原型。前端使用 React + Vite，后端使用 FastAPI 桥接本机 nnUNetv2 环境，目标是完成 CT 浏览、三正交联动、器官 label 说明、真实模型推理回填、结果下载和验收记录。
 
-截至 2026-05-29，项目已经作为独立 GUI 仓库维护；真实 CT、NIfTI、checkpoint 权重和推理输出仍只保留在本机，不提交到 GitHub。
+截至 2026-05-30，项目已经作为独立 GUI 仓库维护；真实 CT、NIfTI、checkpoint 权重和推理输出仍只保留在本机，不提交到 GitHub。
 
 ## 当前状态
 
@@ -39,11 +39,14 @@
 
 未缓存首次推理仍主要受 3D full-res sliding-window 计算影响。AMOS 0117 同脚本单次对照中，`quality` 耗时 `1360.398s` 且验证通过；`fast` 耗时 `384.345s`，但 mean Dice 降到 `0.777243`，并对 label 14/15 产生小体积假阳性。因此默认/正式报告应使用 `quality`，`fast` 只能作为快速预览或演示候选。persistent worker 未证明能加速；当前只作为实验路径保留。
 
-前端“分割控制”面板现在提供 `质量推理` 和 `快速预览` 两个推理模式。默认选择 `质量推理`；选择 `快速预览` 时界面会显示“需人工复核”提示，成功结果元信息也会标注为快速预览结果，避免误认为正式报告依据。
+前端“分割控制”面板现在提供两个运行位置：`服务器运行` 和 `本地运行`。默认推荐 `服务器运行`，后端会按 Linux 服务器 5 张 GPU 并行跑 5 个 fold、保存 softmax 概率图，并通过 `nnUNetv2_ensemble` 软投票生成正式结果；`本地运行` 保留当前单机 nnUNetv2 路径，作为开发调试和服务器不可用时的保底方案。
 
-后端仍支持环境变量作为默认配置；前端每次提交 job 时会把所选 `inference_profile` 显式传给 `/api/segment/jobs`。最终生效的 `inference_options` 会写入创建响应、job state、SSE complete 事件和 `job_summary.json`，并纳入 cache key，避免不同质量/速度参数误用同一缓存：
+前端“分割控制”面板同时提供 `质量推理` 和 `快速预览` 两个推理模式。默认选择 `质量推理`；选择 `快速预览` 时界面会显示“需人工复核”提示，成功结果元信息也会标注为快速预览结果，避免误认为正式报告依据。
+
+后端仍支持环境变量作为默认配置；前端每次提交 job 时会把所选 `runtime_target` 和 `inference_profile` 显式传给 `/api/segment/jobs`。最终生效的 `runtime_target` 与 `inference_options` 会写入创建响应、job state、SSE complete 事件和 `job_summary.json`，并纳入 cache key，避免本地 fold0 结果、服务器 5-fold ensemble 结果和不同质量/速度参数误用同一缓存：
 
 ```powershell
+$env:SEGMENTATION_RUNTIME_TARGET='server'  # 可选 local|server
 $env:SEGMENTATION_INFERENCE_PROFILE='fast'
 $env:SEGMENTATION_DISABLE_TTA='1'
 $env:SEGMENTATION_TILE_STEP_SIZE='1.0'
@@ -51,6 +54,11 @@ $env:SEGMENTATION_TILE_STEP_SIZE='1.0'
 
 含义：
 
+- `SEGMENTATION_RUNTIME_TARGET=server|local`：默认运行位置；前端提交 job 时会显式传入 `runtime_target`，`server` 使用 5-GPU 5-fold soft ensemble，`local` 使用当前本地 nnUNetv2 保底路径。
+- `SEGMENTATION_SERVER_GPUS=0,1,2,3,4` 与 `SEGMENTATION_SERVER_FOLDS=0,1,2,3,4`：服务器运行时的 GPU/fold 映射，不足的 GPU 会复用最后一个配置值。
+- `SEGMENTATION_SERVER_NNUNET_RAW`、`SEGMENTATION_SERVER_NNUNET_PREPROCESSED`、`SEGMENTATION_SERVER_NNUNET_RESULTS`：服务器 nnUNet 数据目录，默认分别指向 `/mnt/data0/LUO_Zheng/nnUNet_raw`、`/mnt/data0/LUO_Zheng/nnUNet_preprocessed`、`/mnt/data0/LUO_Zheng/nnUNet_results`。
+- `SEGMENTATION_SERVER_OUTPUT_ROOT`：服务器 5-fold 中间结果和 ensemble 输出根目录，默认 `/mnt/data0/LUO_Zheng/result/gui_jobs`。
+- `SEGMENTATION_SERVER_EVALUATE_SCRIPT`、`SEGMENTATION_SERVER_LABELS_DIR`、`SEGMENTATION_SERVER_DATASET_JSON`：服务器评估脚本、默认标签目录和 dataset.json；上传标签时 GUI 仍会优先按本次标签计算在线 validation。
 - `SEGMENTATION_DEVICE`：推理设备，可选 `cuda`、`cpu`、`mps`，默认 `cuda`。
 - `SEGMENTATION_INFERENCE_PROFILE=quality`：默认质量模式，nnUNetv2 默认 `tile_step_size=0.5`，保留 TTA/mirroring；用于正式结果和报告依据。
 - `SEGMENTATION_INFERENCE_PROFILE=fast`：在线快速模式，默认 `SEGMENTATION_DISABLE_TTA=1`，`SEGMENTATION_TILE_STEP_SIZE=1.0`。速度更快，但本地 AMOS 0117 对照已显示质量明显下降，只能作为快速预览并需人工复核。
@@ -83,9 +91,35 @@ $env:SEGMENTATION_EXPORT_WORKERS='2'
 python -m uvicorn server.main:app --host 127.0.0.1 --port 8000
 ```
 
+## 局域网运行
+
+局域网联调时，前端通过 `VITE_API_ENDPOINT` 指向后端机器，后端通过 `SEGMENTATION_ALLOWED_ORIGINS` 放行前端来源。
+
+前端机器：
+
+```powershell
+$env:VITE_API_ENDPOINT='http://<后端机器IP>:8000'
+npm run dev:lan
+```
+
+后端机器：
+
+```powershell
+$env:SEGMENTATION_ALLOWED_ORIGINS='http://<前端机器IP>:5173'
+python -m uvicorn server.main:app --host 0.0.0.0 --port 8000
+```
+
+验收时至少检查：
+
+- 局域网设备可打开 `http://<前端机器IP>:5173`。
+- 局域网设备可访问 `http://<后端机器IP>:8000/api/health`。
+- 浏览器控制台无 CORS 报错。
+- 上传 CT、SSE 进度、取消任务、下载结果和标签 validation 均可用。
+
 快速预览示例：
 
 ```powershell
+$env:SEGMENTATION_RUNTIME_TARGET='server'  # 可选 local|server
 $env:SEGMENTATION_INFERENCE_PROFILE='fast'
 $env:SEGMENTATION_DISABLE_TTA='1'
 $env:SEGMENTATION_TILE_STEP_SIZE='1.0'
@@ -224,9 +258,9 @@ FLARE22 Tr 0009 + 自动 taxonomy remap 在线验证：
 - `GET /api/samples`：本地参考病例列表。
 - `GET /api/samples/{sample_id}/original`：下载参考病例原图。
 - `GET /api/samples/{sample_id}/label`：下载参考病例标准答案。
-- `POST /api/segment/jobs`：创建 nnUNetv2 推理任务；表单字段 `inference_profile=quality|fast` 可按任务选择质量/速度配置，`label_file` 可选上传本次 validation 使用的标签 NIfTI。
+- `POST /api/segment/jobs`：创建 nnUNetv2 推理任务；表单字段 `runtime_target=local|server` 可选择本地保底路径或服务器 5-GPU 5-fold soft ensemble，`inference_profile=quality|fast` 可按任务选择质量/速度配置，`label_file` 可选上传本次 validation 使用的标签 NIfTI。
 - `GET /api/segment/jobs/{job_id}`：查询任务状态、耗时、资源、验证摘要和最终 `inference_options`。
-- `GET /api/segment/jobs/{job_id}/events`：SSE 推理进度；推理期间每 10 秒发送心跳事件（含已耗时和资源快照）；complete 事件包含最终 `inference_options`。
+- `GET /api/segment/jobs/{job_id}/events`：SSE 推理进度；推理期间每 10 秒发送心跳事件（含已耗时和资源快照）；complete 事件包含最终 `runtime_target` 和 `inference_options`。
 - `POST /api/segment/jobs/{job_id}/cancel`：请求取消运行中任务。
 - `GET /api/segment/jobs/{job_id}/result`：下载结果 NIfTI。
 

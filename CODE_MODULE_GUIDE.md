@@ -9,7 +9,7 @@
 3. 到 `src/imaging/voxelMapping.ts` 和 `src/imaging/sliceRenderer.ts` 讲体素坐标、切片坐标、方向映射和 canvas 切片渲染缓存。
 4. 到 `src/inference/inferenceClient.ts` 讲前端如何创建 job、监听 SSE、下载结果。
 5. 到 `src/report/exportReport.ts` 讲报告导出：HTML/JSON/PDF 三种格式、自包含 HTML 模板和数据收集。
-6. 到 `server/main.py` 和 `server/persistent_nnunet_worker.py` 讲 FastAPI 后端如何桥接 nnUNetv2、管理任务、缓存和 validation。
+6. 到 `server/main.py`、`server/server_inference.py` 和 `server/persistent_nnunet_worker.py` 讲 FastAPI 后端如何桥接 nnUNetv2、管理任务、缓存、validation，以及如何按 `runtime_target` 选择本地保底路径或服务器 5-fold soft ensemble 路径。
 7. 到 `server/taxonomy.py` 讲跨数据集标签 taxonomy 检测与自动重映射：FLARE22 标签定义、器官名别名映射、`detect_dataset()` 自动识别数据集来源、`build_remap_mapping()` 按器官名建立 ID 映射、`apply_remap()` 用查找表重排参考标签数组。
 8. 到 `tools/segmentation_metrics_summary.py` 讲 Dice、IoU、Voxel Accuracy 和 Hausdorff Distance 指标如何离线复算。
 9. 最后用 `tests/` 和文档说明验收边界：AMOS 原生 validation 与 FLARE22 自动 taxonomy-remap validation 的区别。
@@ -25,6 +25,7 @@
 - 管理参考病例：通过 `/api/samples` 拉取本地 registry，把 `AMOS_0117`、`FLARE22_Tr_0009` 等真实病例显示到顶部病例选择器。
 - 管理标签文件：`labelFile` 状态存储用户上传的标签 NIfTI，通过"标签 CT 导入"按钮或拖拽区域选择。`processVisualizationFile()` 中 `role === "label"` 分支处理标签文件。推理前若 `labelFile` 为 null 会 toast 提醒。
 - 管理在线推理：`startSegmentation()` 调用 inference client 创建 job，监听进度，下载结果并回填到 GUI。标签文件通过 FormData 的 `label_file` 字段传给后端。
+- 管理运行位置：`selectedRuntimeTarget` 控制 `服务器云端推理` / `本地在线推理`，提交 job 时写入 `runtime_target=server|local`；运行中会锁定选项，避免同一 job 的运行位置被误改。
 - 管理底部实时进度：`inferenceTimeline` 记录结构化阶段日志，`inferenceStartedAt` 驱动已耗时展示，`inferenceProgressCopy` 集中生成底部 progress rail 文案。
 - 管理 axial 预览：右侧文件卡片和底部切片时间轴使用 `renderCachedAxialNiftiSliceToDataUrl()`，复用 `src/imaging/sliceRenderer.ts` 的切片缓存，避免重复 canvas toDataURL。
 - 管理窗预设联动：`applyWindowPreset()` 切换窗宽窗位时同步设置 `activePresetId` 和 `highlightedOrganIds`；`presetOrganMap` 映射预设到关联器官 ID 列表；`highlightTimerRef` / `presetToastTimerRef` 防止快速点击堆叠定时器。
@@ -116,7 +117,7 @@
 
 主要职责：
 
-- `createInferenceJob()`：提交源图、模型、profile、后处理配置。可选附带 `label_file` 用于在线 Dice 验证。
+- `createInferenceJob()`：提交源图、模型、运行位置、profile、后处理配置。可选附带 `label_file` 用于在线 Dice 验证。
 - `parseInferenceEvent()`：解析 SSE 进度、完成、失败事件。
 - `downloadInferenceResult()`：下载后端生成的 NIfTI mask。
 - `fetchModelLabels()`：获取 checkpoint label 定义，保证前端器官列表和模型一致。
@@ -126,7 +127,7 @@
 
 - `quality` 是默认正式推理路径。
 - `fast` 只作为快速预览，界面和结果元信息都需要标记“需人工复核”。
-- `inference_options` 会进入 job state、SSE complete event 和缓存 key，避免 fast/quality 混用缓存。
+- `runtime_target` 会进入 job state、SSE complete event 和缓存 key，避免本地 fold0、服务器 5-fold ensemble、fast/quality 混用缓存。
 - 失败事件中的 `log_tail` 会被前端保留到结构化 timeline，便于从底部状态追溯后端错误摘要。
 
 ## 7. 器官与病例数据
@@ -187,7 +188,24 @@
 - 自动 validation 的前提是 label taxonomy 与 checkpoint 原生一致，或后端能通过 `server/taxonomy.py` 识别并自动 remap。FLARE22 已支持在线自动 remap；部分标签需至少两个明确错位 ID，单 label 文件仍需人工判断或后续显式数据集 hint。
 - 心跳事件的 `heartbeat: true` 字段可用于前端区分心跳和真正的阶段进度；心跳失败不会中断推理。
 
-## 10. 常驻推理 worker：`server/persistent_nnunet_worker.py`
+## 10. 服务器推理编排：`server/server_inference.py`
+
+`server/server_inference.py` 集中生成 Linux 服务器 5-GPU / 5-fold soft ensemble 所需的命令和环境变量，避免把服务器脚本细节散落在 FastAPI 路由中。
+
+主要职责：
+
+- 从环境变量读取服务器 nnUNet 数据目录、输出目录、dataset id、configuration、plans、fold 列表、GPU 列表和命令名。
+- `build_server_fold_commands()` 为每个 fold 生成一条 `nnUNetv2_predict` 命令，并设置对应 `CUDA_VISIBLE_DEVICES`。
+- `build_server_ensemble_command()` 生成 `nnUNetv2_ensemble` 命令，把 5 个 fold 的 softmax 概率输出集成为最终结果。
+- `build_server_evaluate_command()` 在有评估脚本和标签目录时生成服务器侧评估命令；GUI 上传标签时仍以本次请求标签 validation 为准。
+
+讲解重点：
+
+- 服务器模式是正式推理候选路径，目标是 5 张 GPU 并行跑 5 个 fold 后做 soft ensemble；本地模式仍作为开发调试和服务器不可用时的保底。
+- 服务器路径只负责命令构造和进程编排，job 生命周期、SSE、取消、结果下载、cache key 和 validation 仍由 `server/main.py` 统一管理。
+- 真实 Linux 服务器端到端推理尚需单独 smoke test；在完成前，文档不能把服务器模式写成已完成质量验收。
+
+## 11. 常驻推理 worker：`server/persistent_nnunet_worker.py`
 
 该脚本承接后端启动的 persistent worker 路径，用于减少部分模型加载开销。
 
@@ -198,7 +216,7 @@
 - 常驻 worker 读取响应时使用进程级共享 `_persistent_worker_reader_thread()` + `queue.Queue` 实现非阻塞读取，超时后自动发送心跳，不阻塞主线程。2026-05-29 修复前，复用 worker 时每次读事件都会新建 stdout reader 线程，存在旧线程抢读后续事件的风险；当前 reader 状态会随 worker 进程创建和关闭统一维护。
 - 目前只通过轻量 shutdown smoke 验证 worker 协议和 reader 清理，未重新完成真实长耗时无缓存推理加速验收。
 
-## 11. 指标与性能工具
+## 12. 指标与性能工具
 
 相关文件：
 
@@ -210,7 +228,7 @@
 - 指标脚本可以用于 AMOS 原生 label，也可以用于 FLARE22 remapped reference，但文档必须明确区分解释边界。
 - 对外报告时，应优先引用 `SEGMENTATION_METRICS_SUMMARY.md` 中已经整理过的指标，而不是直接引用临时输出。
 
-## 12. 测试结构：`tests/`
+## 13. 测试结构：`tests/`
 
 主要测试：
 
@@ -235,7 +253,7 @@ npm test
 npm run build
 ```
 
-## 13. 本轮性能优化的讲解口径
+## 14. 本轮性能优化的讲解口径
 
 分屏模式说明：
 
@@ -270,9 +288,10 @@ npm run build
 - `npm run build` 通过。
 - 浏览器烟测在 `http://127.0.0.1:5173/` 快速拖动三视图后无控制台错误，三视图图片非空白。
 
-## 14. 数据与文档边界
+## 15. 数据与文档边界
 
 - 真实 NIfTI、checkpoint、推理输出和私有 registry 不提交。
+- 局域网运行时，前端 API 地址由 `VITE_API_ENDPOINT` 配置，Vite 通过 `npm run dev:lan` 监听局域网地址，后端通过 `SEGMENTATION_ALLOWED_ORIGINS` 放行实际浏览器来源；不应长期使用无限制公网来源。
 - `AMOS_0117` 是当前自动 validation 的主要原生标签案例。
 - `FLARE22_Tr_0009` 已完成真实 `quality` 在线推理、标签上传在线 validation 和自动 taxonomy remap 验证。remap 前 job `bf20f0ec4456` 的 Dice 低是 taxonomy 错位历史证据；remap 后 job `a717dacf42d3` mean Dice 为 `0.926`。
 - 任何后续新增病例都应先判断 label taxonomy，再决定是否允许后端自动 validation；未知数据集和单 label 文件不能自动声明模型质量通过。

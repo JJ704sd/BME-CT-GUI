@@ -2361,5 +2361,43 @@ job `a717dacf42d3`（FLARE22 Tr 0009 + 自动 taxonomy remap）：
 
 ---
 
-*文档版本：2026-05-29*
-*更新依据：当前 `src/main.tsx`、`src/components/OrthogonalViewer.tsx`、`src/imaging/voxelMapping.ts`、`src/imaging/sliceRenderer.ts`、`src/data/organDetails.ts`、`src/inference/inferenceClient.ts`、`server/main.py`、`server/taxonomy.py`、`server/persistent_nnunet_worker.py`、`server/requirements.txt`、`tools/perf_no_cache_persistent.py`、`README.md`、`ACCEPTANCE.md`、`SEGMENTATION_METRICS_SUMMARY.md`、`SEGMENTATION_EXPERIMENT_COMPARISON.md`、`SEGMENTATION_RECENT_ROUNDS.md`、`reference_cases.example.json`、`tests/*.test.ts` 与本地运行验证结果。*
+## 49. 2026-05-30 运行位置、局域网配置与服务器编排入口
+
+### 49.1 范围
+
+本轮核对并同步 2026-05-30 的工程链路变化：
+
+- 前端在线推理增加 `服务器云端推理` / `本地在线推理` 两个运行位置。
+- 后端按 `runtime_target=server|local` 分流本地 nnUNetv2 路径和服务器 5-fold soft ensemble 编排路径。
+- 局域网访问改为配置化，避免前端和 CORS 只绑定本机 localhost。
+- 文档同步说明当前边界：本轮不新增真实分割指标，真实第二台局域网设备和 Linux 服务器端到端推理仍需单独 smoke test。
+
+### 49.2 代码与配置状态
+
+- `src/main.tsx`：通过 `VITE_API_ENDPOINT` 读取后端地址，未设置时回退 `http://127.0.0.1:8000`；分割控制区提供运行位置选择并在 job 运行中锁定。
+- `src/inference/inferenceClient.ts`：`createInferenceJob()` 会提交 `runtime_target`、`inference_profile` 和可选 `label_file`，SSE complete event 解析也保留最终运行位置。
+- `package.json`：新增 `dev:lan`，用于 Vite 监听 `0.0.0.0:5173`。
+- `server/main.py`：支持 `SEGMENTATION_ALLOWED_ORIGINS`，并把 `runtime_target` 写入 job state、SSE、summary 和 cache key。
+- `server/server_inference.py`：集中构造服务器 5 fold `nnUNetv2_predict`、`nnUNetv2_ensemble` 和可选评估命令。
+
+### 49.3 文档同步
+
+- `README.md`：补充局域网运行、运行位置、服务器 5-fold soft ensemble 配置和 API 字段说明。
+- `ACCEPTANCE.md`：补充 2026-05-30 验收边界，明确真实第二台局域网设备和 Linux 服务器推理仍待验收。
+- `SEGMENTATION_METRICS_SUMMARY.md`：说明运行位置和局域网更新不改变历史 AMOS/FLARE 指标。
+- `SEGMENTATION_EXPERIMENT_COMPARISON.md`：新增 2026-05-30 审核记录，保持推荐基线不变。
+- `SEGMENTATION_RECENT_ROUNDS.md`：新增非推理链路更新段落，不替换近三轮成功推理数据。
+- `CODE_MODULE_GUIDE.md`：补充 `runtime_target`、`server/server_inference.py` 和局域网配置讲解。
+- `.planning/lan-direct-and-tunnel/`：保留局域网直连与穿透方案的 task plan、findings 和 progress 记录。
+
+### 49.4 行为边界
+
+- 当前推荐正式 AMOS 基线仍是 `quality` profile `b3c528cc9e20`；跨数据集在线验证基线仍是 FLARE 自动 remap job `a717dacf42d3`。
+- 服务器模式已经具备后端编排入口，但不能写成已完成 Linux 服务器真实质量验收。
+- 局域网当前只完成本机 IP、health 和 CORS 检查；第二台真实设备上的上传、SSE、取消、下载和标签 validation 仍待验收。
+- `AGENTS.md` 属于 agent instruction 文件，当前自动权限拒绝直接覆盖；若需要统一中文主体，需要单独取得用户授权后处理。
+
+---
+
+*文档版本：2026-05-30*
+*更新依据：当前 `src/main.tsx`、`src/inference/inferenceClient.ts`、`server/main.py`、`server/server_inference.py`、`package.json`、`README.md`、`ACCEPTANCE.md`、`SEGMENTATION_METRICS_SUMMARY.md`、`SEGMENTATION_EXPERIMENT_COMPARISON.md`、`SEGMENTATION_RECENT_ROUNDS.md`、`CODE_MODULE_GUIDE.md` 与 `.planning/lan-direct-and-tunnel/`。*

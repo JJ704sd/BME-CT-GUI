@@ -3321,37 +3321,78 @@ h1 {
   line-height: 1.4;
 }
 
+.option-section-label {
+  margin-top: 6px;
+  color: #eef7f3;
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+}
+
 .inference-profile-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  gap: 10px;
 }
 
 .profile-option {
+  position: relative;
   display: grid;
-  gap: 4px;
+  gap: 5px;
   min-width: 0;
-  min-height: 86px;
-  padding: 11px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.045);
+  min-height: 92px;
+  padding: 12px 13px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.055);
   color: #d8e4e0;
   text-align: left;
-  transition: border-color 160ms ease, background 160ms ease, color 160ms ease;
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease, color 160ms ease;
 }
 
 .profile-option:hover,
 .profile-option.active {
-  border-color: rgba(95, 232, 194, 0.36);
-  background: rgba(95, 232, 194, 0.11);
+  border-color: rgba(95, 232, 194, 0.58);
+  background: rgba(95, 232, 194, 0.14);
 }
 
-.profile-option span {
+.profile-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.profile-option:disabled:not(.active):hover {
+  border-color: rgba(255, 255, 255, 0.11);
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.profile-option.active {
+  box-shadow: 0 0 0 1px rgba(95, 232, 194, 0.2), inset 3px 0 0 rgba(95, 232, 194, 0.9);
+}
+
+.option-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   color: #eef7f3;
   font-size: 13px;
-  font-weight: 820;
+  font-weight: 860;
   line-height: 1.25;
+}
+
+.option-title span {
+  flex: 0 0 auto;
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #9daaa6;
+  font-size: 10px;
+  font-weight: 860;
+}
+
+.profile-option.active .option-title span {
+  background: rgba(95, 232, 194, 0.18);
+  color: #5fe8c2;
 }
 
 .profile-option strong,
@@ -3363,6 +3404,21 @@ h1 {
 
 .profile-option.active strong {
   color: #fff0b3;
+}
+
+.runtime-selection-summary {
+  padding: 8px 10px;
+  border: 1px solid rgba(95, 232, 194, 0.2);
+  border-radius: 7px;
+  background: rgba(95, 232, 194, 0.07);
+  color: #9daaa6;
+  font-size: 11px;
+  font-weight: 720;
+  line-height: 1.4;
+}
+
+.runtime-selection-summary strong {
+  color: #eef7f3;
 }
 
 .profile-warning {

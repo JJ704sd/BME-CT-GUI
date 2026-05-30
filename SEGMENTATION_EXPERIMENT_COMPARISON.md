@@ -1,6 +1,6 @@
 # 分割实验对比
 
-生成日期：2026-05-29
+生成日期：2026-05-30
 
 本文档汇总历史分割实验记录，便于横向比较。它与 `SEGMENTATION_METRICS_SUMMARY.md` 配套使用：后者记录当前指标摘要和命令上下文，本文保留跨轮次对比表。
 
@@ -24,6 +24,7 @@
 - `N/A` 表示该标签在预测和参考中均为空。`0.000000` 表示参考中没有该标签，但预测产生了体素。
 - 2026-05-26 的在线推理输入后缀规范化和底部实时进度展示属于工程链路修复，不改变下列历史实验的 Dice、IoU、Hausdorff Distance 或耗时数值。
 - 2026-05-29 的缓存 validation 修复、persistent worker reader 修复、上传文件名日志移除和部分 FLARE22 标签 remap 增强也不改变下列表格中的历史数值。当前语义下，`cached-real-nnunetv2` 只代表预测结果复用；validation 仍必须按当前请求的标签文件或内置参考标签重新计算。
+- 2026-05-30 新增 `runtime_target=local|server`、局域网配置化和服务器 5-fold soft ensemble 编排入口后，本表仍只保留已实测完成的 AMOS/FLARE 指标；服务器模式真实指标需在 Linux 服务器端到端 smoke test 之后单独新增。
 
 ## 实验名称说明
 
@@ -316,6 +317,13 @@
 - 前端和后端上传文件名调试日志已移除，文档不再要求保留 `console.log` 观察标签传输。
 - FLARE22 自动 remap 支持至少两个明确错位 label 的部分标签文件；单 label 文件仍保持人工判断或后续显式数据集 hint。
 - 本轮不改变历史实验指标，仅修正后续解释和验收口径。
+
+## 2026-05-30 运行位置与局域网配置审核记录
+
+- 前端已支持 `runtime_target=local|server`，用于区分本地 fold0 保底推理和服务器 5-GPU 5-fold soft ensemble 推理。
+- `runtime_target` 和 `inference_options` 已纳入 job state、SSE complete 事件、`job_summary.json` 和缓存语义，避免本地结果、服务器 ensemble 结果、`fast`/`quality` 结果混用。
+- 局域网访问已配置化：前端通过 `VITE_API_ENDPOINT` 指向后端，`npm run dev:lan` 监听 `0.0.0.0:5173`，后端通过 `SEGMENTATION_ALLOWED_ORIGINS` 放行实际浏览器来源。
+- 本轮没有新增真实分割指标；第二台局域网设备 smoke test 和 Linux 服务器端到端推理完成前，当前推荐基线仍沿用 AMOS `quality` profile `b3c528cc9e20` 与 FLARE 自动 remap `a717dacf42d3`。
 
 ## 推荐基线
 

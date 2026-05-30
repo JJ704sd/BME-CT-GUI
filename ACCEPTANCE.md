@@ -1,6 +1,6 @@
 # 三大目标验收包
 
-本文档用于把当前 GUI 的三个目标从”功能接近完成”推进到”可复现验收”。当前证据包含 AMOS 0117 原生标签验证，以及 FLARE22 Tr 0009 的非 AMOS 在线推理和 taxonomy-remap 指标。2026-05-28 实现自动 taxonomy remap 后，FLARE22 在线验证已能自动重映射标签 ID 并得到有意义的跨数据集指标（job `a717dacf42d3`，mean_dice=0.926，验证通过）。2026-05-29 已收口缓存 validation、persistent worker reader、上传文件名调试日志和部分 FLARE22 标签 remap 的历史风险。
+本文档用于把当前 GUI 的三个目标从”功能接近完成”推进到”可复现验收”。当前证据包含 AMOS 0117 原生标签验证，以及 FLARE22 Tr 0009 的非 AMOS 在线推理和 taxonomy-remap 指标。2026-05-28 实现自动 taxonomy remap 后，FLARE22 在线验证已能自动重映射标签 ID 并得到有意义的跨数据集指标（job `a717dacf42d3`，mean_dice=0.926，验证通过）。2026-05-29 已收口缓存 validation、persistent worker reader、上传文件名调试日志和部分 FLARE22 标签 remap 的历史风险。2026-05-30 已增加 `本地在线推理` / `服务器云端推理` 运行位置选择、局域网访问配置化和服务器 5-fold soft ensemble 编排入口；真实第二台局域网设备与 Linux 服务器端到端推理仍需按 smoke test 单独验收。
 
 ## 目标 1：CT 可浏览、三正交可联动
 

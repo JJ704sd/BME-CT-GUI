@@ -46,6 +46,7 @@ export type ResourceSnapshot = {
 export type PhaseTimings = Record<string, number>;
 
 export type InferenceProfile = "quality" | "fast";
+export type RuntimeTarget = "local" | "server";
 
 export type InferenceOptions = {
   profile: InferenceProfile;
@@ -56,7 +57,7 @@ export type InferenceOptions = {
 
 export type InferenceEvent =
   | { type: "progress"; progress: number; stage: string; heartbeat?: boolean; elapsed_seconds?: number }
-  | { type: "complete"; progress: number; stage: string; duration_seconds?: number; result_size_bytes?: number; validation?: ValidationSummary; resource_latest?: ResourceSnapshot; phase_timings?: PhaseTimings; inference_options?: InferenceOptions }
+  | { type: "complete"; progress: number; stage: string; duration_seconds?: number; result_size_bytes?: number; validation?: ValidationSummary; resource_latest?: ResourceSnapshot; phase_timings?: PhaseTimings; inference_options?: InferenceOptions; runtime_target?: RuntimeTarget }
   | { type: "error"; message: string; log_tail?: string; resource_latest?: ResourceSnapshot };
 
 export type InferenceJobMode = "real-nnunetv2" | "cached-real-nnunetv2" | "debug-label-fallback" | "unavailable";
@@ -173,6 +174,10 @@ function normalizeInferenceOptions(payload: unknown): InferenceOptions | undefin
   return options;
 }
 
+function normalizeRuntimeTarget(payload: unknown): RuntimeTarget | undefined {
+  return payload === "server" ? "server" : payload === "local" ? "local" : undefined;
+}
+
 export function parseInferenceEvent(raw: string): InferenceEvent {
   const line = raw.split(/\r?\n/).find((item) => item.startsWith("data:"));
   if (!line) throw new Error("无效的推理事件");
@@ -204,6 +209,8 @@ export function parseInferenceEvent(raw: string): InferenceEvent {
     if (phaseTimings) event.phase_timings = phaseTimings;
     const inferenceOptions = normalizeInferenceOptions(parsed.inference_options);
     if (inferenceOptions) event.inference_options = inferenceOptions;
+    const runtimeTarget = normalizeRuntimeTarget(parsed.runtime_target);
+    if (runtimeTarget) event.runtime_target = runtimeTarget;
   }
   return event;
 }
@@ -239,6 +246,9 @@ export function getPhaseTimingSummary(timings?: PhaseTimings | null) {
     prepare_runtime_model: "模型准备",
     build_predict_command: "命令生成",
     nnunet_process: "nnUNetv2 子进程",
+    server_fold_predict: "服务器 5-fold 推理",
+    server_ensemble: "服务器 soft ensemble",
+    server_validation: "服务器评估脚本",
     persistent_worker: "常驻 worker",
     collect_result: "结果整理",
     validation: "标准答案验证"
@@ -309,7 +319,7 @@ export async function fetchModelLabels(endpoint: string): Promise<OrganLabel[]> 
 export async function createInferenceJob(
   endpoint: string,
   file: File,
-  options: { modelId: string; confidenceThreshold: number; postprocess: Record<string, boolean>; inferenceProfile?: InferenceProfile; labelFile?: File }
+  options: { modelId: string; confidenceThreshold: number; postprocess: Record<string, boolean>; inferenceProfile?: InferenceProfile; runtimeTarget?: RuntimeTarget; labelFile?: File }
 ) {
   const formData = new FormData();
   formData.append("file", file, file.name);
@@ -320,6 +330,7 @@ export async function createInferenceJob(
   formData.append("confidence_threshold", String(options.confidenceThreshold));
   formData.append("postprocess", JSON.stringify(options.postprocess));
   formData.append("inference_profile", options.inferenceProfile ?? "quality");
+  formData.append("runtime_target", options.runtimeTarget ?? "server");
 
   const response = await fetch(`${endpoint}/api/segment/jobs`, { method: "POST", body: formData });
   if (!response.ok) {
@@ -329,6 +340,7 @@ export async function createInferenceJob(
   return await response.json() as {
     job_id: string;
     mode?: InferenceJobMode;
+    runtime_target?: RuntimeTarget;
     inference_profile?: InferenceProfile;
     inference_options?: InferenceOptions;
     confidence_threshold_effective?: boolean;

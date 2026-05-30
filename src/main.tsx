@@ -42,7 +42,7 @@ import demoCtImage from "./assets/demo-abdomen-ct.png";
 import { OrthogonalViewer } from "./components/OrthogonalViewer";
 import { buildLabelLookup, defaultOrganLabels, getOrganDetail, organDetails as ORGAN_DETAIL_MAP } from "./data/organDetails";
 import { exportReport, type ReportFormat } from "./report/exportReport";
-import { cancelInferenceJob, createInferenceJob, downloadInferenceResult, fetchModelLabels, getInferenceResultMeta, getInferenceStatusCopy, getPhaseTimingSummary, getResourceSnapshotCopy, parseInferenceEvent, type InferenceOptions, type InferenceProfile, type InferenceStatus, type PhaseTimings, type ResourceSnapshot, type ValidationSummary } from "./inference/inferenceClient";
+import { cancelInferenceJob, createInferenceJob, downloadInferenceResult, fetchModelLabels, getInferenceResultMeta, getInferenceStatusCopy, getPhaseTimingSummary, getResourceSnapshotCopy, parseInferenceEvent, type InferenceOptions, type InferenceProfile, type InferenceStatus, type PhaseTimings, type ResourceSnapshot, type RuntimeTarget, type ValidationSummary } from "./inference/inferenceClient";
 import { renderNiftiSliceToDataUrl as renderOrientedNiftiSliceToDataUrl } from "./imaging/sliceRenderer";
 import type { VoxelCoord } from "./imaging/voxelMapping";
 import { buildOrganLayersFromLabels, formatOrganScore, getMeanOrganDice, type OrganLayer as Organ, type OrganLayerQuality as QualityState } from "./organLayerLogic";
@@ -50,7 +50,7 @@ import { DEFAULT_REFERENCE_CASES, getReferenceCaseOriginalUrl, normalizeReferenc
 import { buildCustomCaseId, getAlignmentCaptionCopy, getCustomCasePanelCopy, getDisplayAspectRatio, getRegistrationStatus, getSelectedSliceForVoxelCoord, getSplitPositionFromClientX, getStableSliceWindowStart, getVoxelCoordDragCommit, getVoxelCoordForSelectedSliceSync, shouldUpdateVoxelCoord, volumesShareDisplayGrid, type SelectedSliceSyncSource } from "./viewerLogic";
 import "./styles.css";
 
-const API_ENDPOINT = "http://127.0.0.1:8000";
+const API_ENDPOINT = import.meta.env.VITE_API_ENDPOINT || "http://127.0.0.1:8000";
 
 type ViewMode = "CT" | "Mask" | "3D";
 type RunState = "idle" | "running" | "complete";
@@ -209,6 +209,11 @@ const toolbarHints = [
 
 const modelOptions = [
   { id: "abdomen", name: "AMOS22 腹部器官分割", scope: "15 类腹部器官 · 脾肾肝胆胰胃肠 · 血管 · 泌尿生殖", detail: "基于 AMOS22 公开数据集训练的 nnUNetv2 3D fullres 模型，支持腹部 CT 中 15 个前景器官的全自动分割。" }
+];
+
+const runtimeTargetOptions: { id: RuntimeTarget; label: string; detail: string; meta: string }[] = [
+  { id: "server", label: "服务器云端推理", detail: "5-GPU 软投票集成", meta: "正式结果推荐" },
+  { id: "local", label: "本地在线推理", detail: "保留本机 nnUNetv2 路径", meta: "服务器不可用时保底" }
 ];
 
 const inferenceProfileOptions: { id: InferenceProfile; label: string; detail: string; meta: string }[] = [
@@ -551,6 +556,7 @@ function App() {
   const [lastImport, setLastImport] = useState("等待导入本地影像或分割结果图");
   const [selectedModelId, setSelectedModelId] = useState("abdomen");
   const [selectedInferenceProfile, setSelectedInferenceProfile] = useState<InferenceProfile>("quality");
+  const [selectedRuntimeTarget, setSelectedRuntimeTarget] = useState<RuntimeTarget>("server");
   const [resultInferenceOptions, setResultInferenceOptions] = useState<InferenceOptions | null>(null);
   const [confidenceThreshold, setConfidenceThreshold] = useState(72);
   const [postprocessConfig, setPostprocessConfig] = useState({
@@ -577,6 +583,8 @@ function App() {
   const selectedOrgan = organs.find((organ) => organ.id === selectedOrganId) ?? organs[0];
   const selectedModel = modelOptions.find((model) => model.id === selectedModelId) ?? modelOptions[0];
   const selectedInferenceProfileOption = inferenceProfileOptions.find((item) => item.id === selectedInferenceProfile) ?? inferenceProfileOptions[0];
+  const selectedRuntimeTargetOption = runtimeTargetOptions.find((item) => item.id === selectedRuntimeTarget) ?? runtimeTargetOptions[0];
+  const inferenceOptionsLocked = inferenceStatus.status === "submitting" || inferenceStatus.status === "running" || runState === "running";
   const fastProfileNeedsReview = selectedInferenceProfile === "fast" || resultInferenceOptions?.profile === "fast";
   const resultProfileCopy = resultInferenceOptions?.profile === "fast" ? "快速预览 · 需人工复核" : resultInferenceOptions?.profile === "quality" ? "质量推理" : selectedInferenceProfileOption.label;
   const selectedReferenceCase = referenceCases.find((item) => item.id === selectedReferenceCaseId) ?? referenceCases[0] ?? DEFAULT_REFERENCE_CASES[0];
@@ -622,7 +630,7 @@ function App() {
     if (inferenceStatus.status === "submitting") {
       return {
         title: "正在提交任务",
-        stage: latestTimeline?.message ?? "正在创建本地 nnUNetv2 job",
+        stage: latestTimeline?.message ?? `正在提交${selectedRuntimeTargetOption.label}任务`,
         percent: clampedProgress,
         percentCopy: `${clampedProgress}%`,
         jobCopy: jobId ? `Job ${jobId}` : "Job 待创建",
@@ -683,7 +691,7 @@ function App() {
     const idleProgress = inferenceTimeline.length ? clampedProgress : 0;
     return {
       title: "等待在线推理",
-      stage: latestTimeline?.message ?? "选择原图后可运行本地 nnUNetv2 推理",
+      stage: latestTimeline?.message ?? `选择原图后可运行${selectedRuntimeTargetOption.label}`,
       percent: idleProgress,
       percentCopy: idleProgress > 0 ? `${idleProgress}%` : "0%",
       jobCopy: "Job 待创建",
@@ -691,7 +699,7 @@ function App() {
       elapsedCopy: "待记录",
       tone: "idle"
     };
-  }, [elapsedNow, inferenceStartedAt, inferenceStatus, inferenceTimeline, progress, selectedInferenceProfile]);
+  }, [elapsedNow, inferenceStartedAt, inferenceStatus, inferenceTimeline, progress, selectedInferenceProfile, selectedRuntimeTargetOption.label]);
   const hasLocalSource = loadedImage.kind !== "Demo";
   const hasImportedFiles = hasLocalSource || Boolean(resultImage);
   const customCasePanelCopy = useMemo(
@@ -1006,11 +1014,11 @@ function App() {
       type: "info",
       progress: 0,
       stage: "提交任务",
-      message: `提交本地 nnUNetv2 任务：${selectedModel.name} · ${selectedInferenceProfileOption.label}`,
+      message: `提交${selectedRuntimeTargetOption.label}任务：${selectedModel.name} · ${selectedInferenceProfileOption.label}`,
       at: submitAt
     }]);
     setInferenceStatus({ status: "submitting" });
-    setLogs([`提交本地 nnUNetv2 任务：${selectedModel.name} · ${selectedInferenceProfileOption.label}`, `质控提示阈值 ${confidenceThreshold}% · 后处理 ${Object.values(postprocessConfig).filter(Boolean).length}/3`, ...baseLogs]);
+    setLogs([`提交${selectedRuntimeTargetOption.label}任务：${selectedModel.name} · ${selectedInferenceProfileOption.label}`, `质控提示阈值 ${confidenceThreshold}% · 后处理 ${Object.values(postprocessConfig).filter(Boolean).length}/3`, ...baseLogs]);
     if (!labelFile) {
       setToast("未选择标签 CT，推理完成后不会自动计算 Dice。可通过「标签 CT 导入」补充。");
     }
@@ -1022,6 +1030,7 @@ function App() {
         confidenceThreshold,
         postprocess: postprocessConfig,
         inferenceProfile: selectedInferenceProfile,
+        runtimeTarget: selectedRuntimeTarget,
         labelFile: labelFile ?? undefined,
       });
       activeJobIdRef.current = job.job_id;
@@ -1107,16 +1116,18 @@ function App() {
         };
         events.onerror = () => {
           events.close();
-          reject(new Error("无法连接本地推理服务，请确认 server 已在 127.0.0.1:8000 启动"));
+          reject(new Error(`无法连接${selectedRuntimeTargetOption.label}服务，请确认后端已在 ${API_ENDPOINT} 启动`));
         };
       });
 
       const resultBuffer = await downloadInferenceResult(endpoint, job.job_id);
       const resultVol = parseNiftiVolume(resultBuffer);
       const sliceIndex = Math.min(resultVol.slices - 1, voxelCoord.z);
-      const resultKindLabel = inferenceOptions?.profile === "fast"
-        ? "快速预览结果（需人工复核）"
-        : job.cached_result ? "缓存推理结果" : job.mode === "debug-label-fallback" ? "调试结果" : "真实推理结果";
+      const resultKindLabel = selectedRuntimeTarget === "server"
+        ? (inferenceOptions?.profile === "fast" ? "服务器快速预览结果（需人工复核）" : job.cached_result ? "服务器缓存结果" : "服务器 5-fold 软投票结果")
+        : (inferenceOptions?.profile === "fast"
+          ? "快速预览结果（需人工复核）"
+          : job.cached_result ? "缓存推理结果" : job.mode === "debug-label-fallback" ? "调试结果" : "真实推理结果");
       setResultImage({
         src: renderCachedAxialNiftiSliceToDataUrl(resultVol, sliceIndex, "mask"),
         name: `${sourceImage.name.replace(/\.nii(\.gz)?$/i, "")}_seg.nii.gz`,
@@ -1168,7 +1179,7 @@ function App() {
       return;
     }
     try {
-      await cancelInferenceJob("http://127.0.0.1:8000", jobId);
+      await cancelInferenceJob(API_ENDPOINT, jobId);
       setRunState("idle");
       setElapsedNow(Date.now());
       setInferenceStatus({ status: "cancelled", jobId });
@@ -1914,18 +1925,56 @@ function App() {
                       <div className="organ-category"><i /><span>其他器官</span><small>脾脏 · 双侧肾上腺 · 前列腺/子宫</small></div>
                     </div>
                   </div>
+                  <div className="option-section-label">运行位置</div>
+                  <div className="inference-profile-grid" aria-label="运行位置">
+                    {runtimeTargetOptions.map((target) => {
+                      const isSelected = selectedRuntimeTarget === target.id;
+                      return (
+                        <button
+                          key={target.id}
+                          type="button"
+                          className={isSelected ? "profile-option runtime-option active" : "profile-option runtime-option"}
+                          aria-pressed={isSelected}
+                          disabled={inferenceOptionsLocked}
+                          onClick={() => {
+                            if (inferenceOptionsLocked) return;
+                            setSelectedRuntimeTarget(target.id);
+                            setLogs((items) => [`已选择运行位置：${target.label}`, ...items].slice(0, 8));
+                          }}
+                        >
+                          <span className="option-title"><span>{isSelected ? "已选择" : inferenceOptionsLocked ? "已锁定" : "可选择"}</span>{target.label}</span>
+                          <strong>{target.detail}</strong>
+                          <small>{target.meta}</small>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="option-section-label">推理模式</div>
                   <div className="inference-profile-grid" aria-label="推理模式">
-                    {inferenceProfileOptions.map((profile) => (
-                      <button
-                        key={profile.id}
-                        className={selectedInferenceProfile === profile.id ? "profile-option active" : "profile-option"}
-                        onClick={() => setSelectedInferenceProfile(profile.id)}
-                      >
-                        <span>{profile.label}</span>
-                        <strong>{profile.detail}</strong>
-                        <small>{profile.meta}</small>
-                      </button>
-                    ))}
+                    {inferenceProfileOptions.map((profile) => {
+                      const isSelected = selectedInferenceProfile === profile.id;
+                      return (
+                        <button
+                          key={profile.id}
+                          type="button"
+                          className={isSelected ? "profile-option active" : "profile-option"}
+                          aria-pressed={isSelected}
+                          disabled={inferenceOptionsLocked}
+                          onClick={() => {
+                            if (inferenceOptionsLocked) return;
+                            setSelectedInferenceProfile(profile.id);
+                            setLogs((items) => [`已选择推理模式：${profile.label}`, ...items].slice(0, 8));
+                          }}
+                        >
+                          <span className="option-title"><span>{isSelected ? "已选择" : inferenceOptionsLocked ? "已锁定" : "可选择"}</span>{profile.label}</span>
+                          <strong>{profile.detail}</strong>
+                          <small>{profile.meta}</small>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="runtime-selection-summary">
+                    当前{inferenceOptionsLocked ? "已锁定" : "将提交到"}：<strong>{selectedRuntimeTargetOption.label}</strong> · {selectedInferenceProfileOption.label}
                   </div>
                   {fastProfileNeedsReview ? (
                     <div className="profile-warning">
@@ -1990,6 +2039,7 @@ function App() {
                   <Metric label="前景 Dice" value={formatDiceMetric(validationSummary?.foreground_dice)} />
                   <Metric label="标签验证" value={validationStatusCopy} />
                   {validationSummary?.remap_applied ? <Metric label="标签重映射" value={`${validationSummary.remap_source ?? "已知数据集"} → 当前模型`} /> : null}
+                  <Metric label="运行位置" value={selectedRuntimeTargetOption.label} />
                   <Metric label="推理模式" value={resultProfileCopy} />
                   <Metric label="推理耗时" value={inferenceDurationCopy} />
                   <Metric label="瓶颈阶段" value={inferencePhaseTimingCopy} />
