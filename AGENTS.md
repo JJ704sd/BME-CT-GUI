@@ -43,7 +43,7 @@ python -m uvicorn server.main:app --host 0.0.0.0 --port 8000
 在线推理支持 `runtime_target=local|server`：
 
 - `local`：本地 nnUNetv2 保底路径，适合开发调试和服务器不可用时使用。
-- `server`：Linux 服务器 5-GPU / 5-fold soft ensemble 编排入口，适合正式推理候选路径；真实服务器端到端推理完成前，不得写成质量验收已通过。
+- `server`：Linux 服务器 5-GPU / 5-fold soft ensemble 编排入口，已完成校园网端到端 smoke；FLARE 服务器轮次可作为链路证据，AMOS 服务器轮次因疑似 taxonomy 误判暂不作为质量基线。
 
 ## 编码风格与命名约定
 
@@ -81,7 +81,7 @@ git diff --check
 - `CODE_MODULE_GUIDE.md`
 - `.planning/`
 
-AMOS 原生验证、FLARE22 自动 remap 在线验证、FLARE22 离线 remap 对照、fast preview、cached result、本地 fold0 和服务器 5-fold ensemble 必须分开表述，不能混成同一类证据。`cached-real-nnunetv2` 只表示预测 NIfTI 复用，validation 仍绑定当前请求标签文件或内置参考标签。
+AMOS 原生验证、FLARE22 自动 remap 在线验证、FLARE22 离线 remap 对照、fast preview、cached result、本地 fold0 和服务器 5-fold ensemble 必须分开表述，不能混成同一类证据。`cached-real-nnunetv2` 只表示预测 NIfTI 复用，validation 仍绑定当前请求标签文件或内置参考标签。2026-05-31 服务器 smoke 已跑通后，后续文档不得继续写成“服务器端到端待 smoke”；但服务器 AMOS 指标必须等显式 `label_taxonomy=AMOS22` 复跑并确认 `remap_applied=false` 后，才能纳入正式质量基线。
 
 ## 提交与 PR 规范
 

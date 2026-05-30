@@ -7,7 +7,7 @@
 本仓库是腹部 CT 分割 GUI 原型。前端使用 React + TypeScript + Vite，后端使用 FastAPI + Python + nnUNetv2。当前在线推理支持两条运行位置：
 
 - `local`：本地在线推理，作为开发调试和保底路径。
-- `server`：服务器云端推理，走 Linux 服务器 5-GPU / 5-fold soft ensemble 编排。
+- `server`：服务器云端推理，走 Linux 服务器 5-GPU / 5-fold soft ensemble 编排；2026-05-31 已完成校园网端到端 smoke，但 AMOS validation 仍需显式 taxonomy 复跑确认。
 
 前端通过 `VITE_API_ENDPOINT` 指向后端；后端通过 `SEGMENTATION_ALLOWED_ORIGINS` 放行实际浏览器来源。
 
@@ -63,8 +63,10 @@ python tools/segmentation_metrics_summary.py --prediction <pred.nii.gz> --refere
 
 ### server
 
-- 适合正式推理、验收和远程部署。
+- 适合正式推理候选路径、服务器部署和远程验收。
 - 走 Linux 服务器 5 个 fold 并行推理，再做 soft ensemble。
+- 校园网端到端 smoke 已跑通：Windows 前端可调用 Ubuntu FastAPI 后端，完成 5-fold 推理、soft ensemble、结果下载和 GUI 回填。
+- FLARE 服务器轮次在 remap 后可作为链路证据；AMOS 服务器轮次出现 `mean_dice=0.076015`、`foreground_dice=0.979808` 且 `remap_source=FLARE22`，更像 taxonomy 误判，不得写成模型失败基线。
 - 迁移到云服务器时，必须保证 `SEGMENTATION_SERVER_*` 环境变量完整，尤其是 GPU / fold 映射、nnUNet 目录、输出目录和评估脚本。
 
 ## 重要约束
@@ -74,6 +76,8 @@ python tools/segmentation_metrics_summary.py --prediction <pred.nii.gz> --refere
 - 公网入口必须配置鉴权、HTTPS、大文件上传限制和 SSE 反代参数，不裸露未授权后端端口。
 - 缓存只复用预测 NIfTI，不复用旧 job 的 validation 结果；`runtime_target` 必须进入缓存 key。
 - `quality` 是正式报告路径，`fast` 仅作预览。
+- 自动 taxonomy remap 解决 FLARE22 → AMOS22 在线验证，但 AMOS 原生标签不能只靠自动检测；下一轮优先实现 `label_taxonomy=auto|AMOS22|FLARE22`。
+- `runtime_target=server` 创建 job 时应只依赖 server runtime 配置，不应被本地 Windows nnUNet 文件缺失阻断。
 
 ## 测试与验收
 
@@ -109,6 +113,8 @@ git diff --check
 - `SEGMENTATION_RECENT_ROUNDS.md`
 - `CODE_MODULE_GUIDE.md`
 - `.planning/`
+
+当前下一轮工程入口是 `.planning/label-taxonomy-server-validation/`：先补显式标签体系 hint 和 server mode gating，再复跑 AMOS/FLARE 服务器 validation。
 
 ## 云服务器迁移注意
 
