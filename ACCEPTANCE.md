@@ -81,6 +81,7 @@
 | 资源快照 | device、GPU 显存、磁盘空间 |
 | 结果文件 | 下载状态、字节数、能否回填 GUI |
 | 验证结果 | 有标准答案时记录 mean/min/foreground Dice |
+| 影像量化 | 推理结果回填后是否显示量化面板，报告导出是否包含 `quantification` |
 | 底部实时进度 | 是否显示 SSE 阶段进度条、当前阶段、job id、推理模式、已耗时和最近阶段日志 |
 
 通过标准：
@@ -139,6 +140,7 @@ npm run build
 - 当前本地可直接验收的真实 NIfTI 主要是 AMOS 0117。
 - 新增 FLARE 或其他数据集病例后，应先登记到 `reference_cases.example.json` 的同结构配置，再补充本文件中的人工验收记录。
 - 真实服务器模式已完成校园网端到端 smoke：可提交服务器 job、进入 5-fold 推理、完成 soft ensemble、下载并回填 GUI。后续仍需单独记录取消、失败恢复、server/local gating、AMOS/FLARE 显式 taxonomy、更多病例 validation 和长期稳定性。
+- 影像量化分析是纯前端 mask + spacing 计算，不改变后端推理、缓存、SSE 或 validation；验收时应放在“结果下载并回填 GUI”之后检查。
 - 没有标准答案的病例只能验收浏览、推理回填和人工复核流程，不能记录自动 Dice 通过。
 
 ## 2026-05-31 服务器在线推理 smoke 与 validation 风险

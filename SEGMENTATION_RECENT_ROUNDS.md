@@ -129,3 +129,9 @@
 **现状：** 标签上传入口、FormData `label_file`、后端保存路径和在线 validation 已有回归覆盖；缓存命中只复用预测 NIfTI，不复用旧 validation。
 
 **行动：** 后续观察改为检查 job summary、`label_path`、`validation_summary.json` 和 validation 结果，不再依赖控制台文件名日志。
+
+### 问题 4：量化报告需跟随结果回填验证
+
+**现状：** 影像量化分析已作为纯前端能力接入，计算依赖推理完成后的预测 mask 和 NIfTI spacing，不改变服务器推理、缓存或 validation 链路。
+
+**行动：** 后续每次做服务器 smoke 或报告验收时，在“结果下载并回填 GUI”之后补充检查：评估模块是否显示量化面板、HTML/JSON/PDF 报告是否包含 `quantification`，并确认壁厚和精确管腔指标仍显示为不可用/后续扩展。

@@ -31,7 +31,7 @@
 - 管理 axial 预览：右侧文件卡片和底部切片时间轴使用 `renderCachedAxialNiftiSliceToDataUrl()`，复用 `src/imaging/sliceRenderer.ts` 的切片缓存，避免重复 canvas toDataURL。
 - 管理窗预设联动：`applyWindowPreset()` 切换窗宽窗位时同步设置 `activePresetId` 和 `highlightedOrganIds`；`presetOrganMap` 映射预设到关联器官 ID 列表；`highlightTimerRef` / `presetToastTimerRef` 防止快速点击堆叠定时器。
 - 管理模型信息展示：`modelOptions` 显示当前可用模型（AMOS22 腹部器官分割），下方 `.organ-category-grid` 按系统分类展示覆盖的 15 个器官。
-- 管理报告导出：`handleExport()` 收集当前病例、模型、推理、验证、器官、测量、时间线等状态组装 `ReportData`，调用 `exportReport()` 生成 HTML/JSON/PDF 报告。`selectedExportFormat` 控制导出格式。
+- 管理报告导出：`handleExport()` 收集当前病例、模型、推理、验证、量化、器官、测量、时间线等状态组装 `ReportData`，调用 `exportReport()` 生成 HTML/JSON/PDF 报告。`selectedExportFormat` 控制导出格式。
 
 本轮性能相关改动：
 
@@ -136,6 +136,7 @@
 相关文件：
 
 - `src/data/organDetails.ts`：默认器官 label、颜色、中文名称和器官说明。
+- `src/imaging/quantification.ts`：基于分割 mask 与 NIfTI spacing 的纯前端 CPU 量化模块，输出体积、体素数、最大轴向截面积、包围盒尺寸、长度估算和最长径。
 - `src/organLayerLogic.ts`：把 label 列表转换成 UI 器官层，合并 validation 分数和人工质量状态。
 - `src/referenceCases.ts`：归一化 `/api/samples` 返回值，提供参考病例 URL。
 - `src/viewerLogic.ts`：主页面可测试的 UI 计算逻辑，例如病例 ID、切片窗口、配准状态、坐标去重。
@@ -155,9 +156,9 @@
 
 - `exportReport(data, format)`：根据格式分发到对应导出函数。
 - `exportHtmlReport(data, printMode)`：生成自包含 HTML 文件（内联 CSS，`@media print` 友好）或打开新窗口触发 `window.print()`。
-- `exportJsonReport(data)`：生成结构化 JSON，加 `schema_version` 和 `report_type` 字段。
-- HTML 报告包含：概览（模型、推理模式、耗时、结果大小）、验证指标（mean/min/foreground Dice、逐标签表）、器官列表（颜色圆点 + 质控分数 + 解剖位置）、关键发现、测量点、推理时间线。
-- `ReportData` 类型聚合前端已有状态：病例、模型、图像、验证、推理、器官、测量、时间线和 AI 发现。
+- `exportJsonReport(data)`：生成结构化 JSON，加 `schema_version: "1.1"`、`report_type` 和 `quantification` 字段。
+- HTML 报告包含：概览（模型、推理模式、耗时、结果大小）、验证指标（mean/min/foreground Dice、逐标签表）、影像量化分析（体积、最大横断面积、估算长度、最长径、体素数和管腔解释）、器官列表（颜色圆点 + 质控分数 + 解剖位置）、关键发现、测量点、推理时间线。
+- `ReportData` 类型聚合前端已有状态：病例、模型、图像、验证、量化、推理、器官、测量、时间线和 AI 发现。
 
 讲解重点：
 

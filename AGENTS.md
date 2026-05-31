@@ -2,7 +2,7 @@
 
 ## 项目结构与模块组织
 
-本仓库是本地腹部 CT 分割 GUI 原型。前端使用 React + TypeScript + Vite，主要代码位于 `src/`：主应用在 `src/main.tsx`，三正交联动视图在 `src/components/OrthogonalViewer.tsx`，NIfTI 几何映射和切片渲染在 `src/imaging/`，推理 API 封装在 `src/inference/`，报告导出在 `src/report/`。后端位于 `server/`，负责 nnUNetv2 job 编排、SSE 进度、预测缓存、validation、taxonomy remap、本地/服务器运行位置分流。测试位于 `tests/`，离线指标与性能工具位于 `tools/`。真实 CT、模型权重、私有 registry 和生成输出只能放在被忽略目录，例如 `nnunetv2_files/`、`.test-output/`、`server/work/`。
+本仓库是本地腹部 CT 分割 GUI 原型。前端使用 React + TypeScript + Vite，主要代码位于 `src/`：主应用在 `src/main.tsx`，三正交联动视图在 `src/components/OrthogonalViewer.tsx`，NIfTI 几何映射、切片渲染和影像量化在 `src/imaging/`，推理 API 封装在 `src/inference/`，报告导出在 `src/report/`。后端位于 `server/`，负责 nnUNetv2 job 编排、SSE 进度、预测缓存、validation、taxonomy remap、本地/服务器运行位置分流。测试位于 `tests/`，离线指标与性能工具位于 `tools/`。真实 CT、模型权重、私有 registry 和生成输出只能放在被忽略目录，例如 `nnunetv2_files/`、`.test-output/`、`server/work/`。
 
 ## 构建、测试与开发命令
 
@@ -70,7 +70,7 @@ git diff --check
 
 ## 文档与验收口径
 
-涉及推理质量、性能、缓存、taxonomy、报告导出、局域网、服务器运行位置或验收证据的变更，应评估是否同步：
+涉及推理质量、性能、缓存、taxonomy、影像量化、报告导出、局域网、服务器运行位置或验收证据的变更，应评估是否同步：
 
 - `README.md`
 - `ACCEPTANCE.md`

@@ -26,6 +26,7 @@
 - 2026-05-29 的缓存 validation 修复、persistent worker reader 修复、上传文件名日志移除和部分 FLARE22 标签 remap 增强也不改变下列表格中的历史数值。当前语义下，`cached-real-nnunetv2` 只代表预测结果复用；validation 仍必须按当前请求的标签文件或内置参考标签重新计算。
 - 2026-05-30 新增 `runtime_target=local|server`、局域网配置化和服务器 5-fold soft ensemble 编排入口。
 - 2026-05-31 校园网 Linux 服务器端到端 smoke 已跑通：FLARE 服务器轮次 Dice 合理，AMOS 服务器轮次暴露自动 taxonomy 误判风险；服务器指标必须与本地 fold0/quality 基线分开解释。
+- 2026-05-31 前端新增影像量化分析和报告 `quantification` 字段，只读取预测 mask 与 spacing 生成体积、截面积和长度估算，不改变下列表格中的历史 Dice、IoU、Hausdorff Distance 或耗时数值。
 
 ## 实验名称说明
 

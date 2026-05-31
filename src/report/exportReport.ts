@@ -1,5 +1,6 @@
 import type { OrganDetail } from "../data/organDetails";
 import type { InferenceStatus, ValidationSummary } from "../inference/inferenceClient";
+import type { QuantificationSummary } from "../imaging/quantification";
 import type { OrganLayer } from "../organLayerLogic";
 
 export type ReportFormat = "html" | "json" | "pdf";
@@ -14,6 +15,7 @@ export type ReportData = {
   currentSlice: number;
   totalSlices: number;
   validation: ValidationSummary | null;
+  quantification: QuantificationSummary;
   inferenceStatus: InferenceStatus;
   organs: OrganLayer[];
   organDetails: Record<string, OrganDetail>;
@@ -91,6 +93,18 @@ function buildHtmlContent(data: ReportData): string {
       <td>${detail ? escapeHtml(detail.anatomicalLocation) : "—"}</td>
     </tr>`;
   }).join("\n");
+
+  const quantificationRows = data.quantification.organs.length
+    ? data.quantification.organs.slice(0, 12).map((organ) => `<tr>
+        <td>${escapeHtml(organ.name)}</td>
+        <td>${organ.volumeMl != null ? organ.volumeMl.toFixed(1) + " ml" : "—"}</td>
+        <td>${organ.maxAxialAreaMm2 != null ? organ.maxAxialAreaMm2.toFixed(1) + " mm²" : "—"}</td>
+        <td>${organ.estimatedLengthMm != null ? organ.estimatedLengthMm.toFixed(1) + " mm" : "—"}</td>
+        <td>${organ.maxDiameterMm != null ? organ.maxDiameterMm.toFixed(1) + " mm" : "—"}</td>
+        <td>${organ.voxelCount || "—"}</td>
+        <td>${escapeHtml(organ.lumenAreaInterpretation)}</td>
+      </tr>`).join("\n")
+    : '<tr><td colspan="7">暂无量化指标</td></tr>';
 
   const measurementRows = data.measurements.length
     ? data.measurements.map((m) => `<tr>
@@ -188,6 +202,13 @@ ${v?.labels?.length ? `<h3>逐标签指标</h3>
   <tbody>${organRows}</tbody>
 </table>
 
+<h2>影像量化分析</h2>
+<p style="color:#666;font-size:13px;margin-bottom:12px;">${escapeHtml(data.quantification.note)} 体积、截面积和长度由自动分割 mask 与 NIfTI spacing 估算；壁厚、精确管腔面积、中心线长度属于后续扩展。</p>
+<table>
+  <thead><tr><th>器官</th><th>体积</th><th>最大横断面积</th><th>估算长度</th><th>最长径</th><th>体素数</th><th>管腔解释</th></tr></thead>
+  <tbody>${quantificationRows}</tbody>
+</table>
+
 <h2>关键发现</h2>
 <ul>${findingsHtml}</ul>
 
@@ -229,7 +250,7 @@ function exportHtmlReport(data: ReportData, printMode: boolean) {
 
 function exportJsonReport(data: ReportData) {
   const output = {
-    schema_version: "1.0",
+    schema_version: "1.1",
     report_type: "segmentation",
     generated_at: data.generatedAt,
     case: {
@@ -243,6 +264,7 @@ function exportJsonReport(data: ReportData) {
     },
     model: { name: data.modelName },
     validation: data.validation,
+    quantification: data.quantification,
     inference: data.inferenceStatus,
     organs: data.organs.map((o) => ({
       id: o.id,

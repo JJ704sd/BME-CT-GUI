@@ -1819,6 +1819,49 @@ h1 {
   color: #96a29f;
 }
 
+.quantification-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.panel-note {
+  color: #9dacaa;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.quantification-table {
+  display: grid;
+  gap: 8px;
+}
+
+.quantification-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.045);
+  font-size: 13px;
+}
+
+.quantification-row.head {
+  background: rgba(95, 232, 194, 0.1);
+  color: #7df0cc;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.report-quantification-table {
+  margin: 10px 0 6px;
+}
+
+.report-body .panel-note {
+  margin-top: 8px;
+}
+
 .confidence {
   color: #d8e4e0;
   font-size: 13px;

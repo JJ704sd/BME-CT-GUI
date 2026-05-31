@@ -39,10 +39,11 @@ python tools/segmentation_metrics_summary.py --prediction <pred.nii.gz> --refere
 
 ### 前端 `src/`
 
-- `main.tsx`：主界面编排，负责病例、三视图、在线推理、运行位置、标签上传、报告导出。
+- `main.tsx`：主界面编排，负责病例、三视图、在线推理、运行位置、标签上传、影像量化和报告导出。
 - `components/OrthogonalViewer.tsx`：三正交视图联动。
 - `imaging/voxelMapping.ts`：体素与切片坐标映射。
 - `imaging/sliceRenderer.ts`：NIfTI 切片渲染与缓存。
+- `imaging/quantification.ts`：纯前端 CPU 量化模块，基于结果 mask 和 spacing 计算器官体积、截面积、长度估算和包围盒指标。
 - `inference/inferenceClient.ts`：创建 job、监听 SSE、下载结果，提交 `runtime_target` 和 `inference_profile`。
 - `report/exportReport.ts`：HTML / JSON / PDF 报告导出。
 - `data/organDetails.ts`：器官标签、颜色、中文说明。
@@ -103,7 +104,7 @@ git diff --check
 
 ## 文档协作
 
-涉及局域网、服务器运行位置、验证口径或迁移策略的改动，要同步检查：
+涉及局域网、服务器运行位置、验证口径、影像量化、报告 schema 或迁移策略的改动，要同步检查：
 
 - `README.md`
 - `ACCEPTANCE.md`

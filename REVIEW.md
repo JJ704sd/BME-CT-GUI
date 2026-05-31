@@ -2185,8 +2185,8 @@ job `a717dacf42d3`（FLARE22 Tr 0009 + 自动 taxonomy remap）：
 1. **新增 `src/report/exportReport.ts`**
    - 定义 `ReportFormat = "html" | "json" | "pdf"` 和 `ReportData` 类型。
    - `exportReport(data, format)` 根据格式分发到 `exportHtmlReport()`、`exportJsonReport()` 或 `exportPdfReport()`。
-   - HTML 报告为自包含文件，内联 CSS，`@media print` 友好，包含：概览、验证指标、逐标签指标表、器官列表、关键发现、测量点、推理时间线。
-   - JSON 报告加 `schema_version: "1.0"` 和 `report_type: "segmentation"` 字段，直接序列化。
+   - HTML 报告为自包含文件，内联 CSS，`@media print` 友好，包含：概览、验证指标、逐标签指标表、影像量化分析、器官列表、关键发现、测量点、推理时间线。
+   - JSON 报告当前为 `schema_version: "1.1"` 和 `report_type: "segmentation"`，包含 `quantification` 字段；早期 1.0 记录已升级。
    - PDF 报告打开新窗口渲染同一 HTML，调用 `window.print()` 让用户"另存为 PDF"，不引入 jsPDF 等重依赖。
 
 2. **修改 `src/main.tsx`**

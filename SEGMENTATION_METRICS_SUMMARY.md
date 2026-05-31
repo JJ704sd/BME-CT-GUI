@@ -39,6 +39,7 @@ python tools\segmentation_metrics_summary.py `
 - 2026-05-29 自动 remap 支持部分 FLARE22 标签：当至少两个共享 ID 明确语义错位且没有原生匹配时可识别为 FLARE22；单 label 文件仍不自动推断数据集来源。
 - 2026-05-30 新增 `runtime_target=local|server` 和局域网访问配置后，本文件中的历史 AMOS/FLARE 指标不变；本地 fold0、服务器 5-fold ensemble 和不同 profile 的指标必须分开记录，不能混算。
 - 2026-05-31 校园网服务器 5GPU/5-fold smoke 已跑通并回填 GUI；FLARE 轮次 remap 后指标合理，AMOS 轮次出现 `mean Dice=0.076015`、`foreground Dice=0.979808` 且 `remap_source=FLARE22` 的异常。该 AMOS 数值暂列为 taxonomy 误判证据，不作为模型质量基线。
+- 2026-05-31 新增的影像量化分析来自前端已回填的预测 mask 与 NIfTI spacing，输出体积、截面积和长度估算；它不改变本文件中的 Dice、IoU、Voxel Accuracy 或 Hausdorff Distance 口径。
 
 ## 当前 AMOS 基线运行
 

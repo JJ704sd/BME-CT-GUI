@@ -9,7 +9,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test:browser": "node tests/browserLayout.test.ts",
-    "test": "node tests/viewerLogic.test.ts && node tests/imagingLogic.test.ts && node tests/acceptanceDocs.test.ts && node tests/perfTool.test.ts && node tests/layoutRegression.test.ts && python tests/backendState.test.py && python tests/segmentationMetrics.test.py && npm run test:browser"
+    "test": "node tests/viewerLogic.test.ts && node tests/imagingLogic.test.ts && node tests/quantification.test.ts && node tests/acceptanceDocs.test.ts && node tests/perfTool.test.ts && node tests/layoutRegression.test.ts && python tests/backendState.test.py && python tests/segmentationMetrics.test.py && npm run test:browser"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.4",

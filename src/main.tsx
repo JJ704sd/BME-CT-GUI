@@ -43,6 +43,7 @@ import { OrthogonalViewer } from "./components/OrthogonalViewer";
 import { buildLabelLookup, defaultOrganLabels, getOrganDetail, organDetails as ORGAN_DETAIL_MAP } from "./data/organDetails";
 import { exportReport, type ReportFormat } from "./report/exportReport";
 import { cancelInferenceJob, createInferenceJob, downloadInferenceResult, fetchModelLabels, getInferenceResultMeta, getInferenceStatusCopy, getPhaseTimingSummary, getResourceSnapshotCopy, parseInferenceEvent, type InferenceOptions, type InferenceProfile, type InferenceStatus, type PhaseTimings, type ResourceSnapshot, type RuntimeTarget, type ValidationSummary } from "./inference/inferenceClient";
+import { summarizeSegmentationQuantification, formatQuantificationValue } from "./imaging/quantification";
 import { renderNiftiSliceToDataUrl as renderOrientedNiftiSliceToDataUrl } from "./imaging/sliceRenderer";
 import type { VoxelCoord } from "./imaging/voxelMapping";
 import { buildOrganLayersFromLabels, formatOrganScore, getMeanOrganDice, type OrganLayer as Organ, type OrganLayerQuality as QualityState } from "./organLayerLogic";
@@ -593,11 +594,28 @@ function App() {
     : "未发现参考病例";
   const canLoadSelectedReferenceCase = Boolean(selectedReferenceCase?.hasOriginal);
   const visibleOrgans = useMemo(() => new Set(organs.filter((organ) => organ.visible).map((organ) => organ.id)), [organs]);
+  const quantificationSummary = useMemo(() => summarizeSegmentationQuantification(resultImage?.volume, modelLabels), [modelLabels, resultImage]);
+  const quantificationById = useMemo(() => new Map(quantificationSummary.organs.map((organ) => [organ.id, organ])), [quantificationSummary]);
+  const displayedOrgans = useMemo(() => organs.map((organ) => {
+    const quantification = quantificationById.get(organ.id);
+    return quantification?.status === "computed"
+      ? { ...organ, volume: formatQuantificationValue(quantification.volumeMl, "ml") }
+      : organ;
+  }), [organs, quantificationById]);
+  const computedQuantificationOrgans = quantificationSummary.organs.filter((organ) => organ.status === "computed");
+  const quantificationPreviewOrgans = computedQuantificationOrgans.slice(0, 6);
+  const quantificationStatusCopy = quantificationSummary.status === "computed"
+    ? "已基于分割 mask 自动计算器官量化指标。"
+    : quantificationSummary.status === "empty"
+      ? "当前分割 mask 中未发现配置标签的前景体素。"
+      : resultImage?.volume
+        ? "NIfTI 体素间距不可用，无法换算物理量。"
+        : "等待分割结果后自动计算体积、截面积和长度估算。";
   const labelLookup = useMemo(() => buildLabelLookup(modelLabels), [modelLabels]);
   const visibleLabels = useMemo(() => new Set(modelLabels.filter((label) => visibleOrgans.has(label.id) || !organs.some((organ) => organ.id === label.id)).map((label) => label.label)), [modelLabels, organs, visibleOrgans]);
   const acceptedCount = organs.filter((organ) => organ.quality === "accepted").length;
   const reviewCount = organs.length - acceptedCount;
-  const scoredMeanDice = getMeanOrganDice(organs);
+  const scoredMeanDice = getMeanOrganDice(displayedOrgans);
   const averageDice = scoredMeanDice === null ? "待验证" : scoredMeanDice.toFixed(3);
   const displayedAverageDice = validationSummary?.mean_dice != null ? formatDiceMetric(validationSummary.mean_dice) : averageDice;
   const validationStatusCopy = getValidationStatusCopy(validationSummary, Boolean(labelFile));
@@ -1548,8 +1566,9 @@ function App() {
       currentSlice: selectedSlice,
       totalSlices: currentTotalSlices,
       validation: validationSummary,
+      quantification: quantificationSummary,
       inferenceStatus,
-      organs,
+      organs: displayedOrgans,
       organDetails: ORGAN_DETAIL_MAP,
       measurements,
       timeline: inferenceTimeline,
@@ -2019,9 +2038,10 @@ function App() {
                       const isActive = selectedOrganId === organ.id;
                       const isHighlight = highlightedOrganIds.has(organ.id);
                       const cls = ["organ-row", isActive && "active", isHighlight && "highlight"].filter(Boolean).join(" ");
+                      const quantification = quantificationById.get(organ.id);
                       return (
                         <button key={organ.id} className={cls} onClick={() => toggleOrgan(organ.id)}>
-                          <i style={{ background: organ.color }} /><span>{organ.name}</span><strong>{formatOrganScore(organ.score)}</strong>
+                          <i style={{ background: organ.color }} /><span>{organ.name}</span><small>{quantification?.status === "computed" ? formatQuantificationValue(quantification.volumeMl, "ml") : organ.volume}</small><strong>{formatOrganScore(organ.score)}</strong>
                         </button>
                       );
                     })}
@@ -2047,6 +2067,24 @@ function App() {
                   <Metric label="资源快照" value={inferenceResourceCopy} />
                   <Metric label="待复核器官" value={`${reviewCount}`} />
                   <Metric label="配准状态" value={volumeRegistration} />
+                </section>
+                <section className="panel quantification-panel">
+                  <div className="section-head"><h2><Gauge size={18} />影像量化分析</h2><span className="detail-chip">{computedQuantificationOrgans.length}/{quantificationSummary.organs.length}</span></div>
+                  <p className="panel-note">{quantificationStatusCopy}</p>
+                  <div className="quantification-table">
+                    <div className="quantification-row head"><span>器官</span><span>体积</span><span>最大横断面积</span><span>估算长度</span><span>最长径</span></div>
+                    {(quantificationPreviewOrgans.length ? quantificationPreviewOrgans : quantificationSummary.organs.slice(0, 4)).map((organ) => (
+                      <div className="quantification-row" key={organ.id}>
+                        <span>{organ.name}</span>
+                        <span>{formatQuantificationValue(organ.volumeMl, "ml")}</span>
+                        <span>{formatQuantificationValue(organ.maxAxialAreaMm2, "mm²")}</span>
+                        <span>{formatQuantificationValue(organ.estimatedLengthMm, "mm")}</span>
+                        <span>{formatQuantificationValue(organ.maxDiameterMm, "mm")}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <small>{computedQuantificationOrgans[0]?.lumenAreaInterpretation ?? "体积、截面积和长度由自动分割 mask 与 NIfTI spacing 估算。"}</small>
+                  <small>{computedQuantificationOrgans[0]?.wallThicknessStatus ?? "壁厚和精确管腔指标需专用标签或后续算法。"}</small>
                 </section>
                 <section className="panel">
                   <div className="section-head"><h2><ClipboardCheck size={18} />质控标记</h2></div>
@@ -2183,6 +2221,20 @@ function App() {
             <div className="report-body">
               <h3>关键发现</h3>
               {aiFindings.map((finding) => <p key={finding}>- {finding}</p>)}
+              <h3>量化指标</h3>
+              <div className="quantification-table report-quantification-table">
+                <div className="quantification-row head"><span>器官</span><span>体积</span><span>最大横断面积</span><span>估算长度</span><span>体素数</span></div>
+                {(quantificationPreviewOrgans.length ? quantificationPreviewOrgans : quantificationSummary.organs.slice(0, 4)).map((organ) => (
+                  <div className="quantification-row" key={organ.id}>
+                    <span>{organ.name}</span>
+                    <span>{formatQuantificationValue(organ.volumeMl, "ml")}</span>
+                    <span>{formatQuantificationValue(organ.maxAxialAreaMm2, "mm²")}</span>
+                    <span>{formatQuantificationValue(organ.estimatedLengthMm, "mm")}</span>
+                    <span>{organ.voxelCount || "—"}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="panel-note">{quantificationSummary.note} 壁厚和精确管腔指标需专用标签或后续算法。</p>
             </div>
           </div>
         </section>
