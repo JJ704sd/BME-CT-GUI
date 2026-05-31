@@ -30,17 +30,35 @@
 
 如果用户上传的是 `amos_0117(2).nii` 这类 AMOS 原生标签，那么后端把它判为 FLARE22 并 remap 就是误判。
 
-## 需要继续确认的证据
+## 2026-05-31：taxonomy fix 已完成
 
-1. 上传 label 文件的 unique label IDs 和各 label voxel count。
-2. 上传 label 文件到底是 AMOS22 原生标签还是 FLARE22 标签。
-3. `server/taxonomy.py` 的 `detect_dataset()` 是否在 AMOS 原生标签上误触发 FLARE22。
-4. 当前服务器实际模型的 `dataset.json`、checkpoint 标签定义和 `/api/models` 返回 labels 是否一致。
+**事实：** 已实现显式 `label_taxonomy=auto|AMOS22|FLARE22`，并更新 `detect_dataset()` 为保守策略：当参考标签 ID 是 checkpoint 标签 ID 的子集时，不自动触发 FLARE22 remap。
 
-## 2026-05-31：文档同步后的当前结论
+**证据：** 本地验证 job `d56bcff76a8b` 在选择 `AMOS22` 时返回 `remap_applied=false`；前端也已在分割控制面板提供 `自动识别 / AMOS22 原生 / FLARE22 标签` 三种标签体系选项。
 
-**事实：** 项目文档已把服务器在线推理状态从“部署准备 / 待 smoke”更新为“校园网 smoke 已跑通，但 validation taxonomy 仍需修复”。
+**判断：** AMOS 标签误判问题在当前源码中已修复。接下来需要把 20260531 runtime 包部署到服务器，并复跑 AMOS/FLARE 服务器 validation，确认服务器端也使用同一版逻辑。
 
-**关键判断：** `label_taxonomy=auto|AMOS22|FLARE22` 能改善当前 FLARE 高 Dice / AMOS 低 Dice 的映射问题，但它改善的是 validation/remap 解释链路，不改变原始 nnUNet 推理输出。AMOS 轮次必须用 `AMOS22` hint 复跑，确认 `remap_applied=false` 后才能判断真实器官 Dice。
+## 2026-05-31：部署包结构已调整
 
-**How to apply:** 下一轮代码任务应优先实现显式 taxonomy hint 和 server gating；不要继续把 AMOS `mean_dice=0.076015` 当作模型失败结论写入质量基线。
+**事实：** `server-runtime-package-20260531.zip` 内部已改为项目结构：
+
+```text
+server/main.py
+server/taxonomy.py
+server/server_inference.py
+server/persistent_nnunet_worker.py
+server/requirements.txt
+```
+
+**判断：** 服务器可以在项目根目录直接 `unzip -o server-runtime-package-20260531.zip` 覆盖后端文件，比上一版裸文件包更不容易放错目录。
+
+## 仍需确认的证据
+
+1. 服务器更新后，AMOS label 使用 `label_taxonomy=AMOS22` 是否稳定得到 `remap_applied=false`。
+2. 服务器更新后，FLARE label 使用 `label_taxonomy=FLARE22` 是否稳定得到 `remap_applied=true`、`remap_source=FLARE22`。
+3. 服务器实际模型的 `dataset.json`、checkpoint 标签定义和 `/api/models` 返回 labels 是否一致。
+4. `runtime_target=server` 创建 job 是否仍会被本地 Windows nnUNet 文件缺失阻断。
+
+## 当前结论
+
+`label_taxonomy=auto|AMOS22|FLARE22` 已改善 validation/remap 解释链路，但它不改变原始 nnUNet 推理输出。服务器 AMOS 轮次必须用 `AMOS22` hint 复跑，确认 `remap_applied=false` 后才能判断真实器官 Dice；不要继续把 AMOS `mean_dice=0.076015` 当作模型失败结论写入质量基线。

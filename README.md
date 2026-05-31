@@ -6,11 +6,16 @@
 
 ## 当前运行状态
 
-2026-05-31 正在进行：
-- AMOS CT 图像在线推理（768×768×103 分辨率，使用 2D nnUNet 模型）
-- 推理速度分析：输入分辨率高于标准 AMOS（768×768 vs 512×512），导致推理时间较长
-- 预计总推理时间约 90 分钟，已完成约 73 分钟
-- GPU 使用率 100%，显存占用 95%（RTX 4060 Laptop 8GB）
+2026-05-31 已完成：
+- 显式 `label_taxonomy=auto|AMOS22|FLARE22` 功能，AMOS 原生标签不再被自动误判为 FLARE22
+- AMOS CT 高分辨率在线推理（768×768×103，2D nnUNet，fast profile，mean_dice=0.77724）
+- 校园网 Windows 前端直连 Ubuntu FastAPI 后端的 5GPU / 5-fold soft ensemble smoke
+- 服务器 runtime 更新包 `server-runtime-package-20260531.zip`，zip 内已按 `server/...` 项目结构组织，可在项目根目录解压覆盖
+
+当前后续重点：
+- 服务器 AMOS/FLARE validation 复跑：显式选择 `AMOS22` / `FLARE22` 后分别确认 `remap_applied` 状态
+- server mode gating 继续收口：`runtime_target=server` 只依赖服务器 runtime 配置，不被本地 Windows nnUNet 文件缺失阻断
+- 高分辨率 CT 推理优化评估：预降采样与 3D 模型可行性
 
 ## 当前状态
 
@@ -19,11 +24,11 @@
 - 后端模式：模型资源齐备时为 `real-nnunetv2`，缺失时为 `unavailable`
 - 当前主要参考病例：AMOS 0117、FLARE22 Tr 0009
 - 当前新权重：`nnunetv2_files/checkpoint_best.pth`
-- 自动 taxonomy remap：已实现，FLARE22 在线验证 mean_dice 从 0.073 提升到 0.926；服务器最新 FLARE 轮次约 `mean Dice=0.891`、`foreground Dice=0.951`。但 AMOS 原生标签若被自动误判为 FLARE22 会导致 `mean Dice=0.076`、`foreground Dice=0.980` 这类“前景重合但器官 ID 错位”的异常，因此下一步需增加显式 `label_taxonomy=auto|AMOS22|FLARE22`。
+- 自动 taxonomy remap：已实现，FLARE22 在线验证 mean_dice 从 0.073 提升到 0.926；服务器最新 FLARE 轮次约 `mean Dice=0.891`、`foreground Dice=0.951`。显式 `label_taxonomy=auto|AMOS22|FLARE22` 已接入，AMOS22 选择下不会执行 FLARE remap，`auto` 模式也更保守。
 - 主要进展和实验记录：见 [REVIEW.md](./REVIEW.md)、[ACCEPTANCE.md](./ACCEPTANCE.md) 与 [SEGMENTATION_EXPERIMENT_COMPARISON.md](./SEGMENTATION_EXPERIMENT_COMPARISON.md)
 - 代码讲解材料：见 [CODE_MODULE_GUIDE.md](./CODE_MODULE_GUIDE.md)
-- 服务器 runtime 部署包：`deployment-packages/server-runtime-package-20260530.zip`，配套最短操作清单见 `deployment-packages/server-runtime-quickstart-20260530.md`。该包只包含后端运行代码、工具脚本和说明文档，不包含真实 CT/NIfTI、checkpoint、`.env`、日志或推理输出。
-- 当前推荐部署顺序：校园网 API 直连和 Ubuntu 22.04 真实 5GPU smoke test 已初步跑通；后续先修正 AMOS/FLARE label taxonomy 显式选择和 server 模式 gating，再考虑 Tailscale / WireGuard 或公网 HTTPS、鉴权、大文件上传和 SSE 反代。
+- 服务器 runtime 部署包：`deployment-packages/server-runtime-package-20260531.zip`，配套最短操作清单见 `deployment-packages/server-runtime-quickstart-20260531.md`。该包只包含后端运行代码和 `server/requirements.txt`，不包含真实 CT/NIfTI、checkpoint、`.env`、日志或推理输出；zip 内已包含 `server/` 前缀，应在项目根目录解压覆盖。
+- 当前推荐部署顺序：校园网 API 直连和 Ubuntu 22.04 真实 5GPU smoke test 已初步跑通；后续先用 20260531 runtime 包更新服务器并复跑 AMOS/FLARE 显式 taxonomy validation，再继续收口 server 模式 gating，最后再考虑 Tailscale / WireGuard 或公网 HTTPS、鉴权、大文件上传和 SSE 反代。
 
 ## 主要功能
 
@@ -39,7 +44,7 @@
 - 后端会按当前模型 `dataset.json.file_ending` 规范化输入文件名；当前模型要求 `.nii.gz`，所以 `.nii` 上传会转为 nnUNet 可识别的 `_0000.nii.gz` 输入。
 - 推理运行中可点击”取消推理”，后端会请求终止当前 nnUNetv2 子进程并通过 SSE 回写取消状态。
 - 长时间推理期间后端会定期发送心跳事件（间隔 10 秒），前端底部进度 rail 更新已耗时和资源快照，避免界面显示停滞。
-- 支持通过"标签 CT 导入"按钮或拖拽上传标签 NIfTI 文件，推理完成后自动执行在线 Dice 验证。当标签 ID 与当前 checkpoint 不一致时（如 FLARE22 vs AMOS22），后端自动检测数据集来源并按器官名重映射标签 ID，validation 结果中 `remap_applied: true` 表示已自动重映射。当前自动检测也覆盖至少两个明确错位 label 的部分 FLARE22 标签；单 label 文件因证据不足仍需人工判断或后续显式数据集 hint。
+- 支持通过"标签 CT 导入"按钮或拖拽上传标签 NIfTI 文件，推理完成后自动执行在线 Dice 验证。前端会提交 `label_taxonomy=auto|AMOS22|FLARE22`：`AMOS22` 强制不执行 FLARE remap，`FLARE22` 强制执行 FLARE22 → AMOS22 remap，`auto` 使用保守自动检测；validation 结果中的 `remap_applied`、`remap_source` 和 `label_taxonomy` 是解释 Dice 的关键字段。
 - 持久化 job summary、阶段耗时、结果大小、资源快照和 nnUNetv2 日志尾部。
 - 支持同输入、同 checkpoint、同推理配置的历史预测结果缓存回填：`cached-real-nnunetv2`。缓存只复用 NIfTI 预测结果；validation 会按本次请求的标签文件或内置参考标签重新计算，无当前标签时不复用旧 validation。
 - 支持导出分割报告（HTML / JSON / PDF 三种格式），报告包含概览、验证指标、逐标签指标、影像量化分析、器官列表、关键发现、测量点和推理时间线。JSON 报告当前使用 `schema_version: "1.1"` 并包含 `quantification` 字段；PDF 导出使用浏览器原生打印，不引入第三方 PDF 库。
@@ -255,7 +260,7 @@ FLARE22 Tr 0009 + 自动 taxonomy remap 在线验证：
 | FLARE22 + 标签 | mean Dice 约 `0.891`，foreground Dice 约 `0.951`，约 `3分48秒` | 自动 FLARE22 → AMOS22 remap 后指标合理，可作为服务器链路跑通证据。 |
 | AMOS 0117 + AMOS 标签 | mean Dice `0.076015`，foreground Dice `0.979808`，约 `9分46秒` | 前景 Dice 很高但逐器官 Dice 大面积为 0，且报告显示 `remap_source=FLARE22`，更像 AMOS 标签被误 remap，不应解读为模型完全失败。 |
 
-下一轮代码计划已记录在 `.planning/label-taxonomy-server-validation/`：增加显式 `label_taxonomy=auto|AMOS22|FLARE22`，并修复 `runtime_target=server` 创建任务不应依赖本地 Windows nnUNet 文件的 gating 问题。
+下一轮计划已记录在 `.planning/label-taxonomy-server-validation/` 和 `.planning/high-resolution-inference-optimization/`：显式 `label_taxonomy=auto|AMOS22|FLARE22` 已实现，后续重点是用 20260531 runtime 包更新服务器后复跑 AMOS/FLARE validation，并继续收口 `runtime_target=server` 的环境 gating。
 
 ## 三视图拖动体验
 
@@ -280,7 +285,7 @@ FLARE22 Tr 0009 + 自动 taxonomy remap 在线验证：
 - `GET /api/samples`：本地参考病例列表。
 - `GET /api/samples/{sample_id}/original`：下载参考病例原图。
 - `GET /api/samples/{sample_id}/label`：下载参考病例标准答案。
-- `POST /api/segment/jobs`：创建 nnUNetv2 推理任务；表单字段 `runtime_target=local|server` 可选择本地保底路径或服务器 5-GPU 5-fold soft ensemble，`inference_profile=quality|fast` 可按任务选择质量/速度配置，`label_file` 可选上传本次 validation 使用的标签 NIfTI。
+- `POST /api/segment/jobs`：创建 nnUNetv2 推理任务；表单字段 `runtime_target=local|server` 可选择本地保底路径或服务器 5-GPU 5-fold soft ensemble，`inference_profile=quality|fast` 可按任务选择质量/速度配置，`label_taxonomy=auto|AMOS22|FLARE22` 控制标签体系解释，`label_file` 可选上传本次 validation 使用的标签 NIfTI。
 - `GET /api/segment/jobs/{job_id}`：查询任务状态、耗时、资源、验证摘要和最终 `inference_options`。
 - `GET /api/segment/jobs/{job_id}/events`：SSE 推理进度；推理期间每 10 秒发送心跳事件（含已耗时和资源快照）；complete 事件包含最终 `runtime_target` 和 `inference_options`。
 - `POST /api/segment/jobs/{job_id}/cancel`：请求取消运行中任务。

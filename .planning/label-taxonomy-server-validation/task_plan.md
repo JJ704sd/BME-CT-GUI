@@ -2,76 +2,61 @@
 
 ## Context
 
-服务器在线推理已经能完成 5-fold + soft ensemble + 前端回填，但 AMOS_0117 带标签验证报告出现异常：`mean_dice=0.076015`、`foreground_dice=0.979808`，且后端自动应用了 `FLARE22 → 当前模型` remap。当前目标是避免 AMOS 标签被误判为 FLARE22，并让 server 模式创建任务不依赖本地 nnUNet 文件。
+服务器在线推理已经能完成 5-fold + soft ensemble + 前端回填，但历史 AMOS_0117 带标签验证报告出现异常：`mean_dice=0.076015`、`foreground_dice=0.979808`，且后端自动应用了 `FLARE22 → 当前模型` remap。当前源码已实现显式 `label_taxonomy=auto|AMOS22|FLARE22` 和更保守的 `detect_dataset()`，并已生成 `server-runtime-package-20260531.zip`。下一轮目标是把修复部署到服务器，复跑 AMOS/FLARE validation，并收口 server 模式 gating。
 
-## Phase 1：只读证据收集
+## Phase 1：服务器代码更新 [待执行]
 
-- [ ] 保留成功 job 的 `job_summary.json`、`validation_summary.json`、预测 NIfTI 和后端日志。
-- [ ] 对上传 label 文件打印 shape、affine/spacing、unique label IDs、每个 label voxel count。
-- [ ] 对预测结果打印同样的 label ID 分布。
-- [ ] 确认 CT、label、prediction 的体数据矩阵和 spacing 是否一致。
+- [ ] 上传 `deployment-packages/server-runtime-package-20260531.zip` 到服务器项目根目录。
+- [ ] 备份服务器当前 `server/` 目录。
+- [ ] 在项目根目录执行 `unzip -o server-runtime-package-20260531.zip`。
+- [ ] 如依赖缺失，执行 `python -m pip install -r server/requirements.txt`。
+- [ ] 重启 FastAPI 服务。
+- [ ] 访问 `/api/health` 和 `/api/models`，确认后端已恢复服务。
 
-## Phase 2：确认 taxonomy 误判点
+## Phase 2：AMOS 显式 taxonomy 复跑 [待执行]
 
-重点检查：
+- [ ] 上传 AMOS 原图 + AMOS label。
+- [ ] 选择 `runtime_target=server`。
+- [ ] 选择 `label_taxonomy=AMOS22`。
+- [ ] 记录 job id、duration、phase_timings、result_size_bytes。
+- [ ] 检查 `validation.label_taxonomy=AMOS22`。
+- [ ] 检查 `remap_applied=false`。
+- [ ] 若 Dice 仍异常，先检查 shape、spacing/affine、reference unique IDs 和 prediction unique IDs，再判断模型质量。
 
-- `server/taxonomy.py`
-- `server/main.py` 中 `validate_against_custom_label()`
+## Phase 3：FLARE 显式 taxonomy 复跑 [待执行]
 
-要确认：
+- [ ] 上传 FLARE 原图 + FLARE label。
+- [ ] 选择 `runtime_target=server`。
+- [ ] 选择 `label_taxonomy=FLARE22`。
+- [ ] 记录 job id、duration、phase_timings、result_size_bytes。
+- [ ] 检查 `validation.label_taxonomy=FLARE22`。
+- [ ] 检查 `remap_applied=true`、`remap_source=FLARE22`。
+- [ ] 记录 mean/min/foreground Dice，并继续把 FLARE 解释为跨数据集 remap 指标，不与 AMOS 原生基线混算。
 
-- `detect_dataset(reference_labels, labels)` 在什么条件下返回 `FLARE22`。
-- AMOS22 原生标签是否可能被误判为 FLARE22。
-- 单病例或部分标签文件是否因为包含错位 ID 而误触发 remap。
+## Phase 4：修复或验证 server 模式 gating [待执行]
 
-## Phase 3：增加显式 label taxonomy hint
+当前需确认 `/api/models` 和 `/api/segment/jobs` 是否仍因为本地 Windows nnUNet 文件缺失而影响 `runtime_target=server`。
 
-推荐新增请求字段：
+检查目标：
 
-```text
-label_taxonomy=auto|AMOS22|FLARE22
-```
-
-行为：
-
-- `AMOS22`：不做 FLARE22 remap，直接按当前 AMOS checkpoint label ID 计算 Dice。
-- `FLARE22`：强制执行 FLARE22 → AMOS22 remap 后计算 Dice。
-- `auto`：保留现有自动检测逻辑，但 validation message 明确展示检测来源和 remap 状态。
-
-涉及文件：
-
-- `src/inference/inferenceClient.ts`：FormData 增加 `label_taxonomy`。
-- `src/main.tsx`：在导入标签 CT 附近增加标签体系选择，默认建议 `AMOS22` 或按病例类型设置。
-- `server/main.py`：`create_job()` 接收 `label_taxonomy`，保存到 job 或 validation options。
-- `server/taxonomy.py`：复用现有 remap 方法，增加显式 hint 分支。
-- `tests/backendState.test.py`：覆盖 AMOS hint 不 remap、FLARE hint remap、auto 保持现有逻辑。
-
-## Phase 4：修复 server 模式 gating
-
-当前观察到 `/api/models` 默认显示 `runtime_target=local` 且 missing 本地文件：
-
-```text
-dataset.json, plans.json, checkpoint_best.pth, nnUNetv2_python
-```
-
-但服务器云端推理只应依赖 server runtime 配置。需要调整：
-
-- `runtime_target=server` 创建 job 时只检查 server 路径。
-- `runtime_target=local` 才检查本地 nnUNet 文件。
-- server 模式至少检查：`evaluate_script`、`dataset_json`、`nnUNet_raw`、`nnUNet_preprocessed`、`nnUNet_results`、`output_root`。
+- [ ] `runtime_target=server` 创建 job 时只检查 server 路径。
+- [ ] `runtime_target=local` 才检查本地 nnUNet 文件。
+- [ ] server 模式至少检查：`evaluate_script`、`dataset_json`、`nnUNet_raw`、`nnUNet_preprocessed`、`nnUNet_results`、`output_root`。
+- [ ] `/api/segment/jobs` 不因本地 `dataset.json/plans/checkpoint/python.exe` 缺失而 503。
 
 涉及文件：
 
-- `server/main.py`：`get_model_state(runtime_target)` required files 分支。
-- `server/server_inference.py`：确认 server config 字段完整性。
+- `server/main.py`：`get_model_state(runtime_target)`、`create_job()`。
+- `server/server_inference.py`：server config 字段完整性。
+- `tests/backendState.test.py`：增加或保留 server/local gating 覆盖。
 
-## Phase 5：文档和下一轮交接
+## Phase 5：文档和验收收尾 [待执行]
 
-- [ ] 代码实现前先确认 AMOS 标签 unique IDs、spacing/affine 和 prediction 是否一致。
-- [ ] 实现后复跑 AMOS：选择 `label_taxonomy=AMOS22`，预期 `remap_applied=false`。
-- [ ] 实现后复跑 FLARE：选择 `label_taxonomy=FLARE22`，预期 `remap_applied=true`、`remap_source=FLARE22`。
-- [ ] 若 server 模式仍 503，优先检查 `runtime_target=server` 是否仍走了本地 nnUNet required files。
-- [ ] 验证通过后再把服务器 AMOS 指标加入正式质量基线。
+- [ ] 将 AMOS 复跑结果写入 `SEGMENTATION_RECENT_ROUNDS.md`。
+- [ ] 若 AMOS `remap_applied=false` 且 Dice 合理，再写入 `SEGMENTATION_METRICS_SUMMARY.md` 的正式服务器质量基线。
+- [ ] 将 FLARE 复跑结果写入跨数据集 remap 证据，不与 AMOS 原生基线混算。
+- [ ] 更新 `ACCEPTANCE.md`、`README.md`、`REVIEW.md` 中的服务器 validation 状态。
+- [ ] 确认文档主体仍为中文。
 
 ## Verification
 
@@ -84,7 +69,7 @@ dataset.json, plans.json, checkpoint_best.pth, nnUNetv2_python
 5. 预期：
    - `remap_applied=false`
    - `remap_source` 为空或不出现
-   - Dice 不再大面积为 0
+   - Dice 不再因 ID 错位大面积为 0
    - GUI 显示 `Label 6=肝脏`、`Label 9=下腔静脉`
 
 ### FLARE 标签验证

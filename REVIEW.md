@@ -2,7 +2,7 @@
 
 > 基于 `segmentation-gui-prototype` 当前代码、运行中的本地服务以及 `nnunetv2_files` 资源整理。
 > 目标是把这个原型收敛成一个可浏览 CT、可联动三正交视图、可点击器官说明、可连接本地分割后端的工作型 GUI。
-> 当前结论：前端已经具备三正交浏览、13 类器官说明、真实病例入口、结果对比视图和报告导出功能；后端已接入本地 nnUNetv2 model folder 与真实推理命令，并会在配置不完整时明确拒绝创建任务。AMOS 0117 已形成原生标签质量基线，FLARE22 Tr 0009 已完成未缓存 `quality` 在线推理和自动 taxonomy-remap 验证（job `a717dacf42d3`，mean_dice=0.926，验证通过）。2026-05-31 的校园网服务器 smoke 进一步证明：Ubuntu 服务器 5GPU / 5-fold soft ensemble 已能被 Windows GUI 调用；但 AMOS 服务器轮次出现 `mean_dice=0.076015`、`foreground_dice=0.979808` 且 `remap_source=FLARE22` 的异常，说明还需要显式 `label_taxonomy=auto|AMOS22|FLARE22` 和 server gating 收口。GUI 支持 HTML / JSON / PDF 三种格式的分割报告导出。
+> 当前结论：前端已经具备三正交浏览、13 类器官说明、真实病例入口、结果对比视图和报告导出功能；后端已接入本地 nnUNetv2 model folder 与真实推理命令，并会在配置不完整时明确拒绝创建任务。AMOS 0117 已形成原生标签质量基线，FLARE22 Tr 0009 已完成未缓存 `quality` 在线推理和自动 taxonomy-remap 验证（job `a717dacf42d3`，mean_dice=0.926，验证通过）。2026-05-31 的校园网服务器 smoke 进一步证明：Ubuntu 服务器 5GPU / 5-fold soft ensemble 已能被 Windows GUI 调用；但 AMOS 服务器轮次出现 `mean_dice=0.076015`、`foreground_dice=0.979808` 且 `remap_source=FLARE22` 的异常；目前显式 `label_taxonomy=auto|AMOS22|FLARE22` 已实现，仍需要用 20260531 runtime 包更新服务器后复跑 AMOS/FLARE validation，并继续收口 server gating。GUI 支持 HTML / JSON / PDF 三种格式的分割报告导出。
 
 ---
 
@@ -113,7 +113,7 @@
 
 | 目标 | 当前状态 | 结论 |
 |---|---|---|
-| 真实 nnUNetv2 在线推理 | 已接入本地 `nnUNetv2_predict_from_modelfolder.exe`，待实际大体积作业验证 | 部分完成 |
+| 真实 nnUNetv2 在线推理 | 本地 AMOS/FLARE 与服务器 5-fold smoke 已跑通；高分辨率 CT fast 推理完成 | 基本完成，仍需更多病例和服务器显式 taxonomy 复跑 |
 | 结果自动回填并替换手工导入 | 前端能接收后端结果，后端输出路径已改为真实 nnUNetv2 结果 | 基本完成 |
 | 置信度阈值 | 仅保留 UI 控件，尚未与概率输出建立真实语义 | 未完成 |
 | label 表稳定来源 | 后端从真实 `dataset.json` 读取，前端优先使用 `/api/models` 并保留 13 类 fallback | 基本完成 |
@@ -206,19 +206,19 @@
 评价：
 
 - API 形状已经比较清楚。
-- 执行路径已从调试回退切换到本地 nnUNetv2 model folder 调用；仍需要通过真实 CT 作业验证耗时、显存/内存占用和输出稳定性。
+- 执行路径已从调试回退切换到真实 nnUNetv2 调用；本地 AMOS/FLARE、服务器 5-fold smoke 和高分辨率 fast 轮次已有证据，后续重点是更多病例、显式 taxonomy 服务器复跑和长期稳定性。
 
 ---
 
 ## 六、推荐的下一步
 
-### 阶段 1：后端真实化
+### 阶段 1：服务器验证收口
 
-- 接入真正的 nnUNetv2 推理路径。
-- 保留 `/api/health` 和 `/api/models`，但让它们反映真实模型状态。
-- 让 `/api/segment/jobs/{job_id}/result` 返回真实模型输出。
+- 用 `server-runtime-package-20260531.zip` 更新服务器后端。
+- 分别用 `label_taxonomy=AMOS22` 和 `label_taxonomy=FLARE22` 复跑 AMOS/FLARE validation。
+- 确认 `runtime_target=server` 创建任务只依赖服务器 runtime 配置，不被本地 Windows nnUNet 文件缺失阻断。
 
-### 阶段 2：模型配置收敛
+### 阶段 2：模型配置与标签体系收敛
 
 - 明确 `dataset.json`、`plans.json`、trainer、configuration、fold 的来源。
 - 把 label 映射写成单一真源，不要前端和后端各写一套不一致的表。
@@ -2427,9 +2427,9 @@ job `a717dacf42d3`（FLARE22 Tr 0009 + 自动 taxonomy remap）：
    - planning 明确公网入口不能裸露未授权 FastAPI 端口，需要 HTTPS、鉴权、大文件上传限制、SSE 反代 timeout/buffering 配置和日志脱敏。
 
 2. **服务器 runtime 部署包**
-   - 新增 `deployment-packages/server-runtime-package-20260530.zip`，用于服务器解压后运行当前 FastAPI 后端和 server 推理编排代码。
-   - 新增 `deployment-packages/server-runtime-quickstart-20260530.md`，记录解压、进入 nnUNet 环境、安装 FastAPI 依赖、配置 CORS、配置 `SEGMENTATION_SERVER_*`、检查路径、启动 `uvicorn`、本地前端连接和最小验收标准。
-   - 部署包不包含真实 CT/NIfTI、checkpoint、`.env`、日志或推理输出；服务器仍必须具备 CUDA/PyTorch/nnUNetv2、模型目录、数据目录和真实评估脚本路径。
+   - 已新增 `deployment-packages/server-runtime-package-20260531.zip`，用于在服务器项目根目录直接解压覆盖当前 FastAPI 后端和 server 推理编排代码。
+   - 已新增 `deployment-packages/server-runtime-quickstart-20260531.md`，记录备份 `server/`、解压覆盖、安装 FastAPI 依赖、配置 CORS、配置 `SEGMENTATION_SERVER_*`、检查路径、启动 `uvicorn`、本地前端连接和最小验收标准。
+   - 部署包按 `server/...` 项目结构组织，不包含真实 CT/NIfTI、checkpoint、`.env`、日志或推理输出；服务器仍必须具备 CUDA/PyTorch/nnUNetv2、模型目录、数据目录和真实评估脚本路径。
 
 3. **替代服务器能力边界**
    - 如果服务器不放当前后端代码，则必须已有等价推理 API、SSH 执行层或共享文件系统 + 调度系统。
@@ -2453,7 +2453,7 @@ job `a717dacf42d3`（FLARE22 Tr 0009 + 自动 taxonomy remap）：
 
 ### 51.1 背景
 
-用户导入 AMOS CT 图像进行在线推理，发现推理时间较长。本轮分析推理速度慢的原因，并预估剩余完成时间。
+用户导入 AMOS CT 图像进行在线推理，发现推理时间较长。本轮分析推理速度慢的原因，并记录完成后的 fast profile 质量结果。
 
 ### 51.2 输入参数
 
@@ -2491,7 +2491,7 @@ job `a717dacf42d3`（FLARE22 Tr 0009 + 自动 taxonomy remap）：
 
 ### 51.5 推理速度分析
 
-**已运行时间**：约 73 分钟（从 21:15:15 开始）
+**完成状态**：job `ad3d14eba3de` 已完成，使用 `fast` profile，`mean_dice=0.77724`。该轮适合作为高分辨率预览证据，不替代 AMOS `quality` profile 正式质量基线。
 
 **速度瓶颈**：
 
@@ -2501,34 +2501,19 @@ job `a717dacf42d3`（FLARE22 Tr 0009 + 自动 taxonomy remap）：
 4. **2D 模型处理 3D 数据**：103 个切片需要逐个处理
 5. **需要重采样**：输入 768×768 需要重采样到 patch 640×640
 
-**推理速度**：
-- 每切片推理时间：约 50.7 秒
-- 每秒处理像素：约 11,638
-- 理论速度（512×512）：约 30,000 像素/秒
+**推理速度口径**：
+- 高分辨率输入会显著拉长本地 2D nnUNet 推理时间
+- 服务器 5GPU/5-fold soft ensemble 与本地 RTX 4060 Laptop 结果需分开记录
+- fast profile 的速度和质量都不能直接外推到 quality profile
 
-### 51.6 剩余时间预估
+### 51.6 结论
 
-| 方法 | 依据 | 预计剩余 |
-|---|---|---|
-| I/O 分析 | 读取量是输入的 21.9 倍 | ~42 分钟 |
-| 典型速度 | 每切片 50 秒 | ~13 分钟 |
-| 保守估计 | 输出目录无 NIfTI 文件 | ~60 分钟 |
-
-**综合预估**：最可能剩余 30-50 分钟
-
-**理由**：
-1. 输出目录还没有生成 NIfTI 文件，说明还没开始生成最终分割结果
-2. I/O 读取量较大（21.9x），可能在做预处理或重采样
-3. GPU 持续满载，推理正在活跃进行
-
-### 51.7 结论
-
-推理速度慢的主要原因是输入分辨率过高（768×768 vs 标准 512×512）。加上笔记本 GPU 功耗限制和显存压力，导致推理速度只有理论峰值的 40-50%。
+推理速度慢的主要原因是输入分辨率过高（768×768 vs 标准 512×512）。加上笔记本 GPU 功耗限制和显存压力，导致本地推理耗时明显增加；最终 `mean_dice=0.77724` 与 fast profile 预览定位一致。
 
 **下次优化建议**：
-1. 预处理时降采样到 512×512
-2. 使用 3D 模型（如果有）
-3. 在台式机上运行（更高功耗/频率）
+1. 预处理时评估降采样到 512×512
+2. 使用 3D 模型（如果有）做同病例对照
+3. 在台式机或服务器 GPU 上运行，记录与本地 RTX 4060 Laptop 的差异
 
 ---
 

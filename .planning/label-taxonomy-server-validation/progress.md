@@ -1,8 +1,8 @@
 # Label taxonomy and server gating progress
 
-## 2026-05-31：taxonomy fix 已完成
+## 2026-05-31：taxonomy fix 与服务器 runtime 包已完成
 
-**状态：** taxonomy fix 已完成，server gating 待修复。
+**状态：** taxonomy fix 已完成，20260531 runtime 包已调整为可直接在项目根目录解压覆盖；server gating 与服务器显式 taxonomy 复跑仍待完成。
 
 **背景：** 服务器在线推理主链路已经完成校园网 smoke：Windows 前端可以调用 Ubuntu FastAPI 后端，服务器执行 5-fold 并行推理、soft ensemble，并把 NIfTI 结果回填 GUI。但 AMOS 服务器轮次出现 `mean_dice=0.076015`、`foreground_dice=0.979808`，同时 validation 报告显示 `remap_applied=true`、`remap_source=FLARE22`。当前判断更像 AMOS 原生标签被自动误判为 FLARE22 后错误 remap，而不是模型完全失败。
 
@@ -17,24 +17,27 @@
 
 ### 2. 显式 label taxonomy hint [已完成]
 
-- [x] 后端 `server/taxonomy.py` 支持显式 hint 分支。
+- [x] 后端 `server/main.py` 接收 `label_taxonomy` 表单字段。
+- [x] 前端 `src/main.tsx` 提供标签体系选择。
+- [x] `src/inference/inferenceClient.ts` 提交 `label_taxonomy`。
 - [x] `detect_dataset()` 更保守：标签 ID 是 checkpoint 子集时不触发 remap。
 - [x] `AMOS22` hint 下不执行 FLARE remap。
 - [x] `FLARE22` hint 下强制执行 FLARE22 → AMOS22 remap。
-- [x] `auto` 保持现有自动检测逻辑，并明确展示 remap 状态。
+- [x] `auto` 保持自动检测，但以保守策略为默认。
 - [x] `label_taxonomy` 已纳入缓存 key。
 
 ### 3. 测试与验证 [已完成]
 
 - [x] `tests/backendState.test.py` 覆盖 AMOS hint 不 remap。
 - [x] `tests/backendState.test.py` 覆盖 FLARE hint 强制 remap。
-- [x] `tests/backendState.test.py` 覆盖 auto 保持现有逻辑。
+- [x] `tests/backendState.test.py` 覆盖 auto 保守检测。
 - [x] 验证 job `d56bcff76a8b`：AMOS22 选择时 `remap_applied=false`，`mean_dice=0.77724`。
 
 ### 4. 部署包 [已完成]
 
 - [x] 新部署包 `server-runtime-package-20260531.zip` 已创建。
 - [x] 配套 `server-runtime-quickstart-20260531.md` 已编写。
+- [x] zip 包内部已按 `server/...` 项目结构组织，可在服务器项目根目录直接解压覆盖。
 
 ## 待完成
 
@@ -47,9 +50,11 @@
 
 ### 6. 服务器 validation 复跑 [待执行]
 
+- [ ] 先用 `server-runtime-package-20260531.zip` 更新服务器后端并重启 FastAPI。
 - [ ] 复跑 AMOS：选择 `label_taxonomy=AMOS22`，预期 `remap_applied=false`。
 - [ ] 复跑 FLARE：选择 `label_taxonomy=FLARE22`，预期 `remap_applied=true`、`remap_source=FLARE22`。
+- [ ] 将复跑结果写入 `SEGMENTATION_RECENT_ROUNDS.md`、`SEGMENTATION_METRICS_SUMMARY.md` 和验收文档。
 
 ## 当前结论
 
-taxonomy fix 已完成并验证通过。AMOS 标签不再被误判为 FLARE22。server mode gating 修复和服务器 validation 复跑是下一步工作。
+taxonomy fix 已完成并验证通过。AMOS 标签不再被误判为 FLARE22。下一轮工作应优先更新服务器、复跑显式 taxonomy validation，并修复/验证 server mode gating。

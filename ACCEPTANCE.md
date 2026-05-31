@@ -147,8 +147,8 @@ npm run build
 ## 当前边界
 
 - 本仓库不提交真实 CT、NIfTI、checkpoint 权重或推理输出。
-- `deployment-packages/server-runtime-package-20260530.zip` 只是服务器后端运行包，需在 Ubuntu 22.04 服务器具备 nnUNetv2、CUDA/PyTorch、模型目录和真实 `SEGMENTATION_SERVER_*` 路径后按 `deployment-packages/server-runtime-quickstart-20260530.md` 启动。
-- 当前本地可直接验收的真实 NIfTI 主要是 AMOS 0117。
+- `deployment-packages/server-runtime-package-20260531.zip` 只是服务器后端运行包，需在 Ubuntu 22.04 服务器具备 nnUNetv2、CUDA/PyTorch、模型目录和真实 `SEGMENTATION_SERVER_*` 路径后按 `deployment-packages/server-runtime-quickstart-20260531.md` 启动。
+- 当前本地可直接验收的真实 NIfTI 主要是 AMOS 0117；FLARE22 Tr 0009 可作为跨数据集 remap 验证案例，必须与 AMOS 原生质量基线分开记录。
 - 新增 FLARE 或其他数据集病例后，应先登记到 `reference_cases.example.json` 的同结构配置，再补充本文件中的人工验收记录。
 - 真实服务器模式已完成校园网端到端 smoke：可提交服务器 job、进入 5-fold 推理、完成 soft ensemble、下载并回填 GUI。显式 `label_taxonomy` 已实现，`detect_dataset()` 更保守。后续仍需单独记录取消、失败恢复、server/local gating、更多病例 validation 和长期稳定性。
 - 影像量化分析是纯前端 mask + spacing 计算，不改变后端推理、缓存、SSE 或 validation；验收时应放在“结果下载并回填 GUI”之后检查。

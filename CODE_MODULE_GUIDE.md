@@ -221,13 +221,13 @@
 
 ## 11. 服务器部署包：`deployment-packages/`
 
-`deployment-packages/server-runtime-package-20260530.zip` 是给 Ubuntu 22.04 服务器使用的最小后端运行包，配套 `deployment-packages/server-runtime-quickstart-20260530.md` 说明解压、依赖、CORS、`SEGMENTATION_SERVER_*` 和启动命令。
+`deployment-packages/server-runtime-package-20260531.zip` 是给 Ubuntu 22.04 服务器使用的最小后端更新包，配套 `deployment-packages/server-runtime-quickstart-20260531.md` 说明解压覆盖、依赖、重启和 `label_taxonomy` 验证。zip 内已按项目结构放置为 `server/...`，应在项目根目录解压。
 
 讲解重点：
 
 - 该包用于让服务器运行 FastAPI 后端并接收本地电脑 GUI 的 API 请求，然后在服务器侧启动 5GPU / 5-fold nnUNetv2 推理。
 - 包内不包含真实 CT/NIfTI、checkpoint、`.env`、日志或推理输出；服务器仍必须已有 CUDA/PyTorch/nnUNetv2、模型目录和真实数据路径。
-- 当前推荐先做校园网 API 直连；公网浏览器入口必须等真实服务器 smoke test 通过后，再补 HTTPS、鉴权、大文件上传限制和 SSE 反代配置。
+- 校园网 API 直连和服务器 5-fold smoke 已跑通；公网浏览器入口仍必须等 AMOS/FLARE 显式 taxonomy validation 和 server gating 收口后，再补 HTTPS、鉴权、大文件上传限制和 SSE 反代配置。
 
 ## 12. 常驻推理 worker：`server/persistent_nnunet_worker.py`
 
@@ -314,7 +314,7 @@ npm run build
 
 ## 15. 当前下一轮规划入口
 
-最新 planning 文档位于 `.planning/high-resolution-inference-optimization/`。讲解时应把它作为”高分辨率 CT 推理优化”的工程任务，重点包括：
+最新 planning 文档位于 `.planning/high-resolution-inference-optimization/` 和 `.planning/label-taxonomy-server-validation/`。讲解时应把它们作为“高分辨率 CT 推理优化”和“服务器显式 taxonomy 复跑 / gating 收口”的工程任务，重点包括：
 
 - 预降采样方案：在推理前对高分辨率 CT（如 768×768）降采样到标准尺寸（512×512），可显著缩短推理时间。
 - 3D 模型评估：评估 `nnUNetTrainer__nnUNetPlans__3d_fullres` 是否在高分辨率输入上更高效。
