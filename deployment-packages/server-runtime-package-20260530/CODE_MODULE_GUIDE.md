@@ -2,18 +2,6 @@
 
 本说明书面向后续代码讲解、交接和答辩演示。它不替代 `README.md`、`ACCEPTANCE.md` 或 `REVIEW.md`，重点解释各模块在系统里的职责、入口和讲解顺序。
 
-## 当前运行状态
-
-2026-05-31 已完成：
-- 显式 `label_taxonomy=auto|AMOS22|FLARE22` 功能，修复了 AMOS 标签被误判为 FLARE22 的问题
-- AMOS CT 高分辨率在线推理（768×768×103，fast profile，mean_dice=0.77724）
-- 服务器 5GPU/5-fold soft ensemble 校园网 smoke
-- 新部署包 `server-runtime-package-20260531.zip`
-
-当前进行中：
-- 高分辨率 CT 推理优化评估（预降采样方案）
-- server mode gating 修复
-
 ## 1. 推荐讲解路线
 
 1. 从 `src/main.tsx` 讲产品主流程：病例选择、NIfTI 导入、三视图显示、在线推理、结果回填。
@@ -21,11 +9,10 @@
 3. 到 `src/imaging/voxelMapping.ts` 和 `src/imaging/sliceRenderer.ts` 讲体素坐标、切片坐标、方向映射和 canvas 切片渲染缓存。
 4. 到 `src/inference/inferenceClient.ts` 讲前端如何创建 job、监听 SSE、下载结果。
 5. 到 `src/report/exportReport.ts` 讲报告导出：HTML/JSON/PDF 三种格式、自包含 HTML 模板和数据收集。
-6. 到 `server/main.py`、`server/server_inference.py` 和 `server/persistent_nnunet_worker.py` 讲 FastAPI 后端如何桥接 nnUNetv2、管理任务、缓存、validation，以及如何按 `runtime_target` 选择本地保底路径或服务器 5-fold soft ensemble 路径。`label_taxonomy` 参数已纳入缓存 key。
-7. 到 `deployment-packages/server-runtime-quickstart-20260531.md` 讲服务器 runtime 包的解压、环境变量、CORS、校园网 API 直连 smoke test、显式 `label_taxonomy` 参数和验证清单。
-8. 到 `server/taxonomy.py` 讲跨数据集标签 taxonomy 检测与自动重映射：FLARE22 标签定义、器官名别名映射、`detect_dataset()` 自动识别数据集来源（更保守策略：标签 ID 是 checkpoint 子集时不触发 remap）、`build_remap_mapping()` 按器官名建立 ID 映射、`apply_remap()` 用查找表重排参考标签数组。支持显式 `label_taxonomy=auto|AMOS22|FLARE22` 参数。
-9. 到 `tools/segmentation_metrics_summary.py` 讲 Dice、IoU、Voxel Accuracy 和 Hausdorff Distance 指标如何离线复算。
-10. 最后用 `tests/` 和文档说明验收边界：AMOS 原生 validation 与 FLARE22 自动 taxonomy-remap validation 的区别。
+6. 到 `server/main.py`、`server/server_inference.py` 和 `server/persistent_nnunet_worker.py` 讲 FastAPI 后端如何桥接 nnUNetv2、管理任务、缓存、validation，以及如何按 `runtime_target` 选择本地保底路径或服务器 5-fold soft ensemble 路径。
+7. 到 `server/taxonomy.py` 讲跨数据集标签 taxonomy 检测与自动重映射：FLARE22 标签定义、器官名别名映射、`detect_dataset()` 自动识别数据集来源、`build_remap_mapping()` 按器官名建立 ID 映射、`apply_remap()` 用查找表重排参考标签数组。
+8. 到 `tools/segmentation_metrics_summary.py` 讲 Dice、IoU、Voxel Accuracy 和 Hausdorff Distance 指标如何离线复算。
+9. 最后用 `tests/` 和文档说明验收边界：AMOS 原生 validation 与 FLARE22 自动 taxonomy-remap validation 的区别。
 
 ## 2. 前端入口：`src/main.tsx`
 
@@ -43,7 +30,7 @@
 - 管理 axial 预览：右侧文件卡片和底部切片时间轴使用 `renderCachedAxialNiftiSliceToDataUrl()`，复用 `src/imaging/sliceRenderer.ts` 的切片缓存，避免重复 canvas toDataURL。
 - 管理窗预设联动：`applyWindowPreset()` 切换窗宽窗位时同步设置 `activePresetId` 和 `highlightedOrganIds`；`presetOrganMap` 映射预设到关联器官 ID 列表；`highlightTimerRef` / `presetToastTimerRef` 防止快速点击堆叠定时器。
 - 管理模型信息展示：`modelOptions` 显示当前可用模型（AMOS22 腹部器官分割），下方 `.organ-category-grid` 按系统分类展示覆盖的 15 个器官。
-- 管理报告导出：`handleExport()` 收集当前病例、模型、推理、验证、量化、器官、测量、时间线等状态组装 `ReportData`，调用 `exportReport()` 生成 HTML/JSON/PDF 报告。`selectedExportFormat` 控制导出格式。
+- 管理报告导出：`handleExport()` 收集当前病例、模型、推理、验证、器官、测量、时间线等状态组装 `ReportData`，调用 `exportReport()` 生成 HTML/JSON/PDF 报告。`selectedExportFormat` 控制导出格式。
 
 本轮性能相关改动：
 
@@ -148,7 +135,6 @@
 相关文件：
 
 - `src/data/organDetails.ts`：默认器官 label、颜色、中文名称和器官说明。
-- `src/imaging/quantification.ts`：基于分割 mask 与 NIfTI spacing 的纯前端 CPU 量化模块，输出体积、体素数、最大轴向截面积、包围盒尺寸、长度估算和最长径。
 - `src/organLayerLogic.ts`：把 label 列表转换成 UI 器官层，合并 validation 分数和人工质量状态。
 - `src/referenceCases.ts`：归一化 `/api/samples` 返回值，提供参考病例 URL。
 - `src/viewerLogic.ts`：主页面可测试的 UI 计算逻辑，例如病例 ID、切片窗口、配准状态、坐标去重。
@@ -168,9 +154,9 @@
 
 - `exportReport(data, format)`：根据格式分发到对应导出函数。
 - `exportHtmlReport(data, printMode)`：生成自包含 HTML 文件（内联 CSS，`@media print` 友好）或打开新窗口触发 `window.print()`。
-- `exportJsonReport(data)`：生成结构化 JSON，加 `schema_version: "1.1"`、`report_type` 和 `quantification` 字段。
-- HTML 报告包含：概览（模型、推理模式、耗时、结果大小）、验证指标（mean/min/foreground Dice、逐标签表）、影像量化分析（体积、最大横断面积、估算长度、最长径、体素数和管腔解释）、器官列表（颜色圆点 + 质控分数 + 解剖位置）、关键发现、测量点、推理时间线。
-- `ReportData` 类型聚合前端已有状态：病例、模型、图像、验证、量化、推理、器官、测量、时间线和 AI 发现。
+- `exportJsonReport(data)`：生成结构化 JSON，加 `schema_version` 和 `report_type` 字段。
+- HTML 报告包含：概览（模型、推理模式、耗时、结果大小）、验证指标（mean/min/foreground Dice、逐标签表）、器官列表（颜色圆点 + 质控分数 + 解剖位置）、关键发现、测量点、推理时间线。
+- `ReportData` 类型聚合前端已有状态：病例、模型、图像、验证、推理、器官、测量、时间线和 AI 发现。
 
 讲解重点：
 
@@ -199,7 +185,7 @@
 讲解重点：
 
 - `nnunetv2_files/`、`.test-output/`、`server/work/` 都是本地私有或临时输出，不进入 Git。
-- 自动 validation 的前提是 label taxonomy 与 checkpoint 原生一致，或后端能通过 `server/taxonomy.py` 识别并自动 remap。FLARE22 已支持在线自动 remap。显式 `label_taxonomy=auto|AMOS22|FLARE22` 已实现：`auto` 模式更保守（标签 ID 是 checkpoint 子集时不触发 remap），`AMOS22` 强制不 remap，`FLARE22` 强制 remap。该参数已纳入缓存 key。
+- 自动 validation 的前提是 label taxonomy 与 checkpoint 原生一致，或后端能通过 `server/taxonomy.py` 识别并自动 remap。FLARE22 已支持在线自动 remap；部分标签需至少两个明确错位 ID，单 label 文件仍需人工判断或后续显式数据集 hint。
 - 心跳事件的 `heartbeat: true` 字段可用于前端区分心跳和真正的阶段进度；心跳失败不会中断推理。
 
 ## 10. 服务器推理编排：`server/server_inference.py`
@@ -217,19 +203,9 @@
 
 - 服务器模式是正式推理候选路径，目标是 5 张 GPU 并行跑 5 个 fold 后做 soft ensemble；本地模式仍作为开发调试和服务器不可用时的保底。
 - 服务器路径只负责命令构造和进程编排，job 生命周期、SSE、取消、结果下载、cache key 和 validation 仍由 `server/main.py` 统一管理。
-- 真实 Linux 服务器端到端推理已完成校园网 smoke：前端可提交 job、服务器执行 5-fold/soft ensemble 并回填 GUI；但 server/local gating、AMOS/FLARE 显式 taxonomy、取消和失败恢复仍需继续验收，不能写成完整质量验收。
+- 真实 Linux 服务器端到端推理尚需单独 smoke test；在完成前，文档不能把服务器模式写成已完成质量验收。
 
-## 11. 服务器部署包：`deployment-packages/`
-
-`deployment-packages/server-runtime-package-20260530.zip` 是给 Ubuntu 22.04 服务器使用的最小后端运行包，配套 `deployment-packages/server-runtime-quickstart-20260530.md` 说明解压、依赖、CORS、`SEGMENTATION_SERVER_*` 和启动命令。
-
-讲解重点：
-
-- 该包用于让服务器运行 FastAPI 后端并接收本地电脑 GUI 的 API 请求，然后在服务器侧启动 5GPU / 5-fold nnUNetv2 推理。
-- 包内不包含真实 CT/NIfTI、checkpoint、`.env`、日志或推理输出；服务器仍必须已有 CUDA/PyTorch/nnUNetv2、模型目录和真实数据路径。
-- 当前推荐先做校园网 API 直连；公网浏览器入口必须等真实服务器 smoke test 通过后，再补 HTTPS、鉴权、大文件上传限制和 SSE 反代配置。
-
-## 12. 常驻推理 worker：`server/persistent_nnunet_worker.py`
+## 11. 常驻推理 worker：`server/persistent_nnunet_worker.py`
 
 该脚本承接后端启动的 persistent worker 路径，用于减少部分模型加载开销。
 
@@ -240,7 +216,7 @@
 - 常驻 worker 读取响应时使用进程级共享 `_persistent_worker_reader_thread()` + `queue.Queue` 实现非阻塞读取，超时后自动发送心跳，不阻塞主线程。2026-05-29 修复前，复用 worker 时每次读事件都会新建 stdout reader 线程，存在旧线程抢读后续事件的风险；当前 reader 状态会随 worker 进程创建和关闭统一维护。
 - 目前只通过轻量 shutdown smoke 验证 worker 协议和 reader 清理，未重新完成真实长耗时无缓存推理加速验收。
 
-## 13. 指标与性能工具
+## 12. 指标与性能工具
 
 相关文件：
 
@@ -252,7 +228,7 @@
 - 指标脚本可以用于 AMOS 原生 label，也可以用于 FLARE22 remapped reference，但文档必须明确区分解释边界。
 - 对外报告时，应优先引用 `SEGMENTATION_METRICS_SUMMARY.md` 中已经整理过的指标，而不是直接引用临时输出。
 
-## 14. 测试结构：`tests/`
+## 13. 测试结构：`tests/`
 
 主要测试：
 
@@ -277,7 +253,7 @@ npm test
 npm run build
 ```
 
-## 15. 本轮性能优化的讲解口径
+## 14. 本轮性能优化的讲解口径
 
 分屏模式说明：
 
@@ -312,15 +288,7 @@ npm run build
 - `npm run build` 通过。
 - 浏览器烟测在 `http://127.0.0.1:5173/` 快速拖动三视图后无控制台错误，三视图图片非空白。
 
-## 15. 当前下一轮规划入口
-
-最新 planning 文档位于 `.planning/high-resolution-inference-optimization/`。讲解时应把它作为”高分辨率 CT 推理优化”的工程任务，重点包括：
-
-- 预降采样方案：在推理前对高分辨率 CT（如 768×768）降采样到标准尺寸（512×512），可显著缩短推理时间。
-- 3D 模型评估：评估 `nnUNetTrainer__nnUNetPlans__3d_fullres` 是否在高分辨率输入上更高效。
-- `.planning/label-taxonomy-server-validation/` 中剩余的 `runtime_target=server` gating 修复和 AMOS/FLARE 服务器 validation 复跑。
-
-## 16. 数据与文档边界
+## 15. 数据与文档边界
 
 - 真实 NIfTI、checkpoint、推理输出和私有 registry 不提交。
 - 局域网运行时，前端 API 地址由 `VITE_API_ENDPOINT` 配置，Vite 通过 `npm run dev:lan` 监听局域网地址，后端通过 `SEGMENTATION_ALLOWED_ORIGINS` 放行实际浏览器来源；不应长期使用无限制公网来源。

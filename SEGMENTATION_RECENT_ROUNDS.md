@@ -4,24 +4,26 @@
 
 最近更新：2026-05-31
 
-## 第 1 轮（最新）— 本地 AMOS CT 高分辨率在线推理
+## 第 1 轮（最新）— label_taxonomy 修复与 AMOS CT 推理完成
 
 | 项目 | 值 |
 |---|---|
-| job_id | `ad3d14eba3de` |
 | 日期 | 2026-05-31 |
-| 病例 | AMOS CT（768×768×103） |
-| 运行位置 | 本地 RTX 4060 Laptop GPU |
-| 模式 | `real-nnunetv2` |
-| 缓存 | 否 |
-| 推理配置 | quality / tile_step=0.5 / TTA on |
-| 输入分辨率 | 768×768×103（高于标准 AMOS 512×512） |
-| 模型 | nnUNetTrainer__nnUNetPlans__2d（2D 逐切片处理） |
-| GPU 状态 | RTX 4060 Laptop, 100% 利用率, 95% 显存占用, 57°C |
-| 预计总耗时 | 约 90 分钟 |
-| 开始时间 | 2026-05-31 21:15:15 |
+| 修复内容 | 显式 `label_taxonomy=auto\|AMOS22\|FLARE22`，`detect_dataset()` 更保守 |
+| 验证 job | `d56bcff76a8b`（AMOS22 选择，`remap_applied=false`） |
+| AMOS CT 推理 | job `ad3d14eba3de`，768×768×103，fast profile，mean_dice=0.77724 |
+| 部署包 | `server-runtime-package-20260531.zip` |
 
-**推理速度分析：**
+**label_taxonomy 修复要点：**
+
+| 修改项 | 说明 |
+|---|---|
+| `detect_dataset()` | 标签 ID 是 checkpoint 子集时不触发 remap |
+| `label_taxonomy` 参数 | `auto`：保守检测；`AMOS22`：强制不 remap；`FLARE22`：强制 remap |
+| 缓存 key | `label_taxonomy` 已纳入，不同标签体系结果不会混用 |
+| 测试更新 | `tests/backendState.test.py` 已更新期望值 |
+
+**AMOS CT 推理速度分析：**
 
 | 瓶颈因素 | 说明 |
 |---|---|
@@ -32,7 +34,7 @@
 | 2D 模型处理 3D 数据 | 逐切片处理 103 层，每层需独立推理 |
 | 重采样开销 | nnUNetv2 需将 768×768 重采样到模型 patch 640×640 |
 
-**结论：** 该推理速度对于高分辨率输入属于预期行为，非系统故障。输入分辨率高于标准 AMOS 数据集（768×768 vs 512×512），导致计算量增加约 2.25 倍。建议后续高分辨率 CT 可考虑预降采样以加速推理。
+**结论：** label_taxonomy 修复已完成，AMOS 标签不再被误判为 FLARE22。AMOS CT 高分辨率推理完成，fast profile 下 mean_dice=0.77724（低于 quality 的 0.924791，符合预期）。建议后续高分辨率 CT 可考虑预降采样以加速推理。
 
 ---
 
@@ -144,16 +146,11 @@
 - 中期：考虑在推理前对高分辨率 CT 进行预降采样（如 768→512），可显著缩短推理时间。
 - 长期：评估是否需要训练支持更高分辨率的模型，或在 nnUNetv2 配置中调整 patch size。
 
-### 问题 1：AMOS 原生标签可能被误判为 FLARE22
+### 问题 1：AMOS 原生标签可能被误判为 FLARE22 [已修复]
 
-**现状：** 服务器 AMOS 轮次出现 `foreground_dice=0.979808` 但 `mean_dice=0.076015`，同时报告记录 `remap_applied=true`、`remap_source=FLARE22`。这更像 label taxonomy 误判，而不是模型完全失败。
+**现状：** 已实现显式 `label_taxonomy=auto|AMOS22|FLARE22`，`detect_dataset()` 更保守：标签 ID 是 checkpoint 子集时不触发 remap。验证 job `d56bcff76a8b` 确认 AMOS22 选择时 `remap_applied=false`。
 
-**行动：**
-
-- 增加显式 `label_taxonomy=auto|AMOS22|FLARE22`。
-- AMOS22：禁止 FLARE remap，直接按当前 AMOS checkpoint label ID 验证。
-- FLARE22：强制 FLARE22 → AMOS22 remap。
-- auto：保留当前检测逻辑，但 message 必须明确检测来源和 remap 状态。
+**行动：** 后续服务器 AMOS validation 复跑时使用 `label_taxonomy=AMOS22`，确认 `remap_applied=false` 后纳入正式质量基线。
 
 ### 问题 2：server 模式 gating 仍需收口
 

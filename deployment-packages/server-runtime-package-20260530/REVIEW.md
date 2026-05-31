@@ -2,23 +2,7 @@
 
 > 基于 `segmentation-gui-prototype` 当前代码、运行中的本地服务以及 `nnunetv2_files` 资源整理。
 > 目标是把这个原型收敛成一个可浏览 CT、可联动三正交视图、可点击器官说明、可连接本地分割后端的工作型 GUI。
-> 当前结论：前端已经具备三正交浏览、13 类器官说明、真实病例入口、结果对比视图和报告导出功能；后端已接入本地 nnUNetv2 model folder 与真实推理命令，并会在配置不完整时明确拒绝创建任务。AMOS 0117 已形成原生标签质量基线，FLARE22 Tr 0009 已完成未缓存 `quality` 在线推理和自动 taxonomy-remap 验证（job `a717dacf42d3`，mean_dice=0.926，验证通过）。2026-05-31 的校园网服务器 smoke 进一步证明：Ubuntu 服务器 5GPU / 5-fold soft ensemble 已能被 Windows GUI 调用；但 AMOS 服务器轮次出现 `mean_dice=0.076015`、`foreground_dice=0.979808` 且 `remap_source=FLARE22` 的异常，说明还需要显式 `label_taxonomy=auto|AMOS22|FLARE22` 和 server gating 收口。GUI 支持 HTML / JSON / PDF 三种格式的分割报告导出。
-
----
-
-## 〇、2026-05-31 最新状态更新
-
-### label_taxonomy 修复
-
-- 显式 `label_taxonomy=auto|AMOS22|FLARE22` 已实现，修复了 AMOS 标签被误判为 FLARE22 的问题。
-- `server/taxonomy.py` 的 `detect_dataset()` 现在更保守：标签 ID 是 checkpoint 子集时不触发 remap。
-- 新部署包 `server-runtime-package-20260531.zip` 已创建，配套 `server-runtime-quickstart-20260531.md`。
-
-### AMOS CT 高分辨率推理
-
-- AMOS CT（768×768×103）本地在线推理完成，fast profile，mean_dice=0.77724。
-- 输入分辨率高于标准 AMOS（768×768 vs 512×512），面积增加 2.25 倍，推理时间显著延长。
-- 后续优化方向：预降采样、3D 模型评估。
+> 当前结论：前端已经具备三正交浏览、13 类器官说明、真实病例入口、结果对比视图和报告导出功能；后端已接入本地 nnUNetv2 model folder 与真实推理命令，并会在配置不完整时明确拒绝创建任务。AMOS 0117 已形成原生标签质量基线，FLARE22 Tr 0009 已完成未缓存 `quality` 在线推理和自动 taxonomy-remap 验证（job `a717dacf42d3`，mean_dice=0.926，验证通过）。GUI 支持 HTML / JSON / PDF 三种格式的分割报告导出。
 
 ---
 
@@ -2201,8 +2185,8 @@ job `a717dacf42d3`（FLARE22 Tr 0009 + 自动 taxonomy remap）：
 1. **新增 `src/report/exportReport.ts`**
    - 定义 `ReportFormat = "html" | "json" | "pdf"` 和 `ReportData` 类型。
    - `exportReport(data, format)` 根据格式分发到 `exportHtmlReport()`、`exportJsonReport()` 或 `exportPdfReport()`。
-   - HTML 报告为自包含文件，内联 CSS，`@media print` 友好，包含：概览、验证指标、逐标签指标表、影像量化分析、器官列表、关键发现、测量点、推理时间线。
-   - JSON 报告当前为 `schema_version: "1.1"` 和 `report_type: "segmentation"`，包含 `quantification` 字段；早期 1.0 记录已升级。
+   - HTML 报告为自包含文件，内联 CSS，`@media print` 友好，包含：概览、验证指标、逐标签指标表、器官列表、关键发现、测量点、推理时间线。
+   - JSON 报告加 `schema_version: "1.0"` 和 `report_type: "segmentation"` 字段，直接序列化。
    - PDF 报告打开新窗口渲染同一 HTML，调用 `window.print()` 让用户"另存为 PDF"，不引入 jsPDF 等重依赖。
 
 2. **修改 `src/main.tsx`**
@@ -2381,12 +2365,12 @@ job `a717dacf42d3`（FLARE22 Tr 0009 + 自动 taxonomy remap）：
 
 ### 49.1 范围
 
-本轮核对并同步 2026-05-30 的工程链路变化，后续在 2026-05-31 已完成校园网服务器端到端 smoke：
+本轮核对并同步 2026-05-30 的工程链路变化：
 
 - 前端在线推理增加 `服务器云端推理` / `本地在线推理` 两个运行位置。
 - 后端按 `runtime_target=server|local` 分流本地 nnUNetv2 路径和服务器 5-fold soft ensemble 编排路径。
 - 局域网访问改为配置化，避免前端和 CORS 只绑定本机 localhost。
-- 2026-05-31 校园网链路已能从 Windows 前端提交到 Ubuntu FastAPI 后端，完成 5-fold 推理、soft ensemble、结果下载和 GUI 回填；但 AMOS validation 暴露自动 taxonomy 误判风险，仍不能写成完整质量验收通过。
+- 文档同步说明当前边界：本轮不新增真实分割指标，真实第二台局域网设备和 Linux 服务器端到端推理仍需单独 smoke test。
 
 ### 49.2 代码与配置状态
 
@@ -2398,139 +2382,22 @@ job `a717dacf42d3`（FLARE22 Tr 0009 + 自动 taxonomy remap）：
 
 ### 49.3 文档同步
 
-- `README.md`：补充局域网运行、运行位置、服务器 5-fold soft ensemble 配置、服务器 smoke 结果和 AMOS taxonomy 风险。
-- `ACCEPTANCE.md`：补充 2026-05-31 服务器在线推理 smoke 与 validation 风险，明确完整质量验收仍需显式 taxonomy hint 和更多稳定性记录。
-- `SEGMENTATION_METRICS_SUMMARY.md`：把服务器 FLARE/AMOS 轮次与本地 AMOS quality 基线分开记录。
-- `SEGMENTATION_EXPERIMENT_COMPARISON.md`：新增服务器 FLARE smoke 与服务器 AMOS 异常行，避免把 AMOS 异常误写成模型失败。
-- `SEGMENTATION_RECENT_ROUNDS.md`：更新近三轮记录，突出服务器 AMOS taxonomy 异常和 FLARE remap 正常。
-- `CODE_MODULE_GUIDE.md`：补充 `runtime_target`、`server/server_inference.py`、局域网配置和下一轮 taxonomy/gating 规划入口。
-- `.planning/label-taxonomy-server-validation/`：记录显式 `label_taxonomy=auto|AMOS22|FLARE22` 与 server gating 的下一轮任务。
+- `README.md`：补充局域网运行、运行位置、服务器 5-fold soft ensemble 配置和 API 字段说明。
+- `ACCEPTANCE.md`：补充 2026-05-30 验收边界，明确真实第二台局域网设备和 Linux 服务器推理仍待验收。
+- `SEGMENTATION_METRICS_SUMMARY.md`：说明运行位置和局域网更新不改变历史 AMOS/FLARE 指标。
+- `SEGMENTATION_EXPERIMENT_COMPARISON.md`：新增 2026-05-30 审核记录，保持推荐基线不变。
+- `SEGMENTATION_RECENT_ROUNDS.md`：新增非推理链路更新段落，不替换近三轮成功推理数据。
+- `CODE_MODULE_GUIDE.md`：补充 `runtime_target`、`server/server_inference.py` 和局域网配置讲解。
+- `.planning/lan-direct-and-tunnel/`：保留局域网直连与穿透方案的 task plan、findings 和 progress 记录。
 
 ### 49.4 行为边界
 
 - 当前推荐正式 AMOS 基线仍是 `quality` profile `b3c528cc9e20`；跨数据集在线验证基线仍是 FLARE 自动 remap job `a717dacf42d3`。
-- 服务器端到端链路已完成阶段性 smoke，可作为工程进展；服务器 AMOS 质量指标必须等 `label_taxonomy=AMOS22` 复跑并确认 `remap_applied=false` 后再纳入正式基线。
-- `runtime_target=server` 创建 job 仍需修复 gating：服务器云端推理不应依赖本地 Windows 的 `dataset.json/plans/checkpoint/python.exe`。
+- 服务器模式已经具备后端编排入口，但不能写成已完成 Linux 服务器真实质量验收。
+- 局域网当前只完成本机 IP、health 和 CORS 检查；第二台真实设备上的上传、SSE、取消、下载和标签 validation 仍待验收。
 - `AGENTS.md` 属于 agent instruction 文件，当前自动权限拒绝直接覆盖；若需要统一中文主体，需要单独取得用户授权后处理。
 
-## 50. 2026-05-30 校园网访问 planning 与服务器 runtime 包准备
-
-### 50.1 本轮目标
-
-本轮当时不新增推理指标，也不宣称服务器模式已完成质量验收。目标是把真实服务器在线推理的执行路径收敛为可交付材料：先校园网 API 直连，再做 Ubuntu 22.04 真实 5GPU smoke test，最后才视需求进入 VPN/Mesh 或公网入口。2026-05-31 后，校园网服务器 smoke 已完成，剩余重点转为 AMOS/FLARE 显式 taxonomy、server/local gating、取消、失败恢复和长期稳定性验收。
-
-### 50.2 本轮已完成
-
-1. **校园网与公网访问 planning**
-   - 新增 `.planning/campus-network-and-public-access/task_plan.md`、`findings.md`、`progress.md`。
-   - 规划结论为：优先验证本地电脑前端连接校园网 Ubuntu FastAPI 后端；若校园网互访不稳定，再试 Tailscale / WireGuard；只有真实服务器推理稳定后，才评估 frp、Cloudflare Tunnel、ngrok 或 VPS + HTTPS + 鉴权。
-   - planning 明确公网入口不能裸露未授权 FastAPI 端口，需要 HTTPS、鉴权、大文件上传限制、SSE 反代 timeout/buffering 配置和日志脱敏。
-
-2. **服务器 runtime 部署包**
-   - 新增 `deployment-packages/server-runtime-package-20260530.zip`，用于服务器解压后运行当前 FastAPI 后端和 server 推理编排代码。
-   - 新增 `deployment-packages/server-runtime-quickstart-20260530.md`，记录解压、进入 nnUNet 环境、安装 FastAPI 依赖、配置 CORS、配置 `SEGMENTATION_SERVER_*`、检查路径、启动 `uvicorn`、本地前端连接和最小验收标准。
-   - 部署包不包含真实 CT/NIfTI、checkpoint、`.env`、日志或推理输出；服务器仍必须具备 CUDA/PyTorch/nnUNetv2、模型目录、数据目录和真实评估脚本路径。
-
-3. **替代服务器能力边界**
-   - 如果服务器不放当前后端代码，则必须已有等价推理 API、SSH 执行层或共享文件系统 + 调度系统。
-   - 等价 API 至少要支持上传、创建 job、状态查询、SSE 或轮询进度、取消、结果下载、label validation/evaluate、5GPU / 5-fold soft ensemble，并最好兼容当前 GUI 的 `/api/health`、`/api/models`、`/api/segment/jobs`、events、cancel 和 result 接口。
-
-### 50.3 当前未完成
-
-- AMOS 服务器轮次需要在显式 `label_taxonomy=AMOS22` 下复跑，确认 `remap_applied=false` 后才能纳入正式质量基线。
-- FLARE 服务器轮次需要在显式 `label_taxonomy=FLARE22` 下复跑，确认 `remap_applied=true`、`remap_source=FLARE22`。
-- `runtime_target=server` 的 job 创建 gating 仍需修复，避免服务器云端推理依赖本地 Windows nnUNet 文件。
-- 第二台真实局域网设备的大文件上传、SSE 长连接、取消、下载、validation 和前端回填仍需补充记录。
-- 公网浏览器入口尚未实施，不能写成已具备公网访问能力。
-
-### 50.4 文档同步
-
-已同步 `README.md`、`ACCEPTANCE.md`、`CODE_MODULE_GUIDE.md`、`SEGMENTATION_RECENT_ROUNDS.md`、`SEGMENTATION_EXPERIMENT_COMPARISON.md` 和 `SEGMENTATION_METRICS_SUMMARY.md`，统一口径为：server runtime 包完成了部署准备，2026-05-31 校园网服务器端到端 smoke 已跑通；FLARE 轮次可作为链路证据，AMOS 轮次因疑似 taxonomy 误判暂不作为模型失败或质量基线。
-
 ---
 
-## 51. 2026-05-31 AMOS CT 在线推理速度分析
-
-### 51.1 背景
-
-用户导入 AMOS CT 图像进行在线推理，发现推理时间较长。本轮分析推理速度慢的原因，并预估剩余完成时间。
-
-### 51.2 输入参数
-
-| 项目 | 值 |
-|---|---|
-| 输入 CT | AMOS CT 图像 |
-| Shape | (768, 768, 103) |
-| 体素大小 | 0.5078125 × 0.5078125 × 5.0 mm |
-| 切片数 | 103 |
-| 总像素数 | 60,751,872 |
-| 数据类型 | int16 |
-
-### 51.3 模型配置
-
-| 项目 | 值 |
-|---|---|
-| 数据集 | Dataset001_AMOS22 |
-| 模型类型 | 2D (nnUNetTrainer__nnUNetPlans__2d) |
-| Patch 大小 | 640 × 640 |
-| Batch 大小 | 32 |
-| 网络结构 | ResidualEncoderUNet (8 阶段) |
-| 参数量 | ~10.2M |
-
-### 51.4 GPU 状态
-
-| 项目 | 值 |
-|---|---|
-| GPU | NVIDIA GeForce RTX 4060 Laptop |
-| 显存 | 8188 MiB |
-| 使用率 | 100% |
-| 显存占用 | 7782 MiB (95%) |
-| 温度 | 57°C |
-| 当前频率 | 2505 MHz (最大 3105 MHz，80%) |
-| 功耗 | 27W / 40W |
-
-### 51.5 推理速度分析
-
-**已运行时间**：约 73 分钟（从 21:15:15 开始）
-
-**速度瓶颈**：
-
-1. **分辨率过高**：输入 CT 为 768×768，比标准 AMOS 的 512×512 大 2.25 倍
-2. **显存接近满载**：95% 显存占用导致性能下降
-3. **GPU 功耗受限**：笔记本功耗墙限制，频率只有最大值的 80%
-4. **2D 模型处理 3D 数据**：103 个切片需要逐个处理
-5. **需要重采样**：输入 768×768 需要重采样到 patch 640×640
-
-**推理速度**：
-- 每切片推理时间：约 50.7 秒
-- 每秒处理像素：约 11,638
-- 理论速度（512×512）：约 30,000 像素/秒
-
-### 51.6 剩余时间预估
-
-| 方法 | 依据 | 预计剩余 |
-|---|---|---|
-| I/O 分析 | 读取量是输入的 21.9 倍 | ~42 分钟 |
-| 典型速度 | 每切片 50 秒 | ~13 分钟 |
-| 保守估计 | 输出目录无 NIfTI 文件 | ~60 分钟 |
-
-**综合预估**：最可能剩余 30-50 分钟
-
-**理由**：
-1. 输出目录还没有生成 NIfTI 文件，说明还没开始生成最终分割结果
-2. I/O 读取量较大（21.9x），可能在做预处理或重采样
-3. GPU 持续满载，推理正在活跃进行
-
-### 51.7 结论
-
-推理速度慢的主要原因是输入分辨率过高（768×768 vs 标准 512×512）。加上笔记本 GPU 功耗限制和显存压力，导致推理速度只有理论峰值的 40-50%。
-
-**下次优化建议**：
-1. 预处理时降采样到 512×512
-2. 使用 3D 模型（如果有）
-3. 在台式机上运行（更高功耗/频率）
-
----
-
-*文档版本：2026-05-31*
-*更新依据：当前 `src/main.tsx`、`src/inference/inferenceClient.ts`、`server/main.py`、`server/server_inference.py`、`package.json`、`README.md`、`ACCEPTANCE.md`、`SEGMENTATION_METRICS_SUMMARY.md`、`SEGMENTATION_EXPERIMENT_COMPARISON.md`、`SEGMENTATION_RECENT_ROUNDS.md`、`CODE_MODULE_GUIDE.md`、`.planning/lan-direct-and-tunnel/`、`.planning/campus-network-and-public-access/` 与 `deployment-packages/`。*
+*文档版本：2026-05-30*
+*更新依据：当前 `src/main.tsx`、`src/inference/inferenceClient.ts`、`server/main.py`、`server/server_inference.py`、`package.json`、`README.md`、`ACCEPTANCE.md`、`SEGMENTATION_METRICS_SUMMARY.md`、`SEGMENTATION_EXPERIMENT_COMPARISON.md`、`SEGMENTATION_RECENT_ROUNDS.md`、`CODE_MODULE_GUIDE.md` 与 `.planning/lan-direct-and-tunnel/`。*

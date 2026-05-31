@@ -2,15 +2,7 @@
 
 本项目是面向腹部 CT 分割验证流程的本地 GUI 原型。前端使用 React + Vite，后端使用 FastAPI 桥接本机 nnUNetv2 环境，目标是完成 CT 浏览、三正交联动、器官 label 说明、真实模型推理回填、结果下载和验收记录。
 
-截至 2026-05-31，项目已经作为独立 GUI 仓库维护；真实 CT、NIfTI、checkpoint 权重和推理输出仍只保留在本机，不提交到 GitHub。当前已完成本地在线推理、标签上传、自动 taxonomy remap、报告导出、服务器 runtime 部署准备，以及校园网内 Windows 前端直连 Ubuntu 服务器 FastAPI 后端的 5GPU / 5-fold soft ensemble 在线推理回填。最新服务器运行显示：FLARE22 标签经自动 remap 后 Dice 较高，AMOS 原生标签被误判为 FLARE22 后 mean Dice 异常偏低；已实现显式 `label_taxonomy=auto|AMOS22|FLARE22` 功能，修复了 AMOS 标签被误判为 FLARE22 的问题。
-
-## 当前运行状态
-
-2026-05-31 正在进行：
-- AMOS CT 图像在线推理（768×768×103 分辨率，使用 2D nnUNet 模型）
-- 推理速度分析：输入分辨率高于标准 AMOS（768×768 vs 512×512），导致推理时间较长
-- 预计总推理时间约 90 分钟，已完成约 73 分钟
-- GPU 使用率 100%，显存占用 95%（RTX 4060 Laptop 8GB）
+截至 2026-05-30，项目已经作为独立 GUI 仓库维护；真实 CT、NIfTI、checkpoint 权重和推理输出仍只保留在本机，不提交到 GitHub。
 
 ## 当前状态
 
@@ -19,11 +11,9 @@
 - 后端模式：模型资源齐备时为 `real-nnunetv2`，缺失时为 `unavailable`
 - 当前主要参考病例：AMOS 0117、FLARE22 Tr 0009
 - 当前新权重：`nnunetv2_files/checkpoint_best.pth`
-- 自动 taxonomy remap：已实现，FLARE22 在线验证 mean_dice 从 0.073 提升到 0.926；服务器最新 FLARE 轮次约 `mean Dice=0.891`、`foreground Dice=0.951`。但 AMOS 原生标签若被自动误判为 FLARE22 会导致 `mean Dice=0.076`、`foreground Dice=0.980` 这类“前景重合但器官 ID 错位”的异常，因此下一步需增加显式 `label_taxonomy=auto|AMOS22|FLARE22`。
+- 自动 taxonomy remap：已实现，FLARE22 在线验证 mean_dice 从 0.073 提升到 0.926；部分 FLARE22 标签在至少两个明确错位 label 时也可自动识别，单 label 文件仍保持保守处理
 - 主要进展和实验记录：见 [REVIEW.md](./REVIEW.md)、[ACCEPTANCE.md](./ACCEPTANCE.md) 与 [SEGMENTATION_EXPERIMENT_COMPARISON.md](./SEGMENTATION_EXPERIMENT_COMPARISON.md)
 - 代码讲解材料：见 [CODE_MODULE_GUIDE.md](./CODE_MODULE_GUIDE.md)
-- 服务器 runtime 部署包：`deployment-packages/server-runtime-package-20260530.zip`，配套最短操作清单见 `deployment-packages/server-runtime-quickstart-20260530.md`。该包只包含后端运行代码、工具脚本和说明文档，不包含真实 CT/NIfTI、checkpoint、`.env`、日志或推理输出。
-- 当前推荐部署顺序：校园网 API 直连和 Ubuntu 22.04 真实 5GPU smoke test 已初步跑通；后续先修正 AMOS/FLARE label taxonomy 显式选择和 server 模式 gating，再考虑 Tailscale / WireGuard 或公网 HTTPS、鉴权、大文件上传和 SSE 反代。
 
 ## 主要功能
 
@@ -35,14 +25,13 @@
 - 通过本地 FastAPI 创建 nnUNetv2 推理任务，并通过 SSE 获取进度。
 - 底部“切片与流程日志”区域展示 SSE 阶段进度条、当前阶段、job id、推理模式、已耗时和最近阶段日志。
 - 推理完成后下载 NIfTI 分割结果并回填 GUI。
-- 前端基于回填后的分割 mask 和 NIfTI spacing 执行纯 CPU 影像量化分析，自动计算器官体积、体素数、最大轴向截面积、包围盒尺寸、头足向长度估算和三维最长径估算；壁厚、精确管腔面积和中心线长度只作为需专用标签/后续算法的说明，不伪造临床数值。
 - 后端会按当前模型 `dataset.json.file_ending` 规范化输入文件名；当前模型要求 `.nii.gz`，所以 `.nii` 上传会转为 nnUNet 可识别的 `_0000.nii.gz` 输入。
 - 推理运行中可点击”取消推理”，后端会请求终止当前 nnUNetv2 子进程并通过 SSE 回写取消状态。
 - 长时间推理期间后端会定期发送心跳事件（间隔 10 秒），前端底部进度 rail 更新已耗时和资源快照，避免界面显示停滞。
 - 支持通过"标签 CT 导入"按钮或拖拽上传标签 NIfTI 文件，推理完成后自动执行在线 Dice 验证。当标签 ID 与当前 checkpoint 不一致时（如 FLARE22 vs AMOS22），后端自动检测数据集来源并按器官名重映射标签 ID，validation 结果中 `remap_applied: true` 表示已自动重映射。当前自动检测也覆盖至少两个明确错位 label 的部分 FLARE22 标签；单 label 文件因证据不足仍需人工判断或后续显式数据集 hint。
 - 持久化 job summary、阶段耗时、结果大小、资源快照和 nnUNetv2 日志尾部。
 - 支持同输入、同 checkpoint、同推理配置的历史预测结果缓存回填：`cached-real-nnunetv2`。缓存只复用 NIfTI 预测结果；validation 会按本次请求的标签文件或内置参考标签重新计算，无当前标签时不复用旧 validation。
-- 支持导出分割报告（HTML / JSON / PDF 三种格式），报告包含概览、验证指标、逐标签指标、影像量化分析、器官列表、关键发现、测量点和推理时间线。JSON 报告当前使用 `schema_version: "1.1"` 并包含 `quantification` 字段；PDF 导出使用浏览器原生打印，不引入第三方 PDF 库。
+- 支持导出分割报告（HTML / JSON / PDF 三种格式），报告包含概览、验证指标、逐标签指标、器官列表、关键发现、测量点和推理时间线。PDF 导出使用浏览器原生打印，不引入第三方 PDF 库。
 
 ## 在线推理速度策略
 
@@ -245,17 +234,6 @@ FLARE22 Tr 0009 + 自动 taxonomy remap 在线验证：
 | 验证状态 | `passed` |
 
 自动 taxonomy remap 上线后，FLARE22 标签在线验证从 mean_dice=0.073 提升到 0.926。后端 `server/taxonomy.py` 自动检测 FLARE22 数据集并按器官名重映射标签 ID，无需手动干预。跨数据集在线验证链路正式打通。
-
-## 2026-05-31 服务器在线推理补充
-
-校园网链路已经从“部署准备”推进到“可运行 smoke”：Windows 前端通过 `VITE_API_ENDPOINT=http://10.102.1.202:8000` 调用 Ubuntu FastAPI 后端，服务器执行 5-fold 并行推理、soft ensemble，并把 NIfTI 结果下载回 GUI 三视图。
-
-| 轮次 | 结果 | 解读 |
-|---|---|---|
-| FLARE22 + 标签 | mean Dice 约 `0.891`，foreground Dice 约 `0.951`，约 `3分48秒` | 自动 FLARE22 → AMOS22 remap 后指标合理，可作为服务器链路跑通证据。 |
-| AMOS 0117 + AMOS 标签 | mean Dice `0.076015`，foreground Dice `0.979808`，约 `9分46秒` | 前景 Dice 很高但逐器官 Dice 大面积为 0，且报告显示 `remap_source=FLARE22`，更像 AMOS 标签被误 remap，不应解读为模型完全失败。 |
-
-下一轮代码计划已记录在 `.planning/label-taxonomy-server-validation/`：增加显式 `label_taxonomy=auto|AMOS22|FLARE22`，并修复 `runtime_target=server` 创建任务不应依赖本地 Windows nnUNet 文件的 gating 问题。
 
 ## 三视图拖动体验
 

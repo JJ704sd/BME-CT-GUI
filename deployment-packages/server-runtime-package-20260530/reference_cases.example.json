@@ -1,0 +1,26 @@
+{
+  "samples": [
+    {
+      "id": "amos_0117",
+      "name": "AMOS 0117",
+      "dataset": "AMOS22",
+      "modality": "CT",
+      "role": "built-in-reference",
+      "description": "带标准答案的 AMOS 参考病例，用于演示、回归和 Dice 验证。",
+      "original": "nnunetv2_files/amos_0117(3).nii.gz",
+      "label": "nnunetv2_files/amos_0117(2).nii.gz",
+      "original_filename": "amos_0117_original.nii.gz",
+      "label_filename": "amos_0117_label.nii.gz"
+    },
+    {
+      "id": "flare_demo",
+      "name": "FLARE Demo",
+      "dataset": "FLARE",
+      "modality": "CT",
+      "role": "external-reference",
+      "description": "外部 CT 参考病例示例。放入真实文件后即可通过 /api/samples 载入；未提供 label 时不启用自动 Dice 验证。",
+      "original": "external_cases/flare_demo.nii.gz",
+      "original_filename": "flare_demo.nii.gz"
+    }
+  ]
+}

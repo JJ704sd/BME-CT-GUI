@@ -4,12 +4,14 @@
 
 ## 当前运行状态
 
-2026-05-31 正在进行：
-- AMOS CT 图像在线推理（768×768×103 分辨率，使用 2D nnUNet 模型）
-- 推理速度分析：输入分辨率高于标准 AMOS（768×768 vs 512×512），导致推理时间较长
-- 预计总推理时间约 90 分钟
-- GPU 使用率 100%，显存占用 95%（RTX 4060 Laptop 8GB）
-- 推理完成后将补充该高分辨率输入的分割指标
+2026-05-31 已完成：
+- 显式 `label_taxonomy=auto|AMOS22|FLARE22` 功能，修复了 AMOS 标签被误判为 FLARE22 的问题
+- AMOS CT 高分辨率在线推理（768×768×103，fast profile，mean_dice=0.77724）
+- 新部署包 `server-runtime-package-20260531.zip` 已创建
+
+当前进行中：
+- 高分辨率 CT 推理优化评估（预降采样方案）
+- server mode gating 修复
 
 ## 可复用命令
 
@@ -48,6 +50,7 @@ python tools\segmentation_metrics_summary.py `
 - 2026-05-29 自动 remap 支持部分 FLARE22 标签：当至少两个共享 ID 明确语义错位且没有原生匹配时可识别为 FLARE22；单 label 文件仍不自动推断数据集来源。
 - 2026-05-30 新增 `runtime_target=local|server` 和局域网访问配置后，本文件中的历史 AMOS/FLARE 指标不变；本地 fold0、服务器 5-fold ensemble 和不同 profile 的指标必须分开记录，不能混算。
 - 2026-05-31 校园网服务器 5GPU/5-fold smoke 已跑通并回填 GUI；FLARE 轮次 remap 后指标合理，AMOS 轮次出现 `mean Dice=0.076015`、`foreground Dice=0.979808` 且 `remap_source=FLARE22` 的异常。该 AMOS 数值暂列为 taxonomy 误判证据，不作为模型质量基线。
+- 2026-05-31 显式 `label_taxonomy=auto|AMOS22|FLARE22` 已实现，`detect_dataset()` 更保守：标签 ID 是 checkpoint 子集时不触发 remap。AMOS CT 高分辨率推理完成（fast profile，mean_dice=0.77724）。
 - 2026-05-31 新增的影像量化分析来自前端已回填的预测 mask 与 NIfTI spacing，输出体积、截面积和长度估算；它不改变本文件中的 Dice、IoU、Voxel Accuracy 或 Hausdorff Distance 口径。
 
 ## 当前 AMOS 基线运行

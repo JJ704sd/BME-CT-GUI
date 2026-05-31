@@ -26,6 +26,7 @@
 - 2026-05-29 的缓存 validation 修复、persistent worker reader 修复、上传文件名日志移除和部分 FLARE22 标签 remap 增强也不改变下列表格中的历史数值。当前语义下，`cached-real-nnunetv2` 只代表预测结果复用；validation 仍必须按当前请求的标签文件或内置参考标签重新计算。
 - 2026-05-30 新增 `runtime_target=local|server`、局域网配置化和服务器 5-fold soft ensemble 编排入口。
 - 2026-05-31 校园网 Linux 服务器端到端 smoke 已跑通：FLARE 服务器轮次 Dice 合理，AMOS 服务器轮次暴露自动 taxonomy 误判风险；服务器指标必须与本地 fold0/quality 基线分开解释。
+- 2026-05-31 显式 `label_taxonomy=auto|AMOS22|FLARE22` 已实现，`detect_dataset()` 更保守：标签 ID 是 checkpoint 子集时不触发 remap。AMOS CT 高分辨率推理完成（fast profile，mean_dice=0.77724）。
 - 2026-05-31 前端新增影像量化分析和报告 `quantification` 字段，只读取预测 mask 与 spacing 生成体积、截面积和长度估算，不改变下列表格中的历史 Dice、IoU、Hausdorff Distance 或耗时数值。
 
 ## 实验名称说明
@@ -64,7 +65,7 @@
 | FLARE 自动 remap | `a717dacf42d3` | FLARE22 Tr 0009 | quality，自动 remap | passed | false | ~220 | 0.926 | — | — | — | — | — |
 | 服务器 FLARE smoke | `—` | FLARE22 | server quality，5-fold soft ensemble，自动 remap | review/可用 | false | ~228 | ~0.891 | ~0.657 | ~0.951 | — | — | — |
 | 服务器 AMOS 异常 | `5d8f5eee7b75` | AMOS 0117 | server quality，5-fold soft ensemble，疑似误 remap | review | false | 586.453 | 0.076015 | 0.000 | 0.979808 | — | — | — |
-| 本地高分辨率推理 | `ad3d14eba3de` | AMOS CT 768×768×103 | quality, TTA on, 2D nnUNet | 进行中 | false | 预计约 5400 | — | — | — | — | — | — |
+| 本地高分辨率推理 | `ad3d14eba3de` | AMOS CT 768×768×103 | fast, TTA off, 2D nnUNet | review | false | — | 0.77724 | — | — | — | — | — |
 
 ## 逐标签 Dice 对比
 
@@ -350,13 +351,13 @@
 
 ## 2026-05-31 高分辨率 CT 推理速度分析记录
 
-- 新增 AMOS CT（768×768×103）本地在线推理，job `ad3d14eba3de`。
+- AMOS CT（768×768×103）本地在线推理完成，job `ad3d14eba3de`。
 - 输入分辨率高于标准 AMOS 数据集（768×768 vs 512×512），面积增加 2.25 倍。
 - 使用 2D nnUNet 模型（nnUNetTrainer__nnUNetPlans__2d），逐切片处理 103 层。
 - GPU 状态：RTX 4060 Laptop, 100% 利用率, 95% 显存占用, 57°C, 2505/3105 MHz。
 - 速度瓶颈：高分辨率输入、GPU 显存接近上限、GPU 功率受限（27W/40W）、模型复杂度（8 阶段 ResidualEncoderUNet）、重采样开销。
-- 预计总耗时约 90 分钟，属于预期行为，非系统故障。
-- 该轮推理结果待完成后补充到本文档。
+- fast profile 下 mean_dice=0.77724，低于 quality 的 0.924791，符合预期。
+- 后续优化方向：预降采样（768→512）、3D 模型评估。
 
 ## 推荐基线
 

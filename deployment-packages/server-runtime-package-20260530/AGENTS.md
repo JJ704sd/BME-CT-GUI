@@ -1,22 +1,8 @@
 # 仓库协作指南
 
-## 当前运行状态
-
-截至 2026-05-31，项目已完成：
-
-- 显式 `label_taxonomy=auto|AMOS22|FLARE22` 功能，修复了 AMOS 标签被误判为 FLARE22 的问题
-- AMOS CT 高分辨率在线推理（768×768×103，fast profile，mean_dice=0.77724）
-- 服务器 5GPU/5-fold soft ensemble 校园网 smoke 已跑通
-- 新部署包 `server-runtime-package-20260531.zip` 已创建
-
-当前进行中：
-
-- 高分辨率 CT 推理优化评估（预降采样方案）
-- server mode gating 修复（`runtime_target=server` 不应依赖本地 Windows nnUNet 文件）
-
 ## 项目结构与模块组织
 
-本仓库是本地腹部 CT 分割 GUI 原型。前端使用 React + TypeScript + Vite，主要代码位于 `src/`：主应用在 `src/main.tsx`，三正交联动视图在 `src/components/OrthogonalViewer.tsx`，NIfTI 几何映射、切片渲染和影像量化在 `src/imaging/`，推理 API 封装在 `src/inference/`，报告导出在 `src/report/`。后端位于 `server/`，负责 nnUNetv2 job 编排、SSE 进度、预测缓存、validation、taxonomy remap、本地/服务器运行位置分流。测试位于 `tests/`，离线指标与性能工具位于 `tools/`。真实 CT、模型权重、私有 registry 和生成输出只能放在被忽略目录，例如 `nnunetv2_files/`、`.test-output/`、`server/work/`。
+本仓库是本地腹部 CT 分割 GUI 原型。前端使用 React + TypeScript + Vite，主要代码位于 `src/`：主应用在 `src/main.tsx`，三正交联动视图在 `src/components/OrthogonalViewer.tsx`，NIfTI 几何映射和切片渲染在 `src/imaging/`，推理 API 封装在 `src/inference/`，报告导出在 `src/report/`。后端位于 `server/`，负责 nnUNetv2 job 编排、SSE 进度、预测缓存、validation、taxonomy remap、本地/服务器运行位置分流。测试位于 `tests/`，离线指标与性能工具位于 `tools/`。真实 CT、模型权重、私有 registry 和生成输出只能放在被忽略目录，例如 `nnunetv2_files/`、`.test-output/`、`server/work/`。
 
 ## 构建、测试与开发命令
 
@@ -57,7 +43,7 @@ python -m uvicorn server.main:app --host 0.0.0.0 --port 8000
 在线推理支持 `runtime_target=local|server`：
 
 - `local`：本地 nnUNetv2 保底路径，适合开发调试和服务器不可用时使用。
-- `server`：Linux 服务器 5-GPU / 5-fold soft ensemble 编排入口，已完成校园网端到端 smoke；FLARE 服务器轮次可作为链路证据，AMOS 服务器轮次因疑似 taxonomy 误判暂不作为质量基线。显式 `label_taxonomy` 已实现，后续复跑可避免误判。
+- `server`：Linux 服务器 5-GPU / 5-fold soft ensemble 编排入口，适合正式推理候选路径；真实服务器端到端推理完成前，不得写成质量验收已通过。
 
 ## 编码风格与命名约定
 
@@ -84,7 +70,7 @@ git diff --check
 
 ## 文档与验收口径
 
-涉及推理质量、性能、缓存、taxonomy、影像量化、报告导出、局域网、服务器运行位置或验收证据的变更，应评估是否同步：
+涉及推理质量、性能、缓存、taxonomy、报告导出、局域网、服务器运行位置或验收证据的变更，应评估是否同步：
 
 - `README.md`
 - `ACCEPTANCE.md`
@@ -95,7 +81,7 @@ git diff --check
 - `CODE_MODULE_GUIDE.md`
 - `.planning/`
 
-AMOS 原生验证、FLARE22 自动 remap 在线验证、FLARE22 离线 remap 对照、fast preview、cached result、本地 fold0 和服务器 5-fold ensemble 必须分开表述，不能混成同一类证据。`cached-real-nnunetv2` 只表示预测 NIfTI 复用，validation 仍绑定当前请求标签文件或内置参考标签。2026-05-31 服务器 smoke 已跑通后，后续文档不得继续写成”服务器端到端待 smoke”；但服务器 AMOS 指标必须等显式 `label_taxonomy=AMOS22` 复跑并确认 `remap_applied=false` 后，才能纳入正式质量基线。显式 `label_taxonomy` 功能已实现，`detect_dataset()` 更保守：标签 ID 是 checkpoint 子集时不触发 remap。
+AMOS 原生验证、FLARE22 自动 remap 在线验证、FLARE22 离线 remap 对照、fast preview、cached result、本地 fold0 和服务器 5-fold ensemble 必须分开表述，不能混成同一类证据。`cached-real-nnunetv2` 只表示预测 NIfTI 复用，validation 仍绑定当前请求标签文件或内置参考标签。
 
 ## 提交与 PR 规范
 
