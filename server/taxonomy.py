@@ -84,9 +84,13 @@ def detect_dataset(
 ) -> str | None:
     """Detect which known dataset the reference labels belong to.
 
-    Strategy: compare organ names at each ID between the checkpoint and
-    known datasets. If the checkpoint says ID 1 = "spleen" but a known
-    dataset says ID 1 = "liver", the reference is likely from that dataset.
+    Strategy: compare the reference label IDs with the checkpoint label IDs.
+    If the reference IDs are a subset of the checkpoint IDs, the reference
+    is likely from the same dataset (no remap needed).
+
+    Only detect a different dataset if:
+    1. The reference has IDs NOT in the checkpoint (strong evidence of different dataset)
+    2. OR the user explicitly selects a different dataset via label_taxonomy hint
 
     Returns the detected dataset name, or None if no match.
     """
@@ -97,6 +101,15 @@ def detect_dataset(
     if not ckpt_map:
         return None
 
+    ckpt_ids = set(ckpt_map.keys())
+
+    # If reference IDs are a subset of checkpoint IDs, assume same dataset
+    # This prevents AMOS labels from being detected as FLARE22
+    if reference_ids.issubset(ckpt_ids):
+        return None
+
+    # Only try to detect if reference has IDs NOT in checkpoint
+    # This is strong evidence of a different dataset
     best_match: str | None = None
     best_score = 0
 
@@ -106,8 +119,14 @@ def detect_dataset(
         if not reference_ids.intersection(dataset_ids):
             continue
 
+        # Check if the reference has IDs that match this dataset but not checkpoint
+        # This is stronger evidence than just comparing label tables
+        ref_only_ids = reference_ids - ckpt_ids
+        if not ref_only_ids.intersection(dataset_ids):
+            continue
+
         # Compare organ names at shared IDs
-        shared_ids = reference_ids.intersection(dataset_ids).intersection(set(ckpt_map.keys()))
+        shared_ids = reference_ids.intersection(dataset_ids).intersection(ckpt_ids)
         if not shared_ids:
             continue
 
@@ -117,13 +136,11 @@ def detect_dataset(
         )
         mismatch_count = len(shared_ids) - match_count
 
-        # A strong mismatch (most IDs differ) suggests this is the source dataset
-        # because the reference uses different semantics at the same IDs.
-        # Full-label files need several mismatches; partial labels can still be
-        # decisive when all shared IDs disagree.
+        # Require very strong mismatch evidence (most IDs differ)
+        # AND reference has IDs not in checkpoint
         strong_mismatch = (
             mismatch_count > match_count and
-            (mismatch_count > 2 or (match_count == 0 and mismatch_count >= 2))
+            mismatch_count >= 5  # Require at least 5 mismatches
         )
         if strong_mismatch:
             score = mismatch_count

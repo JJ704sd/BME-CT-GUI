@@ -1692,12 +1692,13 @@ def test_taxonomy_detects_flare22_and_remaps_label_ids():
     # FLARE22 reference has IDs {1..13}
     flare22_ids = set(range(1, 14))
 
-    # Should detect FLARE22
+    # New behavior: FLARE22 IDs are subset of checkpoint IDs, so auto-detect returns None
+    # User must explicitly select label_taxonomy=FLARE22
     detected = taxonomy.detect_dataset(flare22_ids, amos_labels)
-    assert detected == "FLARE22", f"Expected FLARE22, got {detected}"
+    assert detected is None, f"Expected None (conservative), got {detected}"
 
-    # Should build correct mapping
-    mapping = taxonomy.build_remap_mapping(amos_labels, detected)
+    # Explicit FLARE22 selection should work
+    mapping = taxonomy.build_remap_mapping(amos_labels, "FLARE22")
     # FLARE22 ID 1 (liver) → AMOS22 ID 6 (liver)
     assert mapping[1] == 6, f"FLARE22 liver(1) should map to AMOS22 liver(6), got {mapping.get(1)}"
     # FLARE22 ID 3 (spleen) → AMOS22 ID 1 (spleen)
@@ -1716,7 +1717,7 @@ def test_taxonomy_detects_flare22_and_remaps_label_ids():
 
 
 def test_taxonomy_detects_partial_flare22_labels_when_ids_are_mismatched():
-    """少量 FLARE22 标签只要有明确错位，也应触发自动 remap。"""
+    """少量 FLARE22 标签：新逻辑下不再自动检测，需显式选择。"""
     import sys
     taxonomy_path = PROJECT_ROOT / "server" / "taxonomy.py"
     spec = importlib.util.spec_from_file_location("taxonomy", taxonomy_path)
@@ -1730,10 +1731,12 @@ def test_taxonomy_detects_partial_flare22_labels_when_ids_are_mismatched():
         {"label": 6, "id": "liver", "nameEn": "liver", "nameZh": "肝脏"},
     ]
 
+    # New behavior: partial labels are subset of checkpoint, no auto-detect
     detected = taxonomy.detect_dataset({1, 3}, amos_labels)
-    mapping = taxonomy.build_remap_mapping(amos_labels, detected) if detected else {}
+    assert detected is None, f"Expected None (conservative), got {detected}"
 
-    assert detected == "FLARE22"
+    # Explicit FLARE22 selection should work
+    mapping = taxonomy.build_remap_mapping(amos_labels, "FLARE22")
     assert mapping[1] == 6
     assert mapping[3] == 1
 
