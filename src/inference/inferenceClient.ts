@@ -9,6 +9,7 @@ export type ValidationSummary = {
   accepted?: boolean;
   message?: string;
   taxonomy_match?: boolean;
+  label_taxonomy?: LabelTaxonomy;
   remap_applied?: boolean;
   remap_source?: string;
   thresholds?: {
@@ -47,6 +48,7 @@ export type PhaseTimings = Record<string, number>;
 
 export type InferenceProfile = "quality" | "fast";
 export type RuntimeTarget = "local" | "server";
+export type LabelTaxonomy = "auto" | "AMOS22" | "FLARE22";
 
 export type InferenceOptions = {
   profile: InferenceProfile;
@@ -95,6 +97,8 @@ function normalizeValidation(payload: unknown): ValidationSummary | undefined {
   }
   if (typeof raw.accepted === "boolean") summary.accepted = raw.accepted;
   if (typeof raw.taxonomy_match === "boolean") summary.taxonomy_match = raw.taxonomy_match;
+  const labelTaxonomy = normalizeLabelTaxonomy(raw.label_taxonomy);
+  if (labelTaxonomy) summary.label_taxonomy = labelTaxonomy;
   if (typeof raw.remap_applied === "boolean") summary.remap_applied = raw.remap_applied;
   if (typeof raw.remap_source === "string") summary.remap_source = raw.remap_source;
   if (raw.message !== undefined) summary.message = String(raw.message);
@@ -176,6 +180,10 @@ function normalizeInferenceOptions(payload: unknown): InferenceOptions | undefin
 
 function normalizeRuntimeTarget(payload: unknown): RuntimeTarget | undefined {
   return payload === "server" ? "server" : payload === "local" ? "local" : undefined;
+}
+
+function normalizeLabelTaxonomy(payload: unknown): LabelTaxonomy | undefined {
+  return payload === "AMOS22" || payload === "FLARE22" || payload === "auto" ? payload : undefined;
 }
 
 export function parseInferenceEvent(raw: string): InferenceEvent {
@@ -319,7 +327,7 @@ export async function fetchModelLabels(endpoint: string): Promise<OrganLabel[]> 
 export async function createInferenceJob(
   endpoint: string,
   file: File,
-  options: { modelId: string; confidenceThreshold: number; postprocess: Record<string, boolean>; inferenceProfile?: InferenceProfile; runtimeTarget?: RuntimeTarget; labelFile?: File }
+  options: { modelId: string; confidenceThreshold: number; postprocess: Record<string, boolean>; inferenceProfile?: InferenceProfile; runtimeTarget?: RuntimeTarget; labelTaxonomy?: LabelTaxonomy; labelFile?: File }
 ) {
   const formData = new FormData();
   formData.append("file", file, file.name);
@@ -331,6 +339,7 @@ export async function createInferenceJob(
   formData.append("postprocess", JSON.stringify(options.postprocess));
   formData.append("inference_profile", options.inferenceProfile ?? "quality");
   formData.append("runtime_target", options.runtimeTarget ?? "server");
+  formData.append("label_taxonomy", options.labelTaxonomy ?? "auto");
 
   const response = await fetch(`${endpoint}/api/segment/jobs`, { method: "POST", body: formData });
   if (!response.ok) {
@@ -341,6 +350,7 @@ export async function createInferenceJob(
     job_id: string;
     mode?: InferenceJobMode;
     runtime_target?: RuntimeTarget;
+    label_taxonomy?: LabelTaxonomy;
     inference_profile?: InferenceProfile;
     inference_options?: InferenceOptions;
     confidence_threshold_effective?: boolean;

@@ -11,6 +11,19 @@
 
 前端通过 `VITE_API_ENDPOINT` 指向后端；后端通过 `SEGMENTATION_ALLOWED_ORIGINS` 放行实际浏览器来源。
 
+## 当前运行状态
+
+截至 2026-05-31，项目已完成：
+- 本地在线推理链路（AMOS 0117、FLARE22 Tr 0009）
+- 自动 taxonomy remap（FLARE22 → AMOS22）
+- 服务器 5GPU/5-fold soft ensemble 校园网 smoke
+- 影像量化分析与报告导出（HTML/JSON/PDF）
+- 底部实时推理进度展示与心跳机制
+
+当前正在进行：
+- AMOS CT 图像在线推理（768×768×103 分辨率，预计耗时约 90 分钟）
+- 推理速度分析与优化评估
+
 ## 常用命令
 
 ```bash

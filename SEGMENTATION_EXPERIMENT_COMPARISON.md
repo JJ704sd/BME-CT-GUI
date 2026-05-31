@@ -1,6 +1,6 @@
 # 分割实验对比
 
-生成日期：2026-05-30
+生成日期：2026-05-31
 
 本文档汇总历史分割实验记录，便于横向比较。它与 `SEGMENTATION_METRICS_SUMMARY.md` 配套使用：后者记录当前指标摘要和命令上下文，本文保留跨轮次对比表。
 
@@ -45,6 +45,7 @@
 | FLARE 自动 remap | 2026-05-28 自动 taxonomy remap 上线后，在线验证自动重映射标签 ID | 跨数据集在线验证正式打通，mean_dice=0.926，验证通过 | job `a717dacf42d3` |
 | 服务器 FLARE smoke | 校园网服务器 5GPU/5-fold soft ensemble，FLARE 标签自动 remap | 服务器链路跑通证据，mean Dice 约 0.891 | 报告 `1780153055202` |
 | 服务器 AMOS 异常 | 校园网服务器 5GPU/5-fold soft ensemble，AMOS 标签疑似被误判为 FLARE22 | taxonomy 误判证据，不作为模型失败基线 | job `5d8f5eee7b75` |
+| 本地高分辨率推理 | AMOS CT 768×768×103，本地 RTX 4060，2D nnUNet 逐切片处理 | 高分辨率输入速度分析，非标准尺寸导致推理时间延长 | job `ad3d14eba3de` |
 
 ## 实验总览
 
@@ -63,6 +64,7 @@
 | FLARE 自动 remap | `a717dacf42d3` | FLARE22 Tr 0009 | quality，自动 remap | passed | false | ~220 | 0.926 | — | — | — | — | — |
 | 服务器 FLARE smoke | `—` | FLARE22 | server quality，5-fold soft ensemble，自动 remap | review/可用 | false | ~228 | ~0.891 | ~0.657 | ~0.951 | — | — | — |
 | 服务器 AMOS 异常 | `5d8f5eee7b75` | AMOS 0117 | server quality，5-fold soft ensemble，疑似误 remap | review | false | 586.453 | 0.076015 | 0.000 | 0.979808 | — | — | — |
+| 本地高分辨率推理 | `ad3d14eba3de` | AMOS CT 768×768×103 | quality, TTA on, 2D nnUNet | 进行中 | false | 预计约 5400 | — | — | — | — | — | — |
 
 ## 逐标签 Dice 对比
 
@@ -345,6 +347,16 @@
 - `runtime_target` 和 `inference_options` 已纳入 job state、SSE complete 事件、`job_summary.json` 和缓存语义，避免本地结果、服务器 ensemble 结果、`fast`/`quality` 结果混用。
 - 局域网访问已配置化：前端通过 `VITE_API_ENDPOINT` 指向后端，`npm run dev:lan` 监听 `0.0.0.0:5173`，后端通过 `SEGMENTATION_ALLOWED_ORIGINS` 放行实际浏览器来源。
 - 2026-05-31 校园网服务器端到端 smoke 已跑通；当前推荐基线仍沿用 AMOS `quality` profile `b3c528cc9e20` 与 FLARE 自动 remap `a717dacf42d3`。服务器 FLARE 轮次可作为链路证据，服务器 AMOS 轮次因疑似 taxonomy 误判暂不替换正式 AMOS 基线。
+
+## 2026-05-31 高分辨率 CT 推理速度分析记录
+
+- 新增 AMOS CT（768×768×103）本地在线推理，job `ad3d14eba3de`。
+- 输入分辨率高于标准 AMOS 数据集（768×768 vs 512×512），面积增加 2.25 倍。
+- 使用 2D nnUNet 模型（nnUNetTrainer__nnUNetPlans__2d），逐切片处理 103 层。
+- GPU 状态：RTX 4060 Laptop, 100% 利用率, 95% 显存占用, 57°C, 2505/3105 MHz。
+- 速度瓶颈：高分辨率输入、GPU 显存接近上限、GPU 功率受限（27W/40W）、模型复杂度（8 阶段 ResidualEncoderUNet）、重采样开销。
+- 预计总耗时约 90 分钟，属于预期行为，非系统故障。
+- 该轮推理结果待完成后补充到本文档。
 
 ## 推荐基线
 

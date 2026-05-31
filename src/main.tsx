@@ -42,7 +42,7 @@ import demoCtImage from "./assets/demo-abdomen-ct.png";
 import { OrthogonalViewer } from "./components/OrthogonalViewer";
 import { buildLabelLookup, defaultOrganLabels, getOrganDetail, organDetails as ORGAN_DETAIL_MAP } from "./data/organDetails";
 import { exportReport, type ReportFormat } from "./report/exportReport";
-import { cancelInferenceJob, createInferenceJob, downloadInferenceResult, fetchModelLabels, getInferenceResultMeta, getInferenceStatusCopy, getPhaseTimingSummary, getResourceSnapshotCopy, parseInferenceEvent, type InferenceOptions, type InferenceProfile, type InferenceStatus, type PhaseTimings, type ResourceSnapshot, type RuntimeTarget, type ValidationSummary } from "./inference/inferenceClient";
+import { cancelInferenceJob, createInferenceJob, downloadInferenceResult, fetchModelLabels, getInferenceResultMeta, getInferenceStatusCopy, getPhaseTimingSummary, getResourceSnapshotCopy, parseInferenceEvent, type InferenceOptions, type InferenceProfile, type InferenceStatus, type LabelTaxonomy, type PhaseTimings, type ResourceSnapshot, type RuntimeTarget, type ValidationSummary } from "./inference/inferenceClient";
 import { summarizeSegmentationQuantification, formatQuantificationValue } from "./imaging/quantification";
 import { renderNiftiSliceToDataUrl as renderOrientedNiftiSliceToDataUrl } from "./imaging/sliceRenderer";
 import type { VoxelCoord } from "./imaging/voxelMapping";
@@ -220,6 +220,12 @@ const runtimeTargetOptions: { id: RuntimeTarget; label: string; detail: string; 
 const inferenceProfileOptions: { id: InferenceProfile; label: string; detail: string; meta: string }[] = [
   { id: "quality", label: "质量推理", detail: "默认正式结果", meta: "TTA 开启 · tile 0.5" },
   { id: "fast", label: "快速预览", detail: "需人工复核", meta: "TTA 关闭 · tile 1.0" }
+];
+
+const labelTaxonomyOptions: { id: LabelTaxonomy; label: string; detail: string; meta: string }[] = [
+  { id: "auto", label: "自动识别", detail: "按标签 ID 组合自动判断", meta: "默认保守策略" },
+  { id: "AMOS22", label: "AMOS22 原生", detail: "不执行 FLARE 重映射", meta: "AMOS 标签推荐" },
+  { id: "FLARE22", label: "FLARE22", detail: "强制映射到当前模型", meta: "FLARE 标签推荐" }
 ];
 
 const windowPresets = [
@@ -557,6 +563,7 @@ function App() {
   const [lastImport, setLastImport] = useState("等待导入本地影像或分割结果图");
   const [selectedModelId, setSelectedModelId] = useState("abdomen");
   const [selectedInferenceProfile, setSelectedInferenceProfile] = useState<InferenceProfile>("quality");
+  const [selectedLabelTaxonomy, setSelectedLabelTaxonomy] = useState<LabelTaxonomy>("auto");
   const [selectedRuntimeTarget, setSelectedRuntimeTarget] = useState<RuntimeTarget>("server");
   const [resultInferenceOptions, setResultInferenceOptions] = useState<InferenceOptions | null>(null);
   const [confidenceThreshold, setConfidenceThreshold] = useState(72);
@@ -584,6 +591,7 @@ function App() {
   const selectedOrgan = organs.find((organ) => organ.id === selectedOrganId) ?? organs[0];
   const selectedModel = modelOptions.find((model) => model.id === selectedModelId) ?? modelOptions[0];
   const selectedInferenceProfileOption = inferenceProfileOptions.find((item) => item.id === selectedInferenceProfile) ?? inferenceProfileOptions[0];
+  const selectedLabelTaxonomyOption = labelTaxonomyOptions.find((item) => item.id === selectedLabelTaxonomy) ?? labelTaxonomyOptions[0];
   const selectedRuntimeTargetOption = runtimeTargetOptions.find((item) => item.id === selectedRuntimeTarget) ?? runtimeTargetOptions[0];
   const inferenceOptionsLocked = inferenceStatus.status === "submitting" || inferenceStatus.status === "running" || runState === "running";
   const fastProfileNeedsReview = selectedInferenceProfile === "fast" || resultInferenceOptions?.profile === "fast";
@@ -1049,6 +1057,7 @@ function App() {
         postprocess: postprocessConfig,
         inferenceProfile: selectedInferenceProfile,
         runtimeTarget: selectedRuntimeTarget,
+        labelTaxonomy: selectedLabelTaxonomy,
         labelFile: labelFile ?? undefined,
       });
       activeJobIdRef.current = job.job_id;
@@ -1992,8 +2001,32 @@ function App() {
                       );
                     })}
                   </div>
+                  <div className="option-section-label">标签体系</div>
+                  <div className="inference-profile-grid" aria-label="标签体系">
+                    {labelTaxonomyOptions.map((taxonomy) => {
+                      const isSelected = selectedLabelTaxonomy === taxonomy.id;
+                      return (
+                        <button
+                          key={taxonomy.id}
+                          type="button"
+                          className={isSelected ? "profile-option active" : "profile-option"}
+                          aria-pressed={isSelected}
+                          disabled={inferenceOptionsLocked}
+                          onClick={() => {
+                            if (inferenceOptionsLocked) return;
+                            setSelectedLabelTaxonomy(taxonomy.id);
+                            setLogs((items) => [`已选择标签体系：${taxonomy.label}`, ...items].slice(0, 8));
+                          }}
+                        >
+                          <span className="option-title"><span>{isSelected ? "已选择" : inferenceOptionsLocked ? "已锁定" : "可选择"}</span>{taxonomy.label}</span>
+                          <strong>{taxonomy.detail}</strong>
+                          <small>{taxonomy.meta}</small>
+                        </button>
+                      );
+                    })}
+                  </div>
                   <div className="runtime-selection-summary">
-                    当前{inferenceOptionsLocked ? "已锁定" : "将提交到"}：<strong>{selectedRuntimeTargetOption.label}</strong> · {selectedInferenceProfileOption.label}
+                    当前{inferenceOptionsLocked ? "已锁定" : "将提交到"}：<strong>{selectedRuntimeTargetOption.label}</strong> · {selectedInferenceProfileOption.label} · {selectedLabelTaxonomyOption.label}
                   </div>
                   {fastProfileNeedsReview ? (
                     <div className="profile-warning">

@@ -431,9 +431,13 @@ try {
     modelId: "abdomen",
     confidenceThreshold: 72,
     postprocess: { removeIslands: true },
-    inferenceProfile: "fast"
+    inferenceProfile: "fast",
+    runtimeTarget: "server",
+    labelTaxonomy: "AMOS22"
   });
   assert.equal(submittedFormData?.get("inference_profile"), "fast");
+  assert.equal(submittedFormData?.get("runtime_target"), "server");
+  assert.equal(submittedFormData?.get("label_taxonomy"), "AMOS22");
   assert.equal(createdJob.inference_profile, "fast");
   assert.deepEqual(createdJob.inference_options, {
     profile: "fast",

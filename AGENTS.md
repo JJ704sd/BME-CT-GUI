@@ -1,5 +1,16 @@
 # 仓库协作指南
 
+## 当前运行状态
+
+截至 2026-05-31，项目正在进行：
+
+- AMOS CT 图像在线推理（768×768×103 分辨率，使用 2D nnUNet 模型）
+- 推理速度分析：输入分辨率高于标准 AMOS（768×768 vs 512×512），导致推理时间较长
+- 预计总推理时间约 90 分钟
+- GPU 使用率 100%，显存占用 95%（RTX 4060 Laptop 8GB）
+- FastAPI 服务器 PID 20196，运行于 127.0.0.1:8000
+- nnUNetv2 推理进程 PID 49492，含 3 个 multiprocessing workers
+
 ## 项目结构与模块组织
 
 本仓库是本地腹部 CT 分割 GUI 原型。前端使用 React + TypeScript + Vite，主要代码位于 `src/`：主应用在 `src/main.tsx`，三正交联动视图在 `src/components/OrthogonalViewer.tsx`，NIfTI 几何映射、切片渲染和影像量化在 `src/imaging/`，推理 API 封装在 `src/inference/`，报告导出在 `src/report/`。后端位于 `server/`，负责 nnUNetv2 job 编排、SSE 进度、预测缓存、validation、taxonomy remap、本地/服务器运行位置分流。测试位于 `tests/`，离线指标与性能工具位于 `tools/`。真实 CT、模型权重、私有 registry 和生成输出只能放在被忽略目录，例如 `nnunetv2_files/`、`.test-output/`、`server/work/`。

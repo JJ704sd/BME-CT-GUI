@@ -173,6 +173,34 @@ def test_model_state_checks_server_required_files_only_for_server_runtime():
     assert local_state["missing"] == []
 
 
+def test_server_runtime_ready_does_not_require_local_model_files():
+    server = load_server_module()
+
+    base = make_test_output_dir("server-runtime-ignores-local-files")
+    missing_local = base / "missing-local"
+    evaluate_script = base / "evaluate_full.py"
+    server_dataset = base / "server-dataset.json"
+    evaluate_script.write_text("ok", encoding="utf-8")
+    server_dataset.write_text("ok", encoding="utf-8")
+
+    with patch.dict(os.environ, {
+        "SEGMENTATION_RUNTIME_TARGET": "server",
+        "SEGMENTATION_SERVER_EVALUATE_SCRIPT": str(evaluate_script),
+        "SEGMENTATION_SERVER_DATASET_JSON": str(server_dataset),
+    }, clear=True), \
+         patch.object(server, "FLARE_DATASET_JSON", missing_local / "dataset.json"), \
+         patch.object(server, "FLARE_PLANS_JSON", missing_local / "plans.json"), \
+         patch.object(server, "FLARE_CHECKPOINT", missing_local / "checkpoint_best.pth"), \
+         patch.object(server, "PROJECT_CHECKPOINT", missing_local / "checkpoint_best.pth"), \
+         patch.object(server, "NNUNET_PYTHON_COMMAND", missing_local / "python.exe", create=True), \
+         patch.object(server, "load_checkpoint_init_args", return_value=AMOS_CHECKPOINT_ARGS):
+        state = server.get_model_state()
+
+    assert state["runtime_target"] == "server"
+    assert state["status"] == "ready"
+    assert state["missing"] == []
+
+
 def test_health_and_models_expose_server_runtime_config():
     server = load_server_module()
 
@@ -384,7 +412,7 @@ def test_create_job_uses_requested_inference_profile_for_options_and_cache_key()
         response = client.post(
             "/api/segment/jobs",
             files={"file": ("case_0000.nii.gz", b"profile-input", "application/octet-stream")},
-            data={"model_id": "abdomen", "inference_profile": "fast"},
+            data={"model_id": "abdomen", "inference_profile": "fast", "runtime_target": "server", "label_taxonomy": "AMOS22"},
         )
         body = response.json()
         state = client.get(f"/api/segment/jobs/{body['job_id']}").json()
@@ -398,8 +426,12 @@ def test_create_job_uses_requested_inference_profile_for_options_and_cache_key()
     assert response.status_code == 200
     assert body["inference_profile"] == "fast"
     assert body["inference_options"] == expected_options
+    assert body["runtime_target"] == "server"
+    assert body["label_taxonomy"] == "AMOS22"
     assert state["inference_profile"] == "fast"
     assert state["inference_options"] == expected_options
+    assert state["runtime_target"] == "server"
+    assert state["label_taxonomy"] == "AMOS22"
     assert captured_model_state["inference_options"] == expected_options
 
 
@@ -1043,10 +1075,11 @@ def test_cached_prediction_revalidates_against_current_label_file():
 
     validated_label_paths: list[Path] = []
 
-    def fake_validate(result_path, label_path, labels):
+    def fake_validate(result_path, label_path, labels, label_taxonomy="auto"):
         validated_label_paths.append(label_path)
         assert result_path.name.endswith(".nii.gz")
         assert labels == [{"label": 1, "id": "spleen"}]
+        assert label_taxonomy == "auto"
         return current_validation
 
     with patch.object(server, "WORK_DIR", temp_root), \
@@ -1600,6 +1633,36 @@ def test_job_state_can_reconstruct_legacy_output_without_summary():
     assert result_response.content == b"legacy-result"
 
 
+def test_validate_against_custom_label_respects_explicit_taxonomy_hints():
+    server = load_server_module()
+    import nibabel as nib
+    import numpy as np
+
+    temp_root = make_test_output_dir("explicit-taxonomy-validation")
+    prediction_path = temp_root / "prediction.nii.gz"
+    reference_path = temp_root / "reference.nii.gz"
+    prediction = np.array([[0, 1], [0, 2]], dtype=np.int16)
+    reference = np.array([[0, 1], [0, 2]], dtype=np.int16)
+    affine = np.eye(4)
+    nib.save(nib.Nifti1Image(prediction, affine), prediction_path)
+    nib.save(nib.Nifti1Image(reference, affine), reference_path)
+    labels = [
+        {"label": 1, "id": "spleen", "nameEn": "spleen"},
+        {"label": 2, "id": "right_kidney", "nameEn": "right_kidney"},
+        {"label": 6, "id": "liver", "nameEn": "liver"},
+    ]
+
+    amos_validation = server.validate_against_custom_label(prediction_path, reference_path, labels, label_taxonomy="AMOS22")
+    flare_validation = server.validate_against_custom_label(prediction_path, reference_path, labels, label_taxonomy="FLARE22")
+
+    assert amos_validation["label_taxonomy"] == "AMOS22"
+    assert amos_validation["remap_applied"] is False
+    assert amos_validation["taxonomy_match"] is True
+    assert flare_validation["label_taxonomy"] == "FLARE22"
+    assert flare_validation["remap_applied"] is True
+    assert flare_validation["remap_source"] == "FLARE22"
+
+
 def test_taxonomy_detects_flare22_and_remaps_label_ids():
     """taxonomy 模块能检测 FLARE22 标签并生成正确的 ID 重映射"""
     import sys
@@ -1699,7 +1762,9 @@ if __name__ == "__main__":
     test_taxonomy_detects_flare22_and_remaps_label_ids()
     test_taxonomy_detects_partial_flare22_labels_when_ids_are_mismatched()
     test_taxonomy_returns_none_for_amos_native_labels()
+    test_validate_against_custom_label_respects_explicit_taxonomy_hints()
     test_model_state_reports_missing_required_files()
+    test_server_runtime_ready_does_not_require_local_model_files()
     test_create_job_rejects_when_model_is_not_ready()
     test_server_source_does_not_log_uploaded_filenames()
     test_predict_command_uses_model_folder_and_job_io()

@@ -4,6 +4,14 @@
 
 截至 2026-05-31，项目已经作为独立 GUI 仓库维护；真实 CT、NIfTI、checkpoint 权重和推理输出仍只保留在本机，不提交到 GitHub。当前已完成本地在线推理、标签上传、自动 taxonomy remap、报告导出、服务器 runtime 部署准备，以及校园网内 Windows 前端直连 Ubuntu 服务器 FastAPI 后端的 5GPU / 5-fold soft ensemble 在线推理回填。最新服务器运行显示：FLARE22 标签经自动 remap 后 Dice 较高，AMOS 原生标签被误判为 FLARE22 后 mean Dice 异常偏低；下一轮重点是显式 `label_taxonomy=auto|AMOS22|FLARE22` 和 server 模式 gating 收口。
 
+## 当前运行状态
+
+2026-05-31 正在进行：
+- AMOS CT 图像在线推理（768×768×103 分辨率，使用 2D nnUNet 模型）
+- 推理速度分析：输入分辨率高于标准 AMOS（768×768 vs 512×512），导致推理时间较长
+- 预计总推理时间约 90 分钟，已完成约 73 分钟
+- GPU 使用率 100%，显存占用 95%（RTX 4060 Laptop 8GB）
+
 ## 当前状态
 
 - 前端入口：`http://127.0.0.1:5173`

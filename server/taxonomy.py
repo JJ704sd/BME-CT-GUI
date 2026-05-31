@@ -34,6 +34,15 @@ KNOWN_DATASETS: dict[str, dict[int, str]] = {
     "FLARE22": FLARE22_LABELS,
 }
 
+SUPPORTED_TAXONOMY_HINTS = {"auto", "AMOS22", "FLARE22"}
+
+
+def normalize_taxonomy_hint(value: str | None) -> str:
+    normalized = str(value or "auto").strip().upper()
+    if normalized in {"AMOS22", "FLARE22"}:
+        return normalized
+    return "auto"
+
 
 # Canonical name aliases — different datasets use different names for the same organ
 _NAME_ALIASES: dict[str, str] = {

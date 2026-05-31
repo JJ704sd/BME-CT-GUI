@@ -2,6 +2,14 @@
 
 本文档用于把当前 GUI 的三个目标从”功能接近完成”推进到”可复现验收”。当前证据包含 AMOS 0117 原生标签验证，以及 FLARE22 Tr 0009 的非 AMOS 在线推理和 taxonomy-remap 指标。2026-05-28 实现自动 taxonomy remap 后，FLARE22 在线验证已能自动重映射标签 ID 并得到有意义的跨数据集指标（job `a717dacf42d3`，mean_dice=0.926，验证通过）。2026-05-29 已收口缓存 validation、persistent worker reader、上传文件名调试日志和部分 FLARE22 标签 remap 的历史风险。2026-05-30 已增加 `本地在线推理` / `服务器云端推理` 运行位置选择、局域网访问配置化和服务器 5-fold soft ensemble 编排入口；2026-05-31 已通过校园网完成 Windows 前端调用 Ubuntu 服务器后端的 5-fold + soft ensemble + 前端回填 smoke，但 AMOS 标签 validation 暴露自动 taxonomy 误判风险，完整验收仍需补显式标签体系选择和 server gating 修复。
 
+## 当前运行状态
+
+2026-05-31 正在进行：
+- AMOS CT 图像在线推理（768×768×103 分辨率，使用 2D nnUNet 模型）
+- 推理速度分析：输入分辨率高于标准 AMOS（768×768 vs 512×512），导致推理时间较长
+- 预计总推理时间约 90 分钟，已完成约 73 分钟
+- GPU 使用率 100%，显存占用 95%（RTX 4060 Laptop 8GB）
+
 ## 目标 1：CT 可浏览、三正交可联动
 
 验收对象：

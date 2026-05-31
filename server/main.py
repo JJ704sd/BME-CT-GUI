@@ -176,6 +176,7 @@ class Job:
   resource_snapshots: list[dict[str, Any]] = field(default_factory=list)
   resource_log_path: Path | None = None
   label_path: Path | None = None
+  label_taxonomy: str = "auto"
   runtime_target: str = "local"
   cancel_requested: bool = False
   process: subprocess.Popen[str] | None = field(default=None, repr=False, compare=False)
@@ -602,6 +603,7 @@ def build_job_summary(job: Job) -> dict[str, Any]:
     "resource_log_path": str(job.resource_log_path) if job.resource_log_path else None,
     "cancel_requested": job.cancel_requested,
     "label_path": str(job.label_path) if job.label_path else None,
+    "label_taxonomy": job.label_taxonomy,
     "validation": job.validation,
   }
 
@@ -1065,7 +1067,15 @@ def validate_against_debug_label(prediction_path: Path) -> dict[str, Any]:
   return compute_label_metrics(prediction, reference, read_labels())
 
 
-def validate_against_custom_label(prediction_path: Path, label_path: Path, labels: list[dict[str, Any]], sample_id: str = "custom") -> dict[str, Any]:
+def normalize_label_taxonomy(value: str | None = None) -> str:
+  try:
+    from server.taxonomy import normalize_taxonomy_hint
+  except ModuleNotFoundError:
+    from taxonomy import normalize_taxonomy_hint
+  return normalize_taxonomy_hint(value)
+
+
+def validate_against_custom_label(prediction_path: Path, label_path: Path, labels: list[dict[str, Any]], sample_id: str = "custom", label_taxonomy: str = "auto") -> dict[str, Any]:
   try:
     import nibabel as nib
     import numpy as np
@@ -1080,32 +1090,41 @@ def validate_against_custom_label(prediction_path: Path, label_path: Path, label
     return unavailable_validation(f"预测结果尺寸 {prediction.shape} 与标签尺寸 {reference.shape} 不一致，无法计算 Dice。")
   checkpoint_labels = {int(item["label"]) for item in labels}
   reference_labels = set(np.unique(reference).astype(int)) - {0}
+  taxonomy_hint = normalize_label_taxonomy(label_taxonomy)
 
-  # Try automatic taxonomy remap for known datasets (e.g. FLARE22 → AMOS22)
   try:
     from server.taxonomy import detect_dataset, build_remap_mapping, apply_remap
-    detected = detect_dataset(reference_labels, labels)
-    if detected:
+  except ModuleNotFoundError:
+    from taxonomy import detect_dataset, build_remap_mapping, apply_remap
+
+  detected = None if taxonomy_hint == "AMOS22" else ("FLARE22" if taxonomy_hint == "FLARE22" else detect_dataset(reference_labels, labels))
+  if detected:
+    try:
       mapping = build_remap_mapping(labels, detected)
       if mapping:
         remapped_reference = apply_remap(reference, mapping)
         result = compute_label_metrics(prediction, remapped_reference, labels, sample_id=sample_id)
         result["taxonomy_match"] = True
+        result["label_taxonomy"] = taxonomy_hint
         result["remap_applied"] = True
         result["remap_source"] = detected
         result["remap_mapping"] = {str(k): v for k, v in mapping.items()}
-        result["message"] = f"已自动重映射标签 ID（{detected} → 当前模型）。" + (result.get("message") or "")
+        action = "已按用户选择" if taxonomy_hint == "FLARE22" else "已自动"
+        result["message"] = f"{action}重映射标签 ID（{detected} → 当前模型）。" + (result.get("message") or "")
         return result
-  except Exception as remap_exc:
-    print(f"[taxonomy] remap failed, falling through: {remap_exc}")
+    except Exception as remap_exc:
+      print(f"[taxonomy] remap failed, falling through: {remap_exc}")
 
   if not reference_labels.intersection(checkpoint_labels):
     return {
       **unavailable_validation("标签 ID 与当前 checkpoint 定义不匹配，需要离线 taxonomy remap。"),
       "taxonomy_match": False,
+      "label_taxonomy": taxonomy_hint,
     }
   result = compute_label_metrics(prediction, reference, labels, sample_id=sample_id)
   result["taxonomy_match"] = True
+  result["label_taxonomy"] = taxonomy_hint
+  result["remap_applied"] = False
   return result
 
 
@@ -1120,20 +1139,18 @@ def get_model_state(runtime_target: str | None = None) -> dict[str, Any]:
   inference_options = get_inference_options()
   server_config = get_server_inference_config()
   normalized_runtime_target = normalize_runtime_target(runtime_target)
-  server_required_files = []
-  if normalized_runtime_target == "server":
-    server_required_files = [
-      ("server_evaluate_full.py", server_config.evaluate_script),
-      ("server_dataset.json", server_config.dataset_json),
-    ]
-  required_files = [
+  local_required_files = [
     ("dataset.json", FLARE_DATASET_JSON),
     ("plans.json", FLARE_PLANS_JSON),
     ("checkpoint_best.pth", checkpoint_source),
     ("nnUNetv2_python", NNUNET_PYTHON_COMMAND),
-    *[(name, path) for name, path in server_required_files if path is not None],
   ]
-  missing = [name for name, path in required_files if not path.exists()]
+  server_required_files = [
+    ("server_evaluate_full.py", server_config.evaluate_script),
+    ("server_dataset.json", server_config.dataset_json),
+  ]
+  required_files = local_required_files if normalized_runtime_target == "local" else server_required_files
+  missing = [name for name, path in required_files if path is not None and not path.exists()]
   ready = not missing
   return {
     "ready": ready,
@@ -1583,7 +1600,7 @@ def complete_cached_job(job: Job, input_path: Path, cache: dict[str, Any]) -> No
   result_path = copy_cached_result(cache, output_dir, job.id)
   validation = None
   if job.label_path and job.label_path.exists():
-    validation = validate_against_custom_label(result_path, job.label_path, read_labels())
+    validation = validate_against_custom_label(result_path, job.label_path, read_labels(), label_taxonomy=job.label_taxonomy)
   elif is_debug_original_upload(input_path):
     validation = validate_against_debug_label(result_path)
   if validation is not None:
@@ -1737,7 +1754,7 @@ def run_server_job_pipeline(job: Job, input_dir: Path, output_dir: Path, case_na
   if job.label_path and job.label_path.exists():
     push_event(job, {"type": "progress", "progress": 96, "stage": "使用用户提供的标签验证服务器结果"})
     start_job_phase(job, "validation")
-    validation = validate_against_custom_label(result_path, job.label_path, read_labels())
+    validation = validate_against_custom_label(result_path, job.label_path, read_labels(), label_taxonomy=job.label_taxonomy)
     write_validation_summary(output_dir, validation)
     evaluate_command = build_server_evaluate_command(config, ensemble_output_dir, job.label_path)
     if evaluate_command:
@@ -1791,7 +1808,7 @@ def run_local_job_pipeline(job: Job, input_path: Path, input_dir: Path, output_d
   if job.label_path and job.label_path.exists():
     push_event(job, {"type": "progress", "progress": 96, "stage": "使用用户提供的标签验证推理结果"})
     start_job_phase(job, "validation")
-    validation = validate_against_custom_label(result_path, job.label_path, read_labels())
+    validation = validate_against_custom_label(result_path, job.label_path, read_labels(), label_taxonomy=job.label_taxonomy)
     write_validation_summary(output_dir, validation)
     finish_job_phase(job, "validation")
   elif is_debug_original_upload(input_path):
@@ -1949,10 +1966,12 @@ async def create_job(
   postprocess: str = Form("{}"),
   inference_profile: str | None = Form(None),
   runtime_target: str | None = Form(None),
+  label_taxonomy: str | None = Form(None),
 ) -> dict[str, Any]:
   if not file.filename or not file.filename.lower().endswith((".nii", ".nii.gz")):
     raise HTTPException(status_code=400, detail="请上传 .nii 或 .nii.gz 格式的 CT 原图。")
   runtime = normalize_runtime_target(runtime_target)
+  taxonomy_hint = normalize_label_taxonomy(label_taxonomy)
   model_state = get_model_state(runtime)
   if not model_state["ready"]:
     raise HTTPException(status_code=503, detail={
@@ -1986,6 +2005,7 @@ async def create_job(
     cache_key=cache_key,
     inference_options=inference_options,
     label_path=custom_label_path,
+    label_taxonomy=taxonomy_hint,
     runtime_target=runtime,
   )
   with jobs_lock:
@@ -2000,6 +2020,7 @@ async def create_job(
       "confidence_threshold_effective": False,
       "postprocess": postprocess,
       "mode": job.mode,
+      "label_taxonomy": job.label_taxonomy,
       "runtime_target": job.runtime_target,
       "model_status": model_state,
       "cached_result": True,
@@ -2016,6 +2037,7 @@ async def create_job(
     "confidence_threshold_effective": False,
     "postprocess": postprocess,
     "mode": job.mode,
+    "label_taxonomy": job.label_taxonomy,
     "runtime_target": job.runtime_target,
     "model_status": model_state,
     "cached_result": False,
