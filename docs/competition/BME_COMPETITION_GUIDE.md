@@ -3,14 +3,20 @@
 > 适用项目：`segmentation-gui-prototype`（腹部 CT 多器官自动分割 + 浏览器端交互验证系统）
 > 适用赛道：「呼吸-消化系统疾病」赛道 — 智能影像分析与评价（影像分析算法类）
 > 报告硬约束：前言 + 问题引入 ≤ 2 页，方案设计 + 结果展示 + 讨论 ≤ 8 页，整体 ≤ 12 页
+> 最近更新：2026-06-02（同步本地缓存演示 7 步 + 2026-06-01 cache 链路补丁）
 
 ---
 
 ## 0. 一句话定位
 
-> 基于 **nnU-Net v2** 在 AMOS22 上完成 15 个腹部器官的 5-fold 自动分割训练，结合 5-fold soft ensemble 与跨数据集自动 taxonomy remap，配套浏览器端三正交 CT 联动浏览 + 三维形态学量化的部署验证系统，在 AMOS 0117 上取得 `mean Dice = 0.925`、`foreground Dice = 0.98`，在 FLARE22 Tr 0009 跨数据集验证中 `mean Dice = 0.926`。
+> 基于 **nnU-Net v2** 在 AMOS22 上完成 15 个腹部器官的 5-fold 自动分割训练，结合 5-fold soft ensemble、跨数据集自动 taxonomy remap 与 **本地缓存演示（cache hit 约 0.001s vs 真实推理约 218s）**，配套浏览器端三正交 CT 联动浏览 + 三维形态学量化的部署验证系统，在 AMOS 0117 上取得 `mean Dice = 0.925`、`foreground Dice = 0.98`，在 FLARE22 Tr 0009 跨数据集验证中 `mean Dice = 0.926`。
 
 **契合命题**：覆盖任务 1（影像智能分割）+ 任务 2（影像量化分析），建议以"腹部多器官自动分割 + 训练过程 + 部署验证"作为整体方案申报。
+
+**工程亮点**（可放进前言"本文工作"或方案结尾的部署小节）：
+- **预测结果缓存（7 字段 cache_key）**：相同 `input_sha + model_dataset + profile + label_taxonomy + runtime_target + postprocess + device` 直接命中 `server/work/<job_id>/prediction.nii.gz`，**避免重复推理**，对评审现场"反复演示同一例"场景尤其友好。
+- **cache hit 显示历史 validation 摘要**（2026-06-01 cache 链路补丁）：FLARE22 Tr 0009 cache hit 命中 `02da885c97d8` 时，前端正确显示 `mean_dice=0.893127 / min_dice=0.67373 / fg=0.949908` 并标注"（历史离线缓存摘要）"，避免张冠李戴。
+- **`/api/samples` 参考病例列表**：通过 `SEGMENTATION_REFERENCE_CASES_JSON` env var 注入，演示现场只需一次 setenv 即可暴露 4 个 case（AMOS 0117、FLARE22 Tr 0009 等）。
 
 ---
 
@@ -97,6 +103,7 @@
 - **方法**：在 `server/taxonomy.py` 维护 FLARE22 标签表、器官别名映射（`postcava → ivc`、`gall_bladder → gallbladder` 等）；后端根据 label ID 集合自动检测数据集来源，按器官名把参考标签重映射到 checkpoint 标签空间。
 - **显式 hint**：前端提供 `label_taxonomy = auto | AMOS22 | FLARE22` 选项；`auto` 模式保守，**仅在多个明确错位 ID 时才触发 remap**，避免 AMOS 原生标签被误判。
 - **结果**：FLARE22 Tr 0009 在线验证 `mean_dice` 从 `0.073` 提升到 `0.926`，`foreground_dice = 0.95`。
+- **cache 链路配套**（2026-06-01 补丁）：FLARE22 cache hit 在前端直接显示历史离线指标，避免重新推理再次触发"语义错位"误判；cache_key 7 字段（`input_sha + model_dataset + profile + label_taxonomy + runtime_target + postprocess + device`）保证 `label_taxonomy` 不同的请求不会共用 cache。
 
 **配图建议**：
 - **图 6 Taxonomy remap 流程**：左 FLARE22 label ID 表 → 中"按器官名重排"算法 → 右 AMOS22 label ID 表 + 重映射后 Dice 提升数据。
@@ -109,6 +116,7 @@
 - 点击非背景 label → 弹出器官说明（解剖位置、功能、常见病变、分割注意点）。
 - **影像量化模块**（纯前端 CPU，基于 mask + NIfTI spacing）：器官体积（mm³）、体素数、最大轴向截面积、包围盒尺寸、头足向长度估算、三维最长径估算。
 - 报告导出：HTML / JSON（schema_version 1.1，含 `quantification`）/ PDF（浏览器原生打印）。
+- **本地缓存演示**（2026-06-01）：相同请求命中 `server/work/<job_id>/prediction.nii.gz` 时跳过完整 nnU-Net 推理；前端展示 `cached_result` + `cache_source_job_id` + `historical` + `source_job_id` 四个字段；演示现场配合 `docs/local-cache-demo-runbook.md` 与 `tools/seed_demo_cache.py` 复现"cache hit 约 0.001s vs 真实推理约 218s"。
 
 **配图建议**：
 - **图 7 推理结果 + 量化报告截图**：`screenshots/orthogonal-current.png` 或 `screenshots/detail-rich.png`，1 张足以。
@@ -119,7 +127,7 @@
 
 - 通过 `SEGMENTATION_SERVER_*` 环境变量配置 GPU / fold 映射、nnUNet 数据目录、输出根目录、评估脚本。
 - 前端通过 `VITE_API_ENDPOINT` 指向服务器；后端按 `runtime_target=server` 串起 5-fold 并行 + soft ensemble。
-- 校园网 Windows 前端直连 Ubuntu FastAPI 后端已跑通，FLARE 服务器轮次约 3 分 48 秒；AMOS 服务器轮次因 taxonomy 误判待 `label_taxonomy=AMOS22` 复跑。
+- 校园网 Windows 前端直连 Ubuntu FastAPI 后端已跑通，FLARE 服务器轮次约 3 分 48 秒；AMOS 服务器轮次 `label_taxonomy=AMOS22` 显式 hint 已落地（与 FLARE 走同一套前端选项），可在下一轮服务器窗口复跑。
 
 **配图建议**：
 - **图 8 部署拓扑**："Windows GUI → 校园网 → Ubuntu 服务器（5×GPU）→ 5-fold 并行 → soft ensemble → 结果回填 GUI"。
@@ -177,20 +185,22 @@
 **配图清单**（用 `screenshots/` 已有截图）：
 - **图 12 三正交视图 + 推理结果**：`screenshots/desktop-final.png` 或 `screenshots/rail-layout-final.png`。
 - **图 13 量化 / 报告导出**：从 GUI 导出一份真实报告截一张图（HTML 或 PDF）。
+- **可选 图 14 本地缓存演示截图**：截一张"FLARE22 Tr 0009 cache hit + 历史 validation 摘要"作为工程亮点（见 `docs/local-cache-demo-runbook.md` 复现步骤）。
 
 ---
 
 ### 第 4 章 讨论与展望（约 0.5 页）
 
 **写作要点**：
-1. **优势**：nnU-Net 自动 plans + 5-fold soft ensemble + 跨数据集 remap + 服务器/本地双部署 + GUI 量化报告齐全。
+1. **优势**：nnU-Net 自动 plans + 5-fold soft ensemble + 跨数据集 remap + 服务器/本地双部署 + GUI 量化报告齐全 + **本地缓存演示（cache hit 0.001s vs 真实推理 218s）**。
 2. **局限**：
     - `fast` profile 牺牲质量，引入 label 14/15 假阳性；
     - 高分辨率 CT（768×768×103）推理耗时显著增加（2.25× 计算量），需预降采样或 3D 模型优化；
-    - 服务器 AMOS 轮次因 taxonomy 误判待 `label_taxonomy=AMOS22` 复跑后再纳入正式基线；
+    - 服务器 AMOS 轮次 `label_taxonomy=AMOS22` 显式 hint 已落地但尚未在 5-GPU 服务器窗口复跑；
     - 当前数据集为单中心公开数据，多中心验证待扩展；
-    - `confidenceThreshold` 当前是质控提示，不会真实作用概率图。
-3. **展望**：高分辨率 CT 预降采样 / 3D 模型；多中心数据集（TotalSegmentator、AMOS2022 后续版本）；云端 HTTPS + 鉴权；与 PACS / RIS 集成；扩展到肺部分割（FLARE 肺、ATM'22）。
+    - `confidenceThreshold` 当前是质控提示，不会真实作用概率图；
+    - 2026-06-01 之前 cache hit 在前端展示的 validation 摘要曾出现"张冠李戴"（FLARE22 命中错位 cache_source），已通过 cache 链路补丁修复（`_load_cached_validation_summary()` + `find_cached_prediction()` 按 `has_validation_summary, mtime` 排序 + `tools/rewrite_flare22_historical_summary.py` 按历史指标改写 `validation_summary.json`）。
+3. **展望**：高分辨率 CT 预降采样 / 3D 模型；多中心数据集（TotalSegmentator、AMOS2022 后续版本）；云端 HTTPS + 鉴权；与 PACS / RIS 集成；扩展到肺部分割（FLARE 肺、ATM'22）；**跨数据集 cache 链路产品化（通用 `tools/rewrite_cached_validation_summary.py`）+ 演示启动脚本化**。
 
 ---
 
@@ -256,6 +266,8 @@
 - ❌ 把 persistent worker 没验证的"加速"写进结果。
 - ❌ 写"未经验证的多中心 / 跨中心"结论。
 - ❌ 提交真实 CT / NIfTI / checkpoint / 推理输出到 GitHub（`.gitignore` 已屏蔽）。
+- ❌ 演示现场漏设 `SEGMENTATION_REFERENCE_CASES_JSON`，把 `/api/samples` 退回成 1 个 case。
+- ❌ 报告里写 cache hit "加速 X 倍"但没明确 cache_key 7 字段（容易让评审误以为只是 UI 缓存）。
 - ❌ 正文前言超 2 页 / 整体超 12 页。
 - ❌ 参考文献缺标注或格式混乱。
 - ❌ 整篇都在介绍 GUI，训练过程只字未提（用户最强调的扣分点）。
@@ -277,6 +289,8 @@
 - [ ] 答辩 PPT ≥ 10 页，留 Q&A 时间
 - [ ] 全程未使用 Mimics / 3D Slicer / ITK-SNAP
 - [ ] 仓库中不包含真实患者数据 / checkpoint
+- [ ] **本地缓存演示**（如现场演示）：启动前确认 `SEGMENTATION_REFERENCE_CASES_JSON=examples/reference_cases.json`，`/api/samples` 返回 4 个 case；FLARE22 cache hit 摘要标注"（历史离线缓存摘要）"
+- [ ] **工程亮点口径一致**：cache hit 数字以 2026-06-01 cache 链路补丁后的 `0.893127 / 0.67373 / 0.949908` 为准（不是旧的 `0.891`）
 
 ---
 
@@ -289,7 +303,9 @@
 - **GUI 前端**：`src/main.tsx`、`src/components/OrthogonalViewer.tsx`、`src/imaging/quantification.ts`、`src/inference/inferenceClient.ts`
 - **报告导出**：`src/report/exportReport.ts`（HTML / JSON / PDF）
 - **指标工具**：`tools/segmentation_metrics_summary.py`
+- **缓存与本地演示工具**：`tools/seed_demo_cache.py`（预置 AMOS 0117 / FLARE22 Tr 0009 cache 命中样例）、`tools/rewrite_flare22_historical_summary.py`（按 2026-05-26 remap 后指标改写 FLARE22 历史 `validation_summary.json`）
+- **本地缓存演示 runbook**：`docs/local-cache-demo-runbook.md`（7 步复现指南，前置 `SEGMENTATION_REFERENCE_CASES_JSON=examples/reference_cases.json`）
 - **测试**：`npm test`、`python tests/backendState.test.py`、`python tests/segmentationMetrics.test.py`
 - **运行环境**：Windows 11 + RTX 4060 Laptop GPU 8 GB（本地）、Ubuntu 22.04 + 5× GPU（服务器 5-fold soft ensemble）
 - **部署包**：`deployment-packages/server-runtime-package-20260531.zip`
-- **核心数字**：AMOS 0117 mean Dice 0.925 / fg Dice 0.980 / HD 7.72 mm；FLARE22 remap 后 mean Dice 0.926；服务器 5-fold / FLARE22 约 0.891。
+- **核心数字**：AMOS 0117 mean Dice 0.925 / fg Dice 0.980 / HD 7.72 mm；FLARE22 remap 后 mean Dice 0.926；服务器 5-fold / FLARE22 约 0.891；**FLARE22 cache hit `02da885c97d8` 显示 mean_dice=0.893127 / min_dice=0.67373 / fg=0.949908（"（历史离线缓存摘要）"）**。
