@@ -1,10 +1,10 @@
 # 下一轮候选任务进度
 
-## 2026-06-01：本地缓存演示已完成，进入下一轮规划
+## 2026-06-01：本地缓存演示 + cache 链路补丁已完成，进入下一轮规划
 
-**状态：** 上一轮（本地缓存演示）已完成，下一轮任务规划见 `.planning/2026-06-01-local-cache-demo/task_plan.md` 的"推荐下一轮任务"。
+**状态：** 本地缓存演示 7 步 + 晚间 cache 链路补丁已完成，下一轮任务规划见本目录 `task_plan.md`（已更新到 2026-06-01）。
 
-**背景：** 2026-06-01 在 BME 竞赛 PPT 演示窗口前完成"本地缓存演示 7 步"，AMOS 0117 cache hit + FLARE22 Tr 0009 真实推理 218s + FLARE22 cache hit 0.001s 的对照链路已落地；9 份核心文档同步完成；新增 `tools/seed_demo_cache.py`、`docs/local-cache-demo-runbook.md`、`docs/superpowers/specs/2026-06-01-local-cache-demo-design.md`、`docs/superpowers/plans/2026-06-01-local-cache-demo.md`。
+**背景：** 2026-06-01 在 BME 竞赛 PPT 演示窗口前完成"本地缓存演示 7 步"，AMOS 0117 cache hit + FLARE22 Tr 0009 真实推理 218s + FLARE22 cache hit 0.001s 的对照链路已落地；现场复测时发现 FLARE22 cache hit 显示的 validation 摘要来自错位 cache_source（`009d4efdc5f6`），已完成 cache 链路补丁：`_load_cached_validation_summary()` + `complete_cached_job()` historical 回退；`find_cached_prediction()` 优先选有 `validation_summary.json` 的 cache_source；`tools/rewrite_flare22_historical_summary.py` 按 2026-05-26 remap 后 metrics 改写 0aa7323a4c01 的历史摘要；前端 `getValidationStatusCopy()` 增加 cachedResult 参数；`tests/backendState.test.py` 新增 2 个回归测试。9 份核心文档已同步；新增 `tools/rewrite_flare22_historical_summary.py`。
 
 ## 2026-05-31：taxonomy fix 和高分辨率推理已完成
 

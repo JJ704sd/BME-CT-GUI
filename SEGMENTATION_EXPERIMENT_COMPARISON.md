@@ -29,6 +29,7 @@
 - 2026-05-31 显式 `label_taxonomy=auto|AMOS22|FLARE22` 已实现，`detect_dataset()` 更保守：标签 ID 是 checkpoint 子集时不触发 remap。AMOS CT 高分辨率推理完成（fast profile，mean_dice=0.77724）。服务器 runtime 包已更新为 `server-runtime-package-20260531.zip`，zip 内按 `server/...` 项目结构组织。
 - 2026-05-31 前端新增影像量化分析和报告 `quantification` 字段，只读取预测 mask 与 spacing 生成体积、截面积和长度估算，不改变下列表格中的历史 Dice、IoU、Hausdorff Distance 或耗时数值。
 - 2026-06-01 完成本地缓存演示 7 步：AMOS 0117 cache hit（`aea4e7cdbaf0`）、FLARE22 Tr 0009 真实推理（`0aa7323a4c01`, 218s）、FLARE22 cache hit（`02da885c97d8`, 0.001s）。新增 `tools/seed_demo_cache.py` 与 `docs/local-cache-demo-runbook.md`。本轮 AMOS cache hit 命中的是 2026-05-23 历史推理 `009d4efdc5f6`（review，mean_dice 0.891，stomach 0.556），不修改本表中的任何指标数值；新 quality AMOS 真实推理仍以 `b3c528cc9e20` 为基线。
+- 2026-06-01 晚间完成 cache 链路补丁：FLARE22 cache hit（`02da885c97d8`）现在能正确显示 2026-05-26 remap 后的指标（mean_dice 0.893127、min_dice 0.67373、fg 0.949908、15 标签），并标注"（历史离线缓存摘要）"；新增 `tools/rewrite_flare22_historical_summary.py` 把该历史摘要写入 0aa7323a4c01 的 output。`server/main.py` 的 `complete_cached_job()` 增加 historical 回退，`find_cached_prediction()` 候选排序改为 `(has_validation_summary, mtime)` 降序。本轮不修改本表中任何基线指标数值，仅修正 cache hit 时的 validation 显示口径。
 
 ## 实验名称说明
 
@@ -387,3 +388,10 @@
 - 推荐基线表不变：正式 AMOS 报告仍以 `b3c528cc9e20`（mean Dice 0.924780）为基线；本地缓存演示是工程链路演示，不替代正式质量基线。
 - 新增 `tools/seed_demo_cache.py`：幂等可重跑；缺失 `009d4efdc5f6` 预测时返回明确提示，FLARE 真实推理缺失时返回"先在 GUI 跑一次 FLARE 推理" 的提示。
 - `cached-real-nnunetv2` 仅复用预测 NIfTI；本轮 FLARE cache hit 没有上传 label file，所以 `validation=null`，与 README 缓存语义说明一致。
+
+## 2026-06-01 cache 链路补丁审核记录
+
+- 本轮为本地缓存演示的链路补丁，目标是把 FLARE22 cache hit 命中的历史 validation 摘要正确显示出来（0.893127/0.67373/0.949908，"（历史离线缓存摘要）"），而不是让 `009d4efdc5f6` 的 AMOS 摘要被错位引用。
+- 修复点：`server/main.py` 新增 `_load_cached_validation_summary()` + `complete_cached_job()` historical 回退；`find_cached_prediction()` 候选排序改为 `(has_validation_summary, mtime)` 降序；`tools/rewrite_flare22_historical_summary.py` 把 2026-05-26 remap 后的 metrics 写入 0aa7323a4c01 的 output；前端 `getValidationStatusCopy()` 增加 cachedResult 参数；`tests/backendState.test.py` 新增 2 个回归测试。
+- 教训：`SEGMENTATION_REFERENCE_CASES_JSON` 必须指向 `examples/reference_cases.json`（或 `nnunetv2_files/reference_cases.local.json`），否则 `/api/samples` 只会返回内置 `amos_0117`，FLARE22 Tr 0009 不可选；现场复测时漏设这个 env var 会让所有"载入参考病例"都跑错。
+- 本轮不修改本表中任何历史实验指标数值；AMOS 原生基线 `b3c528cc9e20`、FLARE22 自动 remap `a717dacf42d3`、FLARE22 离线 remap `86b0153d0a73` 仍是同一份数据。

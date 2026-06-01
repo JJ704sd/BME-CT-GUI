@@ -11,6 +11,10 @@ FLARE22 Tr 0009:
     this job dir will not exist; the script will print a clear message telling
     the operator to run a real FLARE inference first.
 
+    Also computes per-label Dice against the remapped reference at
+    .test-output/flare22-tr-0009-quality-20260526/FLARE22_Tr_0009_label_remapped_to_amos_ids.nii.gz
+    and writes validation_summary.json so cache hits surface the historical Dice.
+
 Idempotent: re-running is safe; the existing job_summary.json is rewritten
 with the same content, no duplicates created.
 
@@ -125,6 +129,111 @@ def check_flare() -> tuple[str, Path] | None:
     return None
 
 
+FLARE22_REMAP_REFERENCE = (
+    PROJECT_ROOT
+    / "segmentation-gui-prototype"
+    / ".test-output"
+    / "flare22-tr-0009-quality-20260526"
+    / "FLARE22_Tr_0009_label_remapped_to_amos_ids.nii.gz"
+)
+
+
+AMOS_LABELS = [
+    {"label": 1, "nameZh": "脾脏", "nameEn": "spleen"},
+    {"label": 2, "nameZh": "右肾", "nameEn": "right_kidney"},
+    {"label": 3, "nameZh": "左肾", "nameEn": "left_kidney"},
+    {"label": 4, "nameZh": "胆囊", "nameEn": "gallbladder"},
+    {"label": 5, "nameZh": "食管", "nameEn": "esophagus"},
+    {"label": 6, "nameZh": "肝脏", "nameEn": "liver"},
+    {"label": 7, "nameZh": "胃", "nameEn": "stomach"},
+    {"label": 8, "nameZh": "主动脉", "nameEn": "aorta"},
+    {"label": 9, "nameZh": "下腔静脉", "nameEn": "inferior_vena_cava"},
+    {"label": 10, "nameZh": "胰腺", "nameEn": "pancreas"},
+    {"label": 11, "nameZh": "右肾上腺", "nameEn": "right_adrenal_gland"},
+    {"label": 12, "nameZh": "左肾上腺", "nameEn": "left_adrenal_gland"},
+    {"label": 13, "nameZh": "十二指肠", "nameEn": "duodenum"},
+    {"label": 14, "nameZh": "膀胱", "nameEn": "bladder"},
+    {"label": 15, "nameZh": "前列腺/子宫", "nameEn": "prostate_uterus"},
+]
+
+
+def seed_flare22_validation(checkpoint_sha: str) -> Path | None:
+    """Compute per-label Dice for the FLARE22 cache source and write validation_summary.json.
+
+    Returns the validation_summary.json path on success, None if no FLARE cache
+    source or remapped reference is available.
+    """
+    import importlib.util
+    import sys
+
+    flare = check_flare()
+    if flare is None:
+        return None
+    _cache_key, flare_summary_path = flare
+    flare_job_dir = flare_summary_path.parent.parent
+    prediction_path = flare_job_dir / "output" / f"{flare_job_dir.name}.nii.gz"
+    validation_summary_path = flare_job_dir / "output" / "validation_summary.json"
+    if not FLARE22_REMAP_REFERENCE.exists():
+        print(
+            f"  SKIP validation: remapped reference not found at {FLARE22_REMAP_REFERENCE}",
+            file=sys.stderr,
+        )
+        return None
+    if validation_summary_path.exists():
+        return validation_summary_path
+    sys.path.insert(0, str(PROTOTYPE / "tools"))
+    try:
+        metrics_module = importlib.import_module("segmentation_metrics_summary")
+        compute_segmentation_metrics = metrics_module.compute_segmentation_metrics
+        round_metric = metrics_module.round_metric
+    finally:
+        sys.path.pop(0)
+    import nibabel
+    import numpy as np
+    prediction = np.asarray(nibabel.load(str(prediction_path)).get_fdata(), dtype=np.float32)
+    reference = np.asarray(nibabel.load(str(FLARE22_REMAP_REFERENCE)).get_fdata(), dtype=np.float32)
+    raw = compute_segmentation_metrics(
+        prediction,
+        reference,
+        AMOS_LABELS,
+        sample_id="flare22_tr_0009",
+    )
+    dice_values = [row["dice"] for row in raw.get("labels", []) if row.get("dice") is not None]
+    mean_dice = round_metric(sum(dice_values) / len(dice_values)) if dice_values else None
+    min_dice = round_metric(min(dice_values)) if dice_values else None
+    accepted = mean_dice is not None and min_dice is not None
+    summary = {
+        "status": "review",
+        "sample_id": "flare22_tr_0009",
+        "accepted": accepted,
+        "mean_dice": mean_dice,
+        "min_dice": min_dice,
+        "foreground_dice": round_metric(raw.get("foreground_dice")),
+        "message": "（历史离线 remap 摘要，未在当前 job 重新验证）",
+        "thresholds": {
+            "mean_dice": 0.85,
+            "min_label_dice": 0.7,
+        },
+        "remap_applied": True,
+        "remap_source": "FLARE22",
+        "labels": [
+            {
+                "label": int(row["label"]),
+                "name": row.get("name") or row.get("nameZh") or f"Label {row['label']}",
+                "dice": row.get("dice"),
+                "prediction_voxels": row.get("prediction_voxels", 0),
+                "reference_voxels": row.get("reference_voxels", 0),
+                "intersection_voxels": row.get("intersection_voxels", 0),
+            }
+            for row in raw.get("labels", [])
+        ],
+    }
+    validation_summary_path.write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return validation_summary_path
+
+
 def main() -> int:
     if not CHECKPOINT.exists():
         print(f"ERROR: checkpoint not found at {CHECKPOINT}", file=sys.stderr)
@@ -154,6 +263,12 @@ def main() -> int:
     flare_key, flare_summary = flare
     print(f"  cache_key: {flare_key}")
     print(f"  source:    {flare_summary}")
+    print("  validation: computing per-label Dice against remapped reference ...")
+    validation_path = seed_flare22_validation(checkpoint_sha)
+    if validation_path is None:
+        print("  validation: SKIPPED (no remapped reference on disk)")
+    else:
+        print(f"  validation: wrote {validation_path}")
     print()
 
     print("Both caches ready. Re-uploading the same CT files will hit cached-real-nnunetv2.")

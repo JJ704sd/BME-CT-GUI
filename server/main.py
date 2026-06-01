@@ -1551,6 +1551,7 @@ def build_prediction_cache_key(input_sha256: str, model_state: dict[str, Any] | 
 
 def find_cached_prediction(cache_key: str, input_path: Path, current_job_id: str) -> dict[str, Any] | None:
   if WORK_DIR.exists():
+    candidates: list[tuple[bool, float, dict[str, Any]]] = []
     for job_dir in WORK_DIR.iterdir():
       if not job_dir.is_dir() or job_dir.name in {current_job_id, "runtime_model"}:
         continue
@@ -1558,12 +1559,21 @@ def find_cached_prediction(cache_key: str, input_path: Path, current_job_id: str
       if not summary or summary.get("cache_key") != cache_key or not summary.get("result_ready"):
         continue
       result_path = Path(str(summary.get("result_path")))
-      if result_path.exists():
-        return {
+      if not result_path.exists():
+        continue
+      has_validation = (job_dir / "output" / "validation_summary.json").exists()
+      candidates.append((
+        has_validation,
+        job_dir.stat().st_mtime,
+        {
           "job_id": job_dir.name,
           "result_path": result_path,
           "legacy": False,
-        }
+        },
+      ))
+    if candidates:
+      candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+      return candidates[0][2]
 
   legacy_job_id = "009d4efdc5f6"
   legacy_result = WORK_DIR / legacy_job_id / "output" / f"{legacy_job_id}.nii.gz"
@@ -1594,6 +1604,20 @@ def copy_cached_result(cache: dict[str, Any], output_dir: Path, job_id: str) -> 
   return target_path
 
 
+def _load_cached_validation_summary(cache_source_job_id: str) -> dict[str, Any] | None:
+  source_output_dir = WORK_DIR / cache_source_job_id / "output"
+  summary_path = source_output_dir / "validation_summary.json"
+  if not summary_path.exists():
+    return None
+  try:
+    data = json.loads(summary_path.read_text(encoding="utf-8"))
+  except (OSError, json.JSONDecodeError):
+    return None
+  if not isinstance(data, dict):
+    return None
+  return data
+
+
 def complete_cached_job(job: Job, input_path: Path, cache: dict[str, Any]) -> None:
   start_job_phase(job, "cache_hit")
   output_dir = input_path.parent.parent / "output"
@@ -1603,6 +1627,14 @@ def complete_cached_job(job: Job, input_path: Path, cache: dict[str, Any]) -> No
     validation = validate_against_custom_label(result_path, job.label_path, read_labels(), label_taxonomy=job.label_taxonomy)
   elif is_debug_original_upload(input_path):
     validation = validate_against_debug_label(result_path)
+  if validation is None and not cache.get("legacy", False):
+    historical = _load_cached_validation_summary(str(cache.get("job_id")))
+    if historical is not None:
+      historical = dict(historical)
+      historical["historical"] = True
+      historical["source_job_id"] = str(cache.get("job_id"))
+      historical.setdefault("message", "（历史离线缓存摘要，未在当前 job 重新验证）")
+      validation = historical
   if validation is not None:
     write_validation_summary(output_dir, validation)
   finish_job_phase(job, "cache_hit")

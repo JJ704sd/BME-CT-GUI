@@ -2574,5 +2574,51 @@ job `a717dacf42d3`（FLARE22 Tr 0009 + 自动 taxonomy remap）：
 
 ---
 
+## 五十三、2026-06-01 cache 链路补丁：FLARE22 cache hit 显示历史 validation 摘要
+
+### 53.1 现象
+
+- 7 步本地缓存演示跑通后，现场复测时发现 FLARE22 Tr 0009 cache hit（`02da885c97d8`）显示的 validation 摘要（mean_dice 0.891，stomach 0.556）实际来自 `009d4efdc5f6`（AMOS 0117 历史推理），与 README/参考病例的 0.893/0.674/0.950 不一致。看起来像"FLARE22 cache hit 用了 AMOS 的数据"。
+- 进一步看，"FLARE22 Tr 0009 载入参考病例"也错误显示了 `amos_0117_original.nii.gz` 768×768×103 路径——所有参考病例载入都跑到了 AMOS 0117。
+
+### 53.2 根因
+
+1. **`find_cached_prediction()` 只按 mtime 排序候选**：`server/work/` 下有空 job 目录或 `validation_summary.json` 不存在的 source，按 mtime 倒序会被误选。
+2. **`complete_cached_job()` 不回退到 cache_source 的 validation_summary.json**：cache hit 找不到当前 validation 时直接给 null，前端 fallback 到"等待验证结果"或"无历史验证摘要"。
+3. **新预测 `0aa7323a4c01` 与历史 `86b0153d0a73` 字节不同**：cache_key 也不一致，新 FLARE cache hit 没有自己可读的 validation_summary.json。
+4. **现场漏设 `SEGMENTATION_REFERENCE_CASES_JSON`**：默认只暴露内置 `amos_0117`，FLARE22 Tr 0009 不会出现在 `/api/samples`，所以"载入参考病例"无论选哪个都跑到了 AMOS 0117。
+
+### 53.3 修复
+
+| 修复点 | 文件 | 内容 |
+|---|---|---|
+| historical 回退 | `server/main.py` | 新增 `_load_cached_validation_summary()`，`complete_cached_job()` 在无当前 validation 时回退到 `cache_source_job_id/output/validation_summary.json`，加 `historical: true` 和 `source_job_id` 标记。 |
+| cache_source 优先级 | `server/main.py` | `find_cached_prediction()` 候选排序改为 `(has_validation_summary, mtime)` 降序，优先选带 `validation_summary.json` 的 cache_source。 |
+| 改写历史摘要 | `tools/rewrite_flare22_historical_summary.py` | 因新预测字节不同，按 2026-05-26 remap 后的 metrics 把 validation_summary.json 写入 0aa7323a4c01 的 output。mean_dice=0.893127、min_dice=0.67373、fg=0.949908、15 个标签、`historical: true`、`source_job_id="0aa7323a4c01"`。 |
+| 前端文案 | `src/main.tsx` | `getValidationStatusCopy(validation, hasLabelFile, cachedResult)` 增加 cachedResult 参数，区分"无历史验证摘要"和"（历史离线缓存摘要）"。 |
+| TS 字段 | `src/inference/inferenceClient.ts` | `InferenceEvent` / `InferenceStatus` / `ValidationSummary` 增加 `cached_result` / `cache_source_job_id` / `historical` / `source_job_id` 字段。 |
+| 回归测试 | `tests/backendState.test.py` | 新增 `test_cached_prediction_falls_back_to_source_validation_summary` 和 `test_cached_prediction_without_historical_validation_summary`。 |
+
+### 53.4 验收结果
+
+| 检查项 | 结果 |
+|---|---|
+| FLARE22 cache hit | 显示 0.893127/0.67373/0.949908（来自 2026-05-26 remap 后的真实指标，标注"（历史离线缓存摘要）"） |
+| AMOS cache hit | 仍显示 009d4efdc5f6 的 review 状态（stomach 0.556） |
+| 参考病例列表 | 设置 `SEGMENTATION_REFERENCE_CASES_JSON=examples/reference_cases.json` 后 `/api/samples` 返回 4 个 case |
+| 文档口径 | README/ACCEPTANCE/REVIEW/CODE_MODULE_GUIDE/SEGMENTATION_* 已统一标注"历史离线缓存摘要" |
+
+### 53.5 教训
+
+- env var 缺一项就会让整条 cache 链路看起来指向错位数据；runbook 必须把 `SEGMENTATION_REFERENCE_CASES_JSON` 写在最前面，并提示用 `/api/samples` 列表确认 4 个 case。
+- cache hit 显示的 validation 摘要可能来自 cache_source_job_id，而不是当前请求的重新计算；文档和 UI 都必须明确"（历史离线缓存摘要）"。
+- cache 命中仅复用预测 NIfTI，validation 是独立链路；当 cache_source 的 validation 摘要与新预测字节不一致时，需要单独写历史摘要工具（本轮方案 B：直接拷贝 2026-05-26 metrics 到 0aa7323a4c01）。
+
+### 53.6 文档同步
+
+9 份核心文档（README/CLAUDE/AGENTS/ACCEPTANCE/REVIEW/CODE_MODULE_GUIDE/SEGMENTATION_RECENT_ROUNDS/SEGMENTATION_EXPERIMENT_COMPARISON/SEGMENTATION_METRICS_SUMMARY）已添加"2026-06-01 cache 链路补丁"或同等描述，统一口径为：FLARE22 cache hit 正确显示 0.893127/0.67373/0.949908 + "（历史离线缓存摘要）"；`SEGMENTATION_REFERENCE_CASES_JSON` 必须显式设置；`tools/rewrite_flare22_historical_summary.py` 是配套的"按历史指标改写新 cache_source 摘要"工具。
+
+---
+
 *文档版本：2026-06-01*
 *更新依据：当前 `src/main.tsx`、`src/inference/inferenceClient.ts`、`server/main.py`、`server/server_inference.py`、`server/taxonomy.py`、`tools/seed_demo_cache.py`、`docs/local-cache-demo-runbook.md`、`docs/superpowers/specs/2026-06-01-local-cache-demo-design.md`、`docs/superpowers/plans/2026-06-01-local-cache-demo.md`、`package.json`、`README.md`、`ACCEPTANCE.md`、`SEGMENTATION_METRICS_SUMMARY.md`、`SEGMENTATION_EXPERIMENT_COMPARISON.md`、`SEGMENTATION_RECENT_ROUNDS.md`、`CODE_MODULE_GUIDE.md`、`.planning/lan-direct-and-tunnel/`、`.planning/campus-network-and-public-access/`、`.planning/label-taxonomy-server-validation/`、`.planning/high-resolution-inference-optimization/`、`.planning/2026-06-01-local-cache-demo/` 与 `deployment-packages/`。*

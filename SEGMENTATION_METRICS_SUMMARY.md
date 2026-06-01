@@ -59,6 +59,7 @@ python tools\segmentation_metrics_summary.py `
 - 2026-05-31 显式 `label_taxonomy=auto|AMOS22|FLARE22` 已实现，`detect_dataset()` 更保守：标签 ID 是 checkpoint 子集时不触发 remap。AMOS CT 高分辨率推理完成（fast profile，mean_dice=0.77724）。
 - 2026-05-31 新增的影像量化分析来自前端已回填的预测 mask 与 NIfTI spacing，输出体积、截面积和长度估算；它不改变本文件中的 Dice、IoU、Voxel Accuracy 或 Hausdorff Distance 口径。
 - 2026-06-01 本地缓存演示：AMOS 0117 cache hit（`aea4e7cdbaf0`，命中 `009d4efdc5f6`，review，mean_dice 0.891，stomach 0.556）；FLARE22 Tr 0009 真实推理（`0aa7323a4c01`，quality 模式，218s，结果 120KB）；FLARE22 cache hit（`02da885c97d8`，0.001s，命中 `0aa7323a4c01`）。该演示不修改本文件既有 AMOS 基线 `b3c528cc9e20`（mean_dice 0.924780）和新权重首跑 `27216eb73220`（mean_dice 0.924791）。`tools/seed_demo_cache.py` 是该演示的预热脚本，幂等可重跑；cache_key 7 字段隔离已实测正确。
+- 2026-06-01 晚间 cache 链路补丁：FLARE22 cache hit 现在能正确显示历史 validation 摘要（0.893127/0.67373/0.949908，"（历史离线缓存摘要）"）；`tools/rewrite_flare22_historical_summary.py` 把 2026-05-26 remap 后的 metrics 写入 0aa7323a4c01 的 output。`server/main.py` 的 `complete_cached_job()` 增加 historical 回退，`find_cached_prediction()` 候选排序改为 `(has_validation_summary, mtime)` 降序。该补丁不修改本文件任何基线指标数值，仅修正 cache hit 时的 validation 显示口径；AMOS 原生基线 `b3c528cc9e20`（mean_dice 0.924780）仍是 quality profile 的正式 AMOS 验证。
 
 ## 当前 AMOS 基线运行
 
@@ -282,3 +283,4 @@ Checkpoint 元数据：
 - 没有标准标签的病例不能计算 Dice、IoU 或 Hausdorff Distance，只能记录推理耗时、资源快照和人工复核结论。
 - 后续训练权重应保留每次的 JSON 原始输出，并把关键聚合指标追加到本文档。
 - 2026-06-01 本地缓存演示的 AMOS 0117 cache hit 命中 `009d4efdc5f6`（2026-05-23 历史推理，138KB，validation review，mean_dice 0.891，stomach 0.556）；当前 AMOS 基线指标与该 cache hit 复用的预测均已记录。如需 quality 模式 AMOS 验证，应使用 job `b3c528cc9e20`（mean_dice 0.924780）作为正式基线，不要把 cache hit 命中的 0.891 解读为正式 AMOS 质量基线。
+- 2026-06-01 cache 链路补丁后，FLARE22 cache hit（`02da885c97d8`）显示的是 0aa7323a4c01 的历史 validation_summary.json（0.893127/0.67373/0.949908，"（历史离线缓存摘要）"），而不是 009d4efdc5f6 的 AMOS 摘要；该指标源自 2026-05-26 remap 后的真实数据，与 AMOS 原生基线 `b3c528cc9e20`（0.924780）属不同口径。

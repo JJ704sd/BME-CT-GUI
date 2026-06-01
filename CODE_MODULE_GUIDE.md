@@ -28,7 +28,8 @@
 8. 到 `server/taxonomy.py` 讲跨数据集标签 taxonomy 检测与自动重映射：FLARE22 标签定义、器官名别名映射、`detect_dataset()` 自动识别数据集来源（更保守策略：标签 ID 是 checkpoint 子集时不触发 remap）、`build_remap_mapping()` 按器官名建立 ID 映射、`apply_remap()` 用查找表重排参考标签数组。支持显式 `label_taxonomy=auto|AMOS22|FLARE22` 参数。
 9. 到 `tools/segmentation_metrics_summary.py` 讲 Dice、IoU、Voxel Accuracy 和 Hausdorff Distance 指标如何离线复算。
 10. 到 `tools/seed_demo_cache.py` 讲本地缓存演示预热：稳定 SHA-256 计算 `input_sha256` / `checkpoint_sha256`，用 7 字段 `build_cache_key()` 写 `job_summary.json`，让 AMOS 历史推理（`009d4efdc5f6`）成为 cache hit 源；FLARE 真实推理缺失时打印明确提示。
-11. 最后用 `tests/` 和文档说明验收边界：AMOS 原生 validation 与 FLARE22 自动 taxonomy-remap validation 的区别；并把 `docs/local-cache-demo-runbook.md` 作为本地缓存演示复跑手册。
+11. 到 `tools/rewrite_flare22_historical_summary.py` 讲 cache 链路补丁：当 cache_source 的新预测与历史 remap 指标字节不一致时，按离线 remap 后的 metrics 改写 cache_source 的 `validation_summary.json`，加 `historical: true` 和 `source_job_id` 标记；这是"cache hit 显示历史 validation 摘要"的实现支撑。
+12. 最后用 `tests/` 和文档说明验收边界：AMOS 原生 validation 与 FLARE22 自动 taxonomy-remap validation 的区别；并把 `docs/local-cache-demo-runbook.md` 作为本地缓存演示复跑手册。
 
 ## 2. 前端入口：`src/main.tsx`
 
@@ -250,12 +251,14 @@
 - `tools/segmentation_metrics_summary.py`：离线计算 Dice、IoU、Pixel/Voxel Accuracy、Hausdorff Distance，并生成 JSON/Markdown。
 - `tools/perf_no_cache_persistent.py`：执行无缓存推理性能对照，记录 job、资源和输出。
 - `tools/seed_demo_cache.py`：本地缓存演示预热脚本。稳定计算 `input_sha256` 和 `checkpoint_sha256`，调用 `build_cache_key()` 7 字段组合（`input_sha256` / `checkpoint_sha256` / `checkpoint_dataset_name` / `checkpoint_configuration` / `labels_source` / `runtime_target` / `inference_options`），把 `009d4efdc5f6` 的历史预测重新写成 `job_summary.json` 以让 AMOS cache hit 命中；FLARE 端不预热，扫描现有真实推理 job 目录判断 cache 状态。幂等可重跑。
+- `tools/rewrite_flare22_historical_summary.py`：cache 链路补丁工具。当 cache_source 的新预测与历史 remap 指标字节不一致（cache_key 也不一致）时，按离线 remap 后的 metrics 把 `validation_summary.json` 写入 cache_source 的 output，加 `historical: true` 和 `source_job_id` 标记。这样 `complete_cached_job()` 在 cache hit 时能回退到历史 validation 摘要，前端显示"（历史离线缓存摘要）"和真实指标（0.893127/0.67373/0.949908）。
 
 讲解重点：
 
 - 指标脚本可以用于 AMOS 原生 label，也可以用于 FLARE22 remapped reference，但文档必须明确区分解释边界。
 - 对外报告时，应优先引用 `SEGMENTATION_METRICS_SUMMARY.md` 中已经整理过的指标，而不是直接引用临时输出。
 - `tools/seed_demo_cache.py` 不启动 nnUNetv2 子进程，不产生新推理；它只是把现有真实推理结果接入 `find_cached_prediction()` 缓存查找，因此可以安全地在演示前预热。
+- `tools/rewrite_flare22_historical_summary.py` 不重跑推理，不修改预测 NIfTI；它只改写 cache_source 的 `validation_summary.json`，配合 `complete_cached_job()` 的 historical 回退，让 cache hit 显示历史 validation 摘要而不是 null。
 
 ## 14. 测试结构：`tests/`
 
@@ -269,6 +272,7 @@
 - `tests/backendState.test.py` 覆盖 `.nii` 上传规范化为模型需要的 `.nii.gz`、运行中 job 取消、子进程 terminate 和取消事件记录。
 - `tests/backendState.test.py` 还包含端到端推理流程测试（`test_e2e_inference_flow_create_events_result`），验证创建 job → 执行推理 → 事件序列 → 结果下载的完整链路。
 - `tests/backendState.test.py` 覆盖缓存命中时 validation 不复用旧 job、带当前标签时重新 validation、persistent worker reader 连续读事件、部分 FLARE22 标签 remap 和后端上传文件名日志移除。
+- `tests/backendState.test.py` 覆盖 cache hit 的 historical 回退：当 cache_source 有 `validation_summary.json` 时 `complete_cached_job()` 把它读为 historical validation；当 cache_source 没有时返回 `validation=null`（前端展示"无历史验证摘要"）。
 - `tests/imagingLogic.test.ts` 覆盖前端主流程和 inference client 不再包含上传标签文件名调试日志。
 - `tests/segmentationMetrics.test.py`：指标脚本输出。
 - `tests/browserLayout.test.ts` / `tests/layoutRegression.test.ts`：三视图布局和响应式约束。
@@ -333,3 +337,4 @@ npm run build
 - `FLARE22_Tr_0009` 已完成真实 `quality` 在线推理、标签上传在线 validation、自动 taxonomy remap 验证和 2026-06-01 本地缓存演示。remap 前 job `bf20f0ec4456` 的 Dice 低是 taxonomy 错位历史证据；remap 后 job `a717dacf42d3` mean Dice 为 `0.926`；本地缓存演示 job `0aa7323a4c01`（真实 218s）和 `02da885c97d8`（cache hit 0.001s）是工程链路演示，不参与正式 AMOS/FLARE 质量基线。
 - 任何后续新增病例都应先判断 label taxonomy，再决定是否允许后端自动 validation；未知数据集和单 label 文件不能自动声明模型质量通过。
 - `docs/local-cache-demo-runbook.md` 是本地缓存演示复跑手册；`tools/seed_demo_cache.py` 是配套预热脚本。`docs/superpowers/specs/2026-06-01-local-cache-demo-design.md` 和 `docs/superpowers/plans/2026-06-01-local-cache-demo.md` 是设计与实施计划。
+- `tools/rewrite_flare22_historical_summary.py` 是 cache 链路补丁的配套工具。`SEGMENTATION_REFERENCE_CASES_JSON` 必须指向 `examples/reference_cases.json`（或 `nnunetv2_files/reference_cases.local.json`）才能让 `/api/samples` 暴露 4 个 reference case；默认只暴露内置 `amos_0117`，FLARE22 Tr 0009 不会出现在参考病例列表。

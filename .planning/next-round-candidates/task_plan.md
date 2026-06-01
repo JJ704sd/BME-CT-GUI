@@ -1,22 +1,59 @@
 # 下一轮候选任务规划
 
-**范围：** 基于 2026-05-31 项目现状，规划下一轮可执行任务。
+**范围：** 基于 2026-06-01 项目现状，规划下一轮可执行任务。
 
-**当前状态：** 三大目标已接近收口：CT 浏览、三正交联动、在线 nnUNetv2 推理、SSE 进度、取消、预测缓存、标签上传、自动 taxonomy remap、报告导出和主要验收文档均已落地。2026-05-31 已完成显式 `label_taxonomy=auto|AMOS22|FLARE22` 修复（`detect_dataset()` 更保守）、AMOS CT 高分辨率推理（768×768×103，fast profile，mean_dice=0.77724）和新部署包 `server-runtime-package-20260531.zip`。当前阻塞点转为 `runtime_target=server` 创建任务不应依赖本地 nnUNet 文件、服务器 AMOS validation 需用显式 taxonomy 复跑、高分辨率 CT 推理需优化。
+**当前状态：** 本地缓存演示 7 步 + cache 链路补丁已落地。FLARE22 cache hit 现在能正确显示历史 validation 摘要（0.893/0.674/0.950），参考病例列表必须设置 `SEGMENTATION_REFERENCE_CASES_JSON` 才返回 4 个 case。三大目标（CT 浏览、三正交联动、在线 nnUNetv2 推理、SSE 进度、取消、预测缓存、标签上传、自动 taxonomy remap、报告导出、cache 链路补丁）均已收口。当前阻塞点转为 `runtime_target=server` 创建任务不应依赖本地 nnUNet 文件、服务器 AMOS validation 需用显式 taxonomy 复跑、高分辨率 CT 推理需优化、AMOS 预热预测需复跑、跨数据集 cache 链路需产品化。
 
-**本轮已完成（2026-05-31）：**
+**本轮已完成（2026-06-01）：**
 
-- 显式 `label_taxonomy=auto|AMOS22|FLARE22`：`detect_dataset()` 更保守，标签 ID 是 checkpoint 子集时不触发 remap。
-- 验证 job `d56bcff76a8b`：AMOS22 选择时 `remap_applied=false`，`mean_dice=0.77724`。
-- AMOS CT 高分辨率推理：job `ad3d14eba3de`，768×768×103，fast profile，mean_dice=0.77724。
-- 新部署包：`server-runtime-package-20260531.zip`，包含更新后的 `taxonomy.py`。
-- 文档同步：9 份核心文档已更新，`.planning/` 历史文档已更新。
+- 本地缓存演示 7 步（AMOS cache hit + FLARE 真实推理 218s + FLARE cache hit 0.001s）
+- cache 链路补丁（historical 回退 + find_cached_prediction 优先选有 validation_summary.json 的 cache_source + tools/rewrite_flare22_historical_summary.py + 2 个新测试）
+- 9 份核心文档同步
+- `.planning/2026-06-01-local-cache-demo/` 4 份 planning 文档落地
 
 ---
 
 ## 推荐下一轮任务
 
-### 1. server mode gating 修复
+### 1. AMOS 预热预测复跑
+
+**优先级：** 高
+
+**前置文档：** `.planning/2026-06-01-local-cache-demo/findings.md` 发现 4
+
+**目标：** 用 quality profile 复跑 AMOS 0117，替换 cache demo Phase A 命中的 review status 预测 `009d4efdc5f6`，让 Phase A 在 PPT 演示中也能挂上一个 stomach Dice 不再是 0.556 的预测。
+
+**关键步骤：**
+
+1. 在本地以 `runtime_target=local`、`profile=quality`、`label_taxonomy=AMOS22` 重新提交 AMOS 0117 job。
+2. 检查 `validation_status` 不再是 review，stomach Dice 恢复到 0.8 以上。
+3. 用 `tools/seed_demo_cache.py` 把新的预测 entry 替换 `009d4efdc5f6`，让 Phase A 自动命中新预测。
+4. 更新 `docs/local-cache-demo-runbook.md` 中的 job 表格。
+
+**风险：** quality profile 在 AMOS 0117 上耗时约 23 分钟，演示当天不要现场重跑；提前完成。
+
+---
+
+### 2. 跨数据集 cache 链路产品化
+
+**优先级：** 中
+
+**前置文档：** `.planning/2026-06-01-local-cache-demo/findings.md` 发现 2
+
+**目标：** 把"按历史指标改写 cache_source 摘要"做成可复用机制，让其他数据集/其他 cache_source 也能享受 cache hit 时显示历史 validation 摘要的链路。
+
+**关键步骤：**
+
+1. 重构 `tools/rewrite_flare22_historical_summary.py` 为通用 `tools/rewrite_cached_validation_summary.py`，支持任意 source 路径、任意 target job 目录、任意指标 JSON。
+2. 在 `server/main.py` 的 `complete_cached_job()` 中增强 historical 回退：除 `validation_summary.json` 外，尝试读 `job_summary.json` 中的历史指标。
+3. 补充 `tests/backendState.test.py` 覆盖"cache_source 含历史指标但无 validation_summary.json"场景。
+4. 更新 `docs/local-cache-demo-runbook.md` 增补"通用改写历史摘要"段落。
+
+**风险：** 必须保留"`historical: true`"和"`source_job_id`"标记，避免误把当前请求的标签结果写成历史。
+
+---
+
+### 3. server mode gating 修复
 
 **优先级：** 高
 
@@ -35,7 +72,7 @@
 
 ---
 
-### 2. 服务器 validation 复跑
+### 4. 服务器 validation 复跑
 
 **优先级：** 高
 
@@ -54,7 +91,7 @@
 
 ---
 
-### 3. 高分辨率推理优化
+### 5. 高分辨率推理优化
 
 **优先级：** 中高
 
@@ -74,7 +111,27 @@
 
 ---
 
-### 4. 跨数据集标签评估增强
+### 6. runbook 自动校验
+
+**优先级：** 中
+
+**前置文档：** `.planning/2026-06-01-local-cache-demo/findings.md` 待验证假设
+
+**目标：** 写 `tests/cacheDemoRunbook.test.py`，自动确认 runbook 中提到的 4 个已知约束仍在代码里成立。
+
+**关键步骤：**
+
+1. 测试 `_resolve_project_root()` 在 cwd 不同时的解析行为，确认必须落在 `segmentation-gui-prototype/`。
+2. 测试 `compute_cache_key()` 的 7 字段仍是 `input_sha + model_dataset + profile + label_taxonomy + runtime_target + postprocess + device`。
+3. 测试 `examples/reference_cases.json` 解析后能产出 4 个 case；`SEGMENTATION_REFERENCE_CASES_JSON` 缺省时只暴露 `amos_0117`。
+4. 测试 `tools/seed_demo_cache.py` 和 `tools/rewrite_flare22_historical_summary.py` 在重复运行下保持幂等。
+5. 测试 `find_cached_prediction()` 候选排序在多个 cache_source 下优先选有 `validation_summary.json` 的。
+
+**风险：** 这些测试不应启动真实后端服务；用 import 函数 + 临时目录的方式做单元测试即可。
+
+---
+
+### 7. 跨数据集标签评估增强
 
 **优先级：** 中
 
@@ -91,7 +148,7 @@
 
 ---
 
-### 5. 文档与验收口径再同步
+### 8. 文档与验收口径再同步
 
 **优先级：** 中
 
@@ -106,7 +163,7 @@
 
 ---
 
-### 6. 多模型支持准备
+### 9. 多模型支持准备
 
 **优先级：** 低（等待新 checkpoint）
 
@@ -124,13 +181,16 @@
 
 ## 推荐执行顺序
 
-1. **server mode gating 修复**：解除服务器模式的阻塞点。
-2. **服务器 validation 复跑**：确认 AMOS 服务器质量基线。
-3. **高分辨率推理优化**：实现预降采样，缩短推理时间。
-4. **跨数据集标签评估增强**：补单 label hint、remap 覆盖率提示和报告摘要。
-5. **文档与验收口径再同步**：确保文档持续跟随代码变化。
-6. **多模型支持准备**：等待新模型或新 checkpoint 后再启动。
+1. **AMOS 预热预测复跑**（让 cache demo Phase A 命中一个非 review 状态预测）。
+2. **server mode gating 修复**（解除服务器模式的阻塞点，独立 planning）。
+3. **AMOS/FLARE 服务器显式 taxonomy 复跑**（确认服务器质量基线，独立 planning）。
+4. **高分辨率推理优化**（预降采样，独立 planning）。
+5. **跨数据集 cache 链路产品化**（让 cache 链路补丁成为通用机制）。
+6. **runbook 自动校验**（演示前 polish）。
+7. **跨数据集标签评估增强**（持续）。
+8. **文档与验收口径再同步**（持续）。
+9. **多模型支持准备**（等待新模型或新 checkpoint 后再启动）。
 
 ---
 
-*更新日期：2026-05-31*
+*更新日期：2026-06-01*

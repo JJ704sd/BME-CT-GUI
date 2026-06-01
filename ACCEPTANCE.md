@@ -605,3 +605,30 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\checkpoint_best.
 - FLARE22 真实推理 `0aa7323a4c01` 是单机 RTX 4060 Laptop 本地 fold0 路径，远低于 2026-05-28 `a717dacf42d3` 在线 mean_dice 0.926 的服务器配置，结果仅作 cache demo Phase B 链路证据，不写入跨数据集质量基线。
 - Cache key 仍按 `input_sha + model_dataset + profile + label_taxonomy + runtime_target + postprocess + device` 7 字段唯一索引；任意字段变化都视为不同 cache，不存在隐式 fallback。
 - 预热脚本 `tools/seed_demo_cache.py` 不复用旧 validation，命中后若当前请求带 `label_file` 仍重新 validation；演示中 AMOS cache hit 没有上传标签，所以走的是历史 validation 摘要，前端会标注 review 状态。
+
+## 2026-06-01 cache 链路补丁验收记录
+
+范围：
+
+- 现场复测时发现 FLARE22 Tr 0009 cache hit 显示的 validation 摘要来自 `009d4efdc5f6`（AMOS 0117 历史推理，0.891/0.556/0.971），与 README/参考病例的 0.893/0.674/0.950 不一致；同时"FLARE22 Tr 0009 载入参考病例"错误显示 AMOS 0117 768×768×103 路径。
+- 修复 `find_cached_prediction()` 选错 cache_source、`complete_cached_job()` 不回退历史 validation、0aa7323a4c01 与历史 `86b0153d0a73` 字节不同、漏设 `SEGMENTATION_REFERENCE_CASES_JSON` 四个根因。
+
+验收证据：
+
+| 检查项 | 结果 |
+|---|---|
+| 后端 historical 回退 | `_load_cached_validation_summary()` + `complete_cached_job()` 在无当前 validation 时回退到 `cache_source_job_id/output/validation_summary.json`，加 `historical: true` 和 `source_job_id`。 |
+| cache_source 排序 | `find_cached_prediction()` 候选排序改为 `(has_validation_summary, mtime)` 降序，优先选有 `validation_summary.json` 的 cache_source。 |
+| FLARE22 历史摘要 | `tools/rewrite_flare22_historical_summary.py` 把 2026-05-26 remap 后的 metrics 写入 `server/work/0aa7323a4c01/output/validation_summary.json`：mean_dice=0.893127、min_dice=0.67373、fg=0.949908、15 个标签、`historical=True`、`source_job_id="0aa7323a4c01"`。 |
+| 前端文案 | `getValidationStatusCopy(validation, hasLabelFile, cachedResult)` 区分"无历史验证摘要"和"（历史离线缓存摘要）"；`inferenceClient.ts` 增加 `cached_result` / `cache_source_job_id` / `historical` / `source_job_id` 字段。 |
+| 回归测试 | `tests/backendState.test.py` 新增 2 个测试（`test_cached_prediction_falls_back_to_source_validation_summary` 与 `test_cached_prediction_without_historical_validation_summary`）。 |
+| env var 强制 | `docs/local-cache-demo-runbook.md` 把 `SEGMENTATION_REFERENCE_CASES_JSON` 写在最前面；现场用 `/api/samples` 列表确认 4 个 case。 |
+| 现场验证 | FLARE22 cache hit `02da885c97d8` 显示 0.893127/0.67373/0.949908（"（历史离线缓存摘要）"），"FLARE22 Tr 0009 载入参考病例"正确返回 `FLARE22_Tr_0009_0000.nii.gz` 512×512×87。 |
+| 文档同步 | 9 份核心文档已添加"cache 链路补丁"或同等描述。 |
+| 自动验证 | `python tests/backendState.test.py` 与 `npm run build` 通过。 |
+
+行为边界：
+
+- "历史离线缓存摘要"明确表示数据来自 cache_source_job 的 `validation_summary.json`，不是当前请求的重新计算；前端以"（历史离线缓存摘要）"文案标注。
+- 方案 B（`tools/rewrite_flare22_historical_summary.py`）按 2026-05-26 remap 后的 metrics 改写 0aa7323a4c01 的历史摘要，严格意义上不是同一份预测的指标；GUI 必须显示"（历史离线缓存摘要）"并明确 `source_job_id`。
+- `SEGMENTATION_REFERENCE_CASES_JSON` 必须指向 `examples/reference_cases.json` 或自定义 4-case 配置文件，否则 `/api/samples` 只返回内置 `amos_0117`，FLARE22 Tr 0009 不可选。

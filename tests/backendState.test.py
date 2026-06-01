@@ -1114,6 +1114,133 @@ def test_cached_prediction_revalidates_against_current_label_file():
     assert server.jobs[body["job_id"]].events[-1]["validation"] == current_validation
 
 
+def test_cached_prediction_falls_back_to_source_validation_summary():
+    server = load_server_module()
+    temp_root = make_test_output_dir("cached-jobs-historical-summary")
+    cached_job_id = "cached0003"
+    cached_output = temp_root / cached_job_id / "output"
+    cached_output.mkdir(parents=True, exist_ok=True)
+    cached_result = cached_output / f"{cached_job_id}.nii.gz"
+    cached_result.write_bytes(b"cached-result")
+    historical_validation = {
+        "status": "review",
+        "sample_id": "flare22_tr_0009",
+        "mean_dice": 0.89313,
+        "min_dice": 0.67377,
+        "foreground_dice": 0.949909,
+        "remap_applied": True,
+        "remap_source": "FLARE22",
+        "message": "（历史离线 remap 摘要，未在当前 job 重新验证）",
+    }
+    (cached_output / "validation_summary.json").write_text(
+        json.dumps(historical_validation, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    (cached_output / "job_summary.json").write_text(json.dumps({
+        "job_id": cached_job_id,
+        "status": "succeeded",
+        "progress": 100,
+        "stage": "历史推理结果已生成",
+        "mode": "real-nnunetv2",
+        "result_ready": True,
+        "result_path": str(cached_result),
+        "result_size_bytes": cached_result.stat().st_size,
+        "cache_key": "cache-key-3",
+        "validation": historical_validation,
+    }, ensure_ascii=False), encoding="utf-8")
+
+    def fail_if_started(*_args, **_kwargs):
+        raise AssertionError("cached jobs must not start a real inference thread")
+
+    with patch.object(server, "WORK_DIR", temp_root), \
+         patch.object(server, "get_model_state", return_value={
+             "ready": True,
+             "status": "ready",
+             "mode": "real-nnunetv2",
+             "missing": [],
+         }), \
+         patch.object(server, "build_prediction_cache_key", return_value="cache-key-3"), \
+         patch.object(server.threading, "Thread", side_effect=fail_if_started):
+        client = TestClient(server.app)
+        response = client.post(
+            "/api/segment/jobs",
+            files={"file": ("case_0000.nii.gz", b"same-input", "application/octet-stream")},
+            data={"model_id": "abdomen"},
+        )
+        body = response.json()
+        state = client.get(f"/api/segment/jobs/{body['job_id']}").json()
+
+    current_output = temp_root / body["job_id"] / "output"
+    summary_path = current_output / "validation_summary.json"
+    summary_payload = json.loads(summary_path.read_text(encoding="utf-8"))
+
+    assert response.status_code == 200
+    assert body["cached_result"] is True
+    assert body["cache_source_job_id"] == cached_job_id
+    assert state["validation"] is not None
+    assert state["validation"]["historical"] is True
+    assert state["validation"]["source_job_id"] == cached_job_id
+    assert state["validation"]["mean_dice"] == 0.89313
+    assert state["validation"]["min_dice"] == 0.67377
+    assert state["validation"]["remap_applied"] is True
+    assert state["validation"]["remap_source"] == "FLARE22"
+    assert summary_payload["historical"] is True
+    assert summary_payload["source_job_id"] == cached_job_id
+    assert server.jobs[body["job_id"]].events[-1]["validation"]["historical"] is True
+
+
+def test_cached_prediction_without_historical_validation_summary():
+    server = load_server_module()
+    temp_root = make_test_output_dir("cached-jobs-no-historical")
+    cached_job_id = "cached0004"
+    cached_output = temp_root / cached_job_id / "output"
+    cached_output.mkdir(parents=True, exist_ok=True)
+    cached_result = cached_output / f"{cached_job_id}.nii.gz"
+    cached_result.write_bytes(b"cached-result")
+    (cached_output / "job_summary.json").write_text(json.dumps({
+        "job_id": cached_job_id,
+        "status": "succeeded",
+        "progress": 100,
+        "stage": "历史推理结果已生成",
+        "mode": "real-nnunetv2",
+        "result_ready": True,
+        "result_path": str(cached_result),
+        "result_size_bytes": cached_result.stat().st_size,
+        "cache_key": "cache-key-4",
+    }, ensure_ascii=False), encoding="utf-8")
+
+    def fail_if_started(*_args, **_kwargs):
+        raise AssertionError("cached jobs must not start a real inference thread")
+
+    with patch.object(server, "WORK_DIR", temp_root), \
+         patch.object(server, "get_model_state", return_value={
+             "ready": True,
+             "status": "ready",
+             "mode": "real-nnunetv2",
+             "missing": [],
+         }), \
+         patch.object(server, "build_prediction_cache_key", return_value="cache-key-4"), \
+         patch.object(server.threading, "Thread", side_effect=fail_if_started):
+        client = TestClient(server.app)
+        response = client.post(
+            "/api/segment/jobs",
+            files={"file": ("case_0000.nii.gz", b"same-input", "application/octet-stream")},
+            data={"model_id": "abdomen"},
+        )
+        body = response.json()
+        state = client.get(f"/api/segment/jobs/{body['job_id']}").json()
+
+    current_output = temp_root / body["job_id"] / "output"
+
+    assert response.status_code == 200
+    assert body["cached_result"] is True
+    assert state["validation"] is None
+    assert not (current_output / "validation_summary.json").exists()
+    last_event = server.jobs[body["job_id"]].events[-1]
+    assert last_event.get("validation") is None
+    assert "validation" not in last_event
+
+
 def test_real_job_uses_persistent_worker_when_enabled():
     server = load_server_module()
     temp_root = make_test_output_dir("persistent-worker-job")
@@ -1792,6 +1919,8 @@ if __name__ == "__main__":
     test_job_summary_json_records_resource_snapshots()
     test_create_job_reuses_cached_prediction_for_matching_cache_key()
     test_cached_prediction_revalidates_against_current_label_file()
+    test_cached_prediction_falls_back_to_source_validation_summary()
+    test_cached_prediction_without_historical_validation_summary()
     test_real_job_uses_persistent_worker_when_enabled()
     test_persistent_worker_stdout_reader_is_reused_across_events()
     test_process_log_is_persisted_as_utf8_and_tail_is_returned()

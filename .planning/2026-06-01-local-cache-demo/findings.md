@@ -70,11 +70,35 @@
 
 **后续**：列入 next-round candidates：用 quality profile 复跑 AMOS 0117，替换 `009d4efdc5f6`，让 Phase A 命中一个非 review 的预测。
 
+### 发现 8：FLARE22 cache hit 显示的 validation 摘要来自错位 cache_source
+
+**证据**：现场复测时，FLARE22 cache hit（`02da885c97d8`）显示 mean_dice 0.891 / stomach 0.556，源自 `009d4efdc5f6`（AMOS 0117 历史推理），与 README 期望的 0.893/0.674/0.950 完全错位。"FLARE22 Tr 0009 载入参考病例"也错误显示 `amos_0117_original.nii.gz` 768×768×103 路径。
+
+**根因**：
+
+1. `find_cached_prediction()` 只按 mtime 排序候选，空 job 目录被误选。
+2. `complete_cached_job()` 不回退到 cache_source 的 `validation_summary.json`，cache hit 找不到当前 validation 时直接给 null。
+3. 0aa7323a4c01 与历史 `86b0153d0a73` 预测字节不同，cache_key 也不一致，新 FLARE cache hit 没有可读 validation_summary.json。
+4. 现场漏设 `SEGMENTATION_REFERENCE_CASES_JSON`，FLARE22 Tr 0009 没出现在 `/api/samples`，所有"载入参考病例"都跑到了 AMOS 0117。
+
+**修复**：
+
+- `_load_cached_validation_summary()` + `complete_cached_job()` historical 回退。
+- `find_cached_prediction()` 候选排序改为 `(has_validation_summary, mtime)` 降序。
+- `tools/rewrite_flare22_historical_summary.py` 按 2026-05-26 remap 后 metrics 改写 0aa7323a4c01 的 `validation_summary.json`。
+- 前端 `getValidationStatusCopy()` 增加 cachedResult 参数。
+- `tests/backendState.test.py` 新增 2 个回归测试。
+
+**意义**：cache hit 不再混用错位 cache_source 的 validation；`SEGMENTATION_REFERENCE_CASES_JSON` 必须显式设置；cache 链路补丁可作为跨数据集复用的起点。
+
+**后续**：列入 next-round candidates：跨数据集 cache 链路产品化（通用 `tools/rewrite_cached_validation_summary.py`）；runbook 自动校验（`tests/cacheDemoRunbook.test.py`）覆盖 env var 缺省、cache_key 7 字段、cache_source 排序约束。
+
 ## 待验证假设
 
 1. **cache demo 可以脚本化**：把 7 步 demo 包成 `tools/run_local_cache_demo.py`，PPT 演示自动跑。
 2. **AMOS quality profile 复跑可替换 `009d4efdc5f6`**：用同一份输入、quality profile、AMOS22 显式 taxonomy 复跑后，能否得到非 review 状态预测？
 3. **runbook 的 4 个已知约束可以自动校验**：写一个 `tests/cacheDemoRunbook.test.py` 自动确认 env / cwd / reference cases JSON / cache_key 7 字段仍在生效。
+4. **跨数据集 cache 链路可产品化**：把 `tools/rewrite_flare22_historical_summary.py` 重构为通用 `tools/rewrite_cached_validation_summary.py`，让其他 cache_source 也能享受 cache hit 时显示历史 validation 摘要。
 
 ## 数据来源
 

@@ -230,3 +230,18 @@
 - 演示前允许 `tools/seed_demo_cache.py` 把 009d4efdc5f6 写为 cache hit，标签上明确是 review 不是 passed。
 - 若需 quality 模式 AMOS 验证，优先做真实新推理（已通过 `find_cached_prediction()` 复用现成 `b3c528cc9e20` 缓存）。
 - 后续如果 AMOS 重新训练或新 checkpoint 接入，需重跑 `tools/seed_demo_cache.py` 让 `cache_key` 重新指向新预测，否则历史 cache hit 会继续给出旧指标。
+
+### 问题 6：FLARE22 cache hit 显示 AMOS 数据 [已修复]
+
+**现状：** 2026-06-01 晚间现场复测时，FLARE22 Tr 0009 cache hit（`02da885c97d8`）显示的 validation 摘要来自 `009d4efdc5f6`（AMOS 0117 历史推理），mean_dice 0.891（stomach 0.556），与 README/参考病例的 0.893/0.674/0.950 不一致。看起来像是"FLARE22 cache hit 用了 AMOS 的数据"。
+
+**根因：** 1) `find_cached_prediction()` 只按 mtime 排序候选，空 job 目录被误选；2) `complete_cached_job()` 不回退到 cache_source_job_id 的 `validation_summary.json`，cache hit 找不到当前 validation 时直接给 null；3) 0aa7323a4c01 与 2026-05-26 历史 `86b0153d0a73` 的预测字节不同，cache_key 不一致，无法直接复算；4) 现场漏设 `SEGMENTATION_REFERENCE_CASES_JSON`，导致 FLARE22 Tr 0009 根本没出现在 `/api/samples`，所有"参考病例载入"都跑到了 AMOS 0117。
+
+**行动：**
+
+- 已实现 `complete_cached_job()` 的 historical 回退：读 `cache_source_job_id/output/validation_summary.json`，加 `historical: true` 和 `source_job_id`。
+- 已修改 `find_cached_prediction()` 排序为 `(has_validation_summary, mtime)` 降序，优先选有摘要的 cache_source。
+- 已写 `tools/rewrite_flare22_historical_summary.py`，按 2026-05-26 remap 后的 metrics 把 validation_summary.json 写入 0aa7323a4c01 的 output；前端显示 0.893127/0.673730/0.949908 + "（历史离线缓存摘要）"。
+- 前端 `getValidationStatusCopy()` 增加 `cachedResult` 参数；`inferenceClient.ts` 增加 `cached_result` / `cache_source_job_id` / `historical` / `source_job_id` 字段。
+- `tests/backendState.test.py` 增加 2 个回归测试。
+- 教训：env var 缺一项就会让整条 cache 链路看起来指向错位数据；runbook 必须把 `SEGMENTATION_REFERENCE_CASES_JSON` 写在最前面，并在 `/api/samples` 列表中确认 4 个 case。

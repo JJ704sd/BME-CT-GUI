@@ -7,6 +7,7 @@
 1. **直观证据**：cache hit → 真实推理 → cache hit 三步对照，0.001s 与 218s 的耗时差异肉眼可见。
 2. **可复现**：所有命令、路径、环境变量必须能在另一台 Windows 单机被复述出来，避免演示时翻车。
 3. **不污染基线**：本轮所用的两份预测都不是新一轮的正式质量基线，必须在文档里清楚分离工程演示与正式质量证据。
+4. **链路补丁**：演示后现场复测时发现 FLARE22 cache hit 显示的 validation 摘要来自错位 cache_source（`009d4efdc5f6` 的 AMOS 摘要），需要补充 cache 链路补丁让 cache hit 正确显示历史 validation 摘要。
 
 ## 本轮范围
 
@@ -46,6 +47,7 @@
 1. **AMOS 预热预测复跑**：用 quality profile 重新生成 AMOS 0117 预测，替换 `009d4efdc5f6`，让 cache demo Phase A 也能挂上一个 review status 不是 review 的预测。
 2. **cache demo 脚本化**：考虑把 7 步 demo 包装成 `tools/run_local_cache_demo.py`，让 PPT 演示自动播放 3 个 job 的耗时对照。
 3. **runbook 自动化校验**：补一个最小的 `tests/cacheDemoRunbook.test.py`，确认 runbook 中提到的 reference case JSON、cache_key 7 字段、4 个已知约束在代码里仍然成立。
+4. **跨数据集 cache 链路产品化**：当前 cache 链路补丁只针对 FLARE22 + 0aa7323a4c01 这对 cache_source；把"按历史指标改写 cache_source 摘要"做成可复用机制（`tools/rewrite_cached_validation_summary.py`），让其他数据集/其他 cache_source 也能享受 cache hit 时显示历史 validation 摘要的链路。
 
 ---
 

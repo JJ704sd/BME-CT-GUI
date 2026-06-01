@@ -2,7 +2,7 @@
 
 **范围：** 2026-06-01 BME 竞赛 PPT 演示的"本地缓存演示"链路 + 后续候选任务。
 
-**当前状态：** 本轮 7 步 demo + 9 份核心文档同步 + 4 份 planning 已完成；准备 git 提交收尾。
+**当前状态：** 本轮 7 步 demo + 9 份核心文档同步 + 4 份 planning + cache 链路补丁 已完成；准备 git 提交收尾。
 
 ---
 
@@ -17,6 +17,7 @@
 7. 运行手册 `docs/local-cache-demo-runbook.md` + 设计稿 + 实施计划
 8. 9 份核心文档同步：`README` / `CLAUDE` / `AGENTS` / `ACCEPTANCE` / `REVIEW` / `CODE_MODULE_GUIDE` / `SEGMENTATION_RECENT_ROUNDS` / `SEGMENTATION_EXPERIMENT_COMPARISON` / `SEGMENTATION_METRICS_SUMMARY`
 9. 4 份 planning 文档：本目录的 `explanation.md` / `findings.md` / `progress.md` / `task_plan.md`
+10. cache 链路补丁（2026-06-01 晚）：`_load_cached_validation_summary()` + `complete_cached_job()` historical 回退；`find_cached_prediction()` 优先选有 `validation_summary.json` 的 cache_source；`tools/rewrite_flare22_historical_summary.py`；前端 `getValidationStatusCopy()` 增加 cachedResult 参数；`tests/backendState.test.py` 新增 2 个回归测试
 
 ---
 
@@ -41,7 +42,26 @@
 
 ---
 
-### 2. cache demo 脚本化
+### 2. 跨数据集 cache 链路产品化
+
+**优先级：** 中
+
+**前置文档：** 本目录 `findings.md` 发现 8
+
+**目标：** 把"按历史指标改写 cache_source 摘要"做成可复用机制，让其他数据集/其他 cache_source 也能享受 cache hit 时显示历史 validation 摘要的链路。
+
+**关键步骤：**
+
+1. 重构 `tools/rewrite_flare22_historical_summary.py` 为通用 `tools/rewrite_cached_validation_summary.py`，支持任意 source 路径、任意 target job 目录、任意指标 JSON。
+2. 在 `server/main.py` 的 `complete_cached_job()` 中增强 historical 回退：除 `validation_summary.json` 外，尝试读 `job_summary.json` 中的历史指标。
+3. 补充 `tests/backendState.test.py` 覆盖"cache_source 含历史指标但无 validation_summary.json"场景。
+4. 更新 `docs/local-cache-demo-runbook.md` 增补"通用改写历史摘要"段落。
+
+**风险：** 必须保留"`historical: true`"和"`source_job_id`"标记，避免误把当前请求的标签结果写成历史。
+
+---
+
+### 3. cache demo 脚本化
 
 **优先级：** 中
 
@@ -60,7 +80,7 @@
 
 ---
 
-### 3. runbook 自动校验
+### 4. runbook 自动校验
 
 **优先级：** 中
 
@@ -72,14 +92,15 @@
 
 1. 测试 `_resolve_project_root()` 在 cwd 不同时的解析行为，确认必须落在 `segmentation-gui-prototype/`。
 2. 测试 `compute_cache_key()` 的 7 字段仍是 `input_sha + model_dataset + profile + label_taxonomy + runtime_target + postprocess + device`。
-3. 测试 `examples/reference_cases.json` 解析后能产出 4 个 case。
-4. 测试 `tools/seed_demo_cache.py` 在重复运行下保持幂等。
+3. 测试 `examples/reference_cases.json` 解析后能产出 4 个 case；`SEGMENTATION_REFERENCE_CASES_JSON` 缺省时只暴露 `amos_0117`。
+4. 测试 `tools/seed_demo_cache.py` 和 `tools/rewrite_flare22_historical_summary.py` 在重复运行下保持幂等。
+5. 测试 `find_cached_prediction()` 候选排序在多个 cache_source 下优先选有 `validation_summary.json` 的。
 
 **风险：** 这些测试不应启动真实后端服务；用 import 函数 + 临时目录的方式做单元测试即可。
 
 ---
 
-### 4. 高分辨率推理优化（独立 planning 入口）
+### 5. 高分辨率推理优化（独立 planning 入口）
 
 **优先级：** 中高
 
@@ -89,7 +110,7 @@
 
 ---
 
-### 5. server mode gating 修复（独立 planning 入口）
+### 6. server mode gating 修复（独立 planning 入口）
 
 **优先级：** 高
 
@@ -99,7 +120,7 @@
 
 ---
 
-### 6. AMOS / FLARE 服务器轮次显式 taxonomy 复跑（独立 planning 入口）
+### 7. AMOS / FLARE 服务器轮次显式 taxonomy 复跑（独立 planning 入口）
 
 **优先级：** 高
 
@@ -109,7 +130,7 @@
 
 ---
 
-### 7. 文档与验收口径再同步
+### 8. 文档与验收口径再同步
 
 **优先级：** 中
 
@@ -123,8 +144,9 @@
 2. **server mode gating 修复**（解除服务器模式阻塞，独立 planning）。
 3. **AMOS/FLARE 服务器显式 taxonomy 复跑**（确认服务器质量基线，独立 planning）。
 4. **高分辨率推理优化**（预降采样，独立 planning）。
-5. **cache demo 脚本化 + runbook 自动校验**（演示前 polish）。
-6. **文档与验收口径再同步**（持续）。
+5. **跨数据集 cache 链路产品化**（把 cache 链路补丁做成通用机制）。
+6. **cache demo 脚本化 + runbook 自动校验**（演示前 polish）。
+7. **文档与验收口径再同步**（持续）。
 
 ---
 

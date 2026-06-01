@@ -12,3 +12,12 @@
   - `git -C 'D:\BME2026\BME_CT_Seg\segmentation-gui-prototype' diff --check`：退出码 0，仅有 Git 行尾转换提示。
 - 已提交 `eb475d0 docs: sync segmentation gui status after validation fixes`，并推送到 `origin/main`。
 - 提交范围只包含本轮文档与 `.planning` 文件；既有 `AGENTS.md`、`CLAUDE.md` 改动未纳入提交。
+
+## 2026-06-01 后续
+
+- 后续 2026-06-01 已完成本地缓存演示 7 步和 cache 链路补丁；本轮文档同步范围内的文档均已重新同步至最新口径：
+  - 9 份核心文档（README / CLAUDE / AGENTS / ACCEPTANCE / REVIEW / CODE_MODULE_GUIDE / SEGMENTATION_RECENT_ROUNDS / SEGMENTATION_EXPERIMENT_COMPARISON / SEGMENTATION_METRICS_SUMMARY）已加"2026-06-01 cache 链路补丁"或同等描述。
+  - `.planning/2026-06-01-local-cache-demo/` 4 份 planning 文档已落地（本地缓存演示 + cache 链路补丁）。
+  - `.planning/2026-06-01-cache-link-patch/` 4 份 planning 文档已落地（cache 链路补丁独立轮）。
+  - `.planning/next-round-candidates/` 4 份 planning 文档已更新（新增"跨数据集 cache 链路产品化"任务）。
+- 主体说明继续保持中文；URL、技术字段保留英文；与本轮"先中文后技术字段"的口径一致。

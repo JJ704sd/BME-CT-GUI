@@ -9,7 +9,8 @@
 - 服务器 5GPU/5-fold soft ensemble 校园网 smoke 已跑通
 - 新部署包 `server-runtime-package-20260531.zip` 已创建
 - **本地缓存演示 7 步**：AMOS 0117 cache hit（`aea4e7cdbaf0`，命中 `009d4efdc5f6`）、FLARE22 Tr 0009 真实推理（`0aa7323a4c01`，218s）、FLARE22 cache hit（`02da885c97d8`，0.001s）
-- **新增脚本/文档**：`tools/seed_demo_cache.py`（幂等预热 AMOS cache hit）、`docs/local-cache-demo-runbook.md`（运行说明手册）、`docs/superpowers/specs/2026-06-01-local-cache-demo-design.md`、`docs/superpowers/plans/2026-06-01-local-cache-demo.md`
+- **2026-06-01 晚间 cache 链路补丁**：FLARE22 cache hit 正确显示历史 validation 摘要（0.893/0.674/0.950），不再混用 AMOS 数据。后端 `complete_cached_job()` 增加 historical 回退、`find_cached_prediction()` 优先有 `validation_summary.json` 的 cache_source；前端 `getValidationStatusCopy()` 区分"无历史验证摘要"和"（历史离线缓存摘要）"；新增 `tools/rewrite_flare22_historical_summary.py`。
+- **新增脚本/文档**：`tools/seed_demo_cache.py`（幂等预热 AMOS cache hit）、`tools/rewrite_flare22_historical_summary.py`（按 2026-05-26 remap 后的 metrics 改写 0aa7323a4c01 的历史摘要）、`docs/local-cache-demo-runbook.md`（运行说明手册）、`docs/superpowers/specs/2026-06-01-local-cache-demo-design.md`、`docs/superpowers/plans/2026-06-01-local-cache-demo.md`
 - **后端依赖补充**：在 `D:\BME2026\BME_CT_Seg\nnunet_env` 装了 `fastapi 0.136.3 / uvicorn 0.48.0 / python-multipart 0.0.30`
 
 当前进行中：

@@ -12,6 +12,8 @@ export type ValidationSummary = {
   label_taxonomy?: LabelTaxonomy;
   remap_applied?: boolean;
   remap_source?: string;
+  historical?: boolean;
+  source_job_id?: string;
   thresholds?: {
     mean_dice?: number;
     min_label_dice?: number;
@@ -59,7 +61,7 @@ export type InferenceOptions = {
 
 export type InferenceEvent =
   | { type: "progress"; progress: number; stage: string; heartbeat?: boolean; elapsed_seconds?: number }
-  | { type: "complete"; progress: number; stage: string; duration_seconds?: number; result_size_bytes?: number; validation?: ValidationSummary; resource_latest?: ResourceSnapshot; phase_timings?: PhaseTimings; inference_options?: InferenceOptions; runtime_target?: RuntimeTarget }
+  | { type: "complete"; progress: number; stage: string; duration_seconds?: number; result_size_bytes?: number; validation?: ValidationSummary; resource_latest?: ResourceSnapshot; phase_timings?: PhaseTimings; inference_options?: InferenceOptions; runtime_target?: RuntimeTarget; cached_result?: boolean; cache_source_job_id?: string }
   | { type: "error"; message: string; log_tail?: string; resource_latest?: ResourceSnapshot };
 
 export type InferenceJobMode = "real-nnunetv2" | "cached-real-nnunetv2" | "debug-label-fallback" | "unavailable";
@@ -68,7 +70,7 @@ export type InferenceStatus =
   | { status: "idle" }
   | { status: "submitting" }
   | { status: "running"; progress: number; stage: string; jobId?: string }
-  | { status: "succeeded"; jobId?: string; mode?: InferenceJobMode; duration_seconds?: number; result_size_bytes?: number; resource_latest?: ResourceSnapshot; phase_timings?: PhaseTimings; inference_options?: InferenceOptions }
+  | { status: "succeeded"; jobId?: string; mode?: InferenceJobMode; duration_seconds?: number; result_size_bytes?: number; resource_latest?: ResourceSnapshot; phase_timings?: PhaseTimings; inference_options?: InferenceOptions; cached_result?: boolean; cache_source_job_id?: string }
   | { status: "cancelled"; jobId?: string }
   | { status: "failed"; message: string; jobId?: string };
 
@@ -101,6 +103,8 @@ function normalizeValidation(payload: unknown): ValidationSummary | undefined {
   if (labelTaxonomy) summary.label_taxonomy = labelTaxonomy;
   if (typeof raw.remap_applied === "boolean") summary.remap_applied = raw.remap_applied;
   if (typeof raw.remap_source === "string") summary.remap_source = raw.remap_source;
+  if (raw.historical === true) summary.historical = true;
+  if (typeof raw.source_job_id === "string") summary.source_job_id = raw.source_job_id;
   if (raw.message !== undefined) summary.message = String(raw.message);
   if (raw.thresholds && typeof raw.thresholds === "object") {
     const thresholds = raw.thresholds as Record<string, unknown>;
@@ -219,6 +223,10 @@ export function parseInferenceEvent(raw: string): InferenceEvent {
     if (inferenceOptions) event.inference_options = inferenceOptions;
     const runtimeTarget = normalizeRuntimeTarget(parsed.runtime_target);
     if (runtimeTarget) event.runtime_target = runtimeTarget;
+    if (parsed.cached_result === true) event.cached_result = true;
+    if (typeof parsed.cache_source_job_id === "string" && parsed.cache_source_job_id) {
+      event.cache_source_job_id = parsed.cache_source_job_id;
+    }
   }
   return event;
 }

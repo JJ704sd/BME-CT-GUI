@@ -28,4 +28,14 @@
 ## 2026-05-28 GitHub 收尾
 
 - 提交 `0364d2e docs: sync gui docs and planning` 已推送到 `origin/main`。
+
+## 2026-06-01 后续
+
+- 后续 2026-06-01 已完成本地缓存演示 7 步 + cache 链路补丁，本目录的 9 份核心文档同步目标已包含在 2026-06-01 大轮内重新执行：
+  - `README.md` / `CLAUDE.md` / `AGENTS.md` 加 "2026-06-01 本地缓存演示补充" 与 "2026-06-01 cache 链路补丁" 描述。
+  - `REVIEW.md` 新增 "五十二、2026-06-01 本地缓存演示" 与 "五十三、2026-06-01 cache 链路补丁" 两节。
+  - `ACCEPTANCE.md` 新增 "2026-06-01 本地缓存演示验收记录" 与 "2026-06-01 cache 链路补丁验收记录" 两节。
+  - `CODE_MODULE_GUIDE.md` 补 `tools/seed_demo_cache.py` 和 `tools/rewrite_flare22_historical_summary.py` 步骤。
+  - `SEGMENTATION_RECENT_ROUNDS.md` / `SEGMENTATION_EXPERIMENT_COMPARISON.md` / `SEGMENTATION_METRICS_SUMMARY.md` 各自加 cache 链路补丁审核记录或备注。
+  - 主体说明继续保持中文；URL、技术字段保留英文。
 - `CLAUDE.md` 是本轮开始前已有的未暂存修改，未纳入该提交。

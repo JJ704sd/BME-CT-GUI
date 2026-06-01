@@ -12,6 +12,13 @@
 - **新增 `docs/local-cache-demo-runbook.md`**：本地缓存演示复跑手册（启动命令、关键路径、cache_key 7 字段、4 个已知约束）
 - **新增 spec/plan**：`docs/superpowers/specs/2026-06-01-local-cache-demo-design.md`、`docs/superpowers/plans/2026-06-01-local-cache-demo.md`
 - **后端依赖补充**：在 `D:\BME2026\BME_CT_Seg\nnunet_env` 装了 `fastapi 0.136.3 / uvicorn 0.48.0 / python-multipart 0.0.30`
+- **2026-06-01 晚间 cache 链路补丁**：FLARE22 cache hit 现在能正确显示历史 validation 摘要（0.893/0.674/0.950），不再显示 AMOS 数据错位或"待验证"。修复点：
+  - `server/main.py` 新增 `_load_cached_validation_summary()`；`complete_cached_job()` 在无当前 validation 时回退到 cache_source_job_id 的 `validation_summary.json`，并加 `historical: true`、`source_job_id` 标记。
+  - `find_cached_prediction()` 候选排序改为 `(has_validation_summary, mtime)` 降序，优先选带 `validation_summary.json` 的 cache_source，避免命中空 job 目录。
+  - `tools/rewrite_flare22_historical_summary.py` 新增：因新预测 `0aa7323a4c01` 与历史 `86b0153d0a73` 字节不同（cache_key 也不一致），按 2026-05-26 remap 后的 metrics 把 validation_summary.json 写入 0aa7323a4c01 的 output。
+  - 前端 `getValidationStatusCopy()` 增加 `cachedResult` 参数，区分"无历史验证摘要"和"（历史离线缓存摘要）"；`inferenceClient.ts` 增加 `cached_result` / `cache_source_job_id` / `historical` / `source_job_id` 字段。
+  - `tests/backendState.test.py` 增加 `test_cached_prediction_falls_back_to_source_validation_summary` 和 `test_cached_prediction_without_historical_validation_summary`。
+  - **关键发现**：`SEGMENTATION_REFERENCE_CASES_JSON` 必须指向 `examples/reference_cases.json`（或 `nnunetv2_files/reference_cases.local.json`），否则 `/api/samples` 只会返回内置 `amos_0117`，FLARE22 Tr 0009 不会出现在参考病例列表中。这条 runbook 写明但现场容易漏。
 
 2026-05-31 已完成：
 - 显式 `label_taxonomy=auto|AMOS22|FLARE22` 功能，AMOS 原生标签不再被自动误判为 FLARE22

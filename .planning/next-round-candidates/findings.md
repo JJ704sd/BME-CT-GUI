@@ -2,34 +2,62 @@
 
 ## 发现日期
 
-2026-05-31
+2026-06-01
 
 ## 关键发现
 
-### 发现 1：taxonomy fix 已验证通过
+### 发现 1：本地缓存演示 7 步已跑通
 
-**证据**：job `d56bcff76a8b`，AMOS22 选择时 `remap_applied=false`。
+**证据**：AMOS 0117 cache hit（`aea4e7cdbaf0`）、FLARE22 Tr 0009 真实推理（`0aa7323a4c01`，218s）、FLARE22 cache hit（`02da885c97d8`，0.001s）。
 
-**意义**：AMOS 原生标签不再被误判为 FLARE22，解决了服务器 AMOS 轮次 `mean_dice=0.076015` 的根因。
+**意义**：cache_key 7 字段隔离已实测正确；cache hit 与真实推理的耗时对照（0.001s vs 218s）肉眼可见。
 
-**后续**：需要用显式 `label_taxonomy=AMOS22` 复跑服务器 AMOS，确认 `remap_applied=false` 后纳入正式质量基线。
+**后续**：本轮目标已达成，下一轮任务规划见本目录 `task_plan.md`。
 
-### 发现 2：高分辨率 CT 推理速度瓶颈明确
+### 发现 2：cache 链路补丁后 FLARE22 cache hit 显示历史 validation 摘要
 
-**证据**：job `ad3d14eba3de`，768×768×103 输入，fast profile，mean_dice=0.77724。
+**证据**：FLARE22 cache hit 现在显示 0.893127/0.67373/0.949908（"（历史离线缓存摘要）"）；AMOS cache hit 仍显示 review 状态（stomach 0.556）。`server/main.py` 的 `complete_cached_job()` 增加 historical 回退；`find_cached_prediction()` 候选排序改为 `(has_validation_summary, mtime)` 降序。
 
-**瓶颈分析**：
+**意义**：cache hit 不再混用错位 cache_source 的 validation；`tools/rewrite_flare22_historical_summary.py` 是配套的"按历史指标改写 cache_source 摘要"工具。
 
-| 因素 | 影响 | 说明 |
+**后续**：下一轮需要把"按历史指标改写 cache_source 摘要"做成可复用机制，让其他数据集/其他 cache_source 也能享受这条链路。
+
+### 发现 3：`SEGMENTATION_REFERENCE_CASES_JSON` 是 cache 链路的前置条件
+
+**证据**：现场复测时漏设 `SEGMENTATION_REFERENCE_CASES_JSON`，导致 `/api/samples` 只返回内置 `amos_0117`，FLARE22 Tr 0009 不可选；所有"载入参考病例"都跑到了 AMOS 0117。
+
+**意义**：env var 缺一项就会让整条 cache 链路看起来指向错位数据；runbook 必须把这一项写在最前面，并提示用 `/api/samples` 列表确认 4 个 case。
+
+**后续**：runbook 已更新；下一轮要把这个约束写到启动脚本或 smoke test 里。
+
+### 发现 4：AMOS 预热预测 `009d4efdc5f6` 仍是 review 状态
+
+**证据**：cache demo Phase A 命中的 `009d4efdc5f6` 是 2026-05-23 历史推理，stomach Dice 0.556，`validation_status=review`。
+
+**意义**：cache demo 命中的不是新一轮 AMOS 基线，演示口径必须明确"这是 2026-05-23 历史预测"。
+
+**后续**：列入 next-round candidates：用 quality profile 复跑 AMOS 0117，替换 `009d4efdc5f6`，让 Phase A 命中一个非 review 的预测。
+
+### 发现 5：server mode gating 仍需修复
+
+**证据**：`/api/models` 默认仍可能显示 `runtime_target=local` 并报告本地 Windows nnUNet 文件缺失。
+
+**影响**：服务器模式创建 job 时可能因本地文件缺失而 503。
+
+**后续**：`runtime_target=server` 只检查 server runtime 必需路径（`evaluate_script`、`dataset_json`、`nnUNet_raw`、`nnUNet_preprocessed`、`nnUNet_results`、`output_root`）。
+
+### 发现 6：服务器链路已跑通但质量基线未定
+
+**证据**：2026-05-31 校园网服务器 smoke。
+
+| 轮次 | 结果 | 状态 |
 |---|---|---|
-| 输入分辨率 | 高 | 面积 2.25 倍于标准 512×512 |
-| GPU 显存 | 中 | 8GB 显存占用 95% |
-| GPU 功率 | 中 | 笔记本散热限制，27W/40W |
-| 2D 模型 | 中 | 逐切片处理 103 层 |
+| FLARE | mean Dice 约 0.891 | 可用，链路证据 |
+| AMOS | mean Dice 0.076015 | 疑似 taxonomy 误判 |
 
-**后续**：预降采样（768→512）是最直接的优化路径，预计推理时间减少约 50%。
+**意义**：服务器推理、ensemble、下载和 GUI 回填链路可用，但 AMOS 质量基线需复跑确认。
 
-### 发现 3：fast/quality profile 对照数据完整
+### 发现 7：fast/quality profile 对照数据完整
 
 **证据**：`SEGMENTATION_METRICS_SUMMARY.md` 中的对照表。
 
@@ -42,39 +70,24 @@
 
 **意义**：`quality` 应继续作为正式报告基线，`fast` 仅作为预览模式。
 
-### 发现 4：server mode gating 仍需修复
-
-**证据**：`/api/models` 默认仍可能显示 `runtime_target=local` 并报告本地 Windows nnUNet 文件缺失。
-
-**影响**：服务器模式创建 job 时可能因本地文件缺失而 503。
-
-**后续**：`runtime_target=server` 只检查 server runtime 必需路径（`evaluate_script`、`dataset_json`、`nnUNet_raw`、`nnUNet_preprocessed`、`nnUNet_results`、`output_root`）。
-
-### 发现 5：服务器链路已跑通但质量基线未定
-
-**证据**：2026-05-31 校园网服务器 smoke。
-
-| 轮次 | 结果 | 状态 |
-|---|---|---|
-| FLARE | mean Dice 约 0.891 | 可用，链路证据 |
-| AMOS | mean Dice 0.076015 | 疑似 taxonomy 误判 |
-
-**意义**：服务器推理、ensemble、下载和 GUI 回填链路可用，但 AMOS 质量基线需复跑确认。
-
 ## 待验证假设
 
 1. **预降采样不影响 Dice**：768→512 降采样后，mean Dice 是否仍在 0.85 以上？
 2. **server gating 修复后服务器模式可用**：修复后 `/api/segment/jobs` 是否不再因本地文件缺失而 503？
 3. **显式 AMOS22 复跑可解决误判**：服务器 AMOS 轮次用 `label_taxonomy=AMOS22` 后，`remap_applied` 是否为 false？
+4. **跨数据集 cache 链路可产品化**：其他 cache_source 命中时能否复用 historical 回退机制？
 
 ## 数据来源
 
+- `.planning/2026-06-01-local-cache-demo/` 的 `findings.md` / `progress.md` / `task_plan.md`
 - `.planning/label-taxonomy-server-validation/progress.md`
 - `.planning/high-resolution-inference-optimization/progress.md`
 - `SEGMENTATION_METRICS_SUMMARY.md`
 - `SEGMENTATION_EXPERIMENT_COMPARISON.md`
 - `SEGMENTATION_RECENT_ROUNDS.md`
+- `tools/seed_demo_cache.py` / `tools/rewrite_flare22_historical_summary.py`
+- `docs/local-cache-demo-runbook.md`
 
 ---
 
-*更新日期：2026-05-31*
+*更新日期：2026-06-01*

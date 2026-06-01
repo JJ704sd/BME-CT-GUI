@@ -438,12 +438,16 @@ function formatBytes(value: number | undefined) {
   return `${value} B`;
 }
 
-function getValidationStatusCopy(validation: ValidationSummary | null, hasLabelFile: boolean) {
-  if (!validation) return hasLabelFile ? "等待验证结果" : "未提供标签 CT";
+function getValidationStatusCopy(validation: ValidationSummary | null, hasLabelFile: boolean, cachedResult: boolean) {
+  if (!validation) {
+    if (cachedResult) return "无历史验证摘要";
+    return hasLabelFile ? "等待验证结果" : "未提供标签 CT";
+  }
   if (validation.taxonomy_match === false) return "标签 ID 不匹配";
   const remapTag = validation.remap_applied ? `（${validation.remap_source ?? "已知数据集"}→当前模型）` : "";
-  if (validation.status === "passed") return `验证通过${remapTag}`;
-  if (validation.status === "review") return `建议人工复核${remapTag}`;
+  const historicalTag = validation.historical ? "（历史离线缓存摘要）" : "";
+  if (validation.status === "passed") return `验证通过${remapTag}${historicalTag}`;
+  if (validation.status === "review") return `建议人工复核${remapTag}${historicalTag}`;
   return "无法自动验证";
 }
 
@@ -626,7 +630,7 @@ function App() {
   const scoredMeanDice = getMeanOrganDice(displayedOrgans);
   const averageDice = scoredMeanDice === null ? "待验证" : scoredMeanDice.toFixed(3);
   const displayedAverageDice = validationSummary?.mean_dice != null ? formatDiceMetric(validationSummary.mean_dice) : averageDice;
-  const validationStatusCopy = getValidationStatusCopy(validationSummary, Boolean(labelFile));
+  const validationStatusCopy = getValidationStatusCopy(validationSummary, Boolean(labelFile), inferenceStatus.status === "succeeded" && Boolean(inferenceStatus.cached_result));
   const validationMessage = validationSummary?.message ?? (labelFile ? "推理完成后将自动用标签 CT 计算 Dice。" : "导入标签 CT 或载入参考病例后，可自动计算 Dice。");
   const inferenceDurationCopy = inferenceStatus.status === "succeeded" ? formatSeconds(inferenceStatus.duration_seconds) : "待记录";
   const inferenceResultSizeCopy = inferenceStatus.status === "succeeded" ? formatBytes(inferenceStatus.result_size_bytes) : "待生成";
@@ -1062,6 +1066,8 @@ function App() {
       });
       activeJobIdRef.current = job.job_id;
       let inferenceOptions = job.inference_options;
+      let cachedResultFromEvent: boolean | undefined;
+      let cacheSourceJobIdFromEvent: string | undefined;
       const startedAt = Date.now();
       setInferenceStartedAt(startedAt);
       setElapsedNow(startedAt);
@@ -1127,6 +1133,10 @@ function App() {
               resourceLatest = parsed.resource_latest;
               phaseTimings = parsed.phase_timings;
               if (parsed.inference_options) inferenceOptions = parsed.inference_options;
+              if (parsed.cached_result === true) cachedResultFromEvent = true;
+              if (typeof parsed.cache_source_job_id === "string" && parsed.cache_source_job_id) {
+                cacheSourceJobIdFromEvent = parsed.cache_source_job_id;
+              }
               if (resourceLatest) {
                 setLogs((items) => [`资源记录：${getResourceSnapshotCopy(resourceLatest)}`, ...items].slice(0, 8));
               }
@@ -1170,7 +1180,7 @@ function App() {
       setProgress(100);
       setRunState("complete");
       setElapsedNow(Date.now());
-      setInferenceStatus({ status: "succeeded", jobId: job.job_id, mode: job.mode, duration_seconds: durationSeconds, result_size_bytes: resultSizeBytes, resource_latest: resourceLatest, phase_timings: phaseTimings, inference_options: inferenceOptions });
+      setInferenceStatus({ status: "succeeded", jobId: job.job_id, mode: job.mode, duration_seconds: durationSeconds, result_size_bytes: resultSizeBytes, resource_latest: resourceLatest, phase_timings: phaseTimings, inference_options: inferenceOptions, cached_result: cachedResultFromEvent ?? Boolean(job.cached_result), cache_source_job_id: cacheSourceJobIdFromEvent ?? job.cache_source_job_id });
       activeJobIdRef.current = null;
       setLastImport(`${resultKindLabel}就绪：${job.job_id}`);
       appendInferenceTimelineEntry({
