@@ -4,6 +4,13 @@
 
 ## 当前运行状态
 
+2026-06-01 已完成：
+- 本地缓存演示 7 步：AMOS 0117 cache hit（job `aea4e7cdbaf0`，命中 2026-05-23 历史推理 `009d4efdc5f6`）、FLARE22 Tr 0009 真实推理（job `0aa7323a4c01`，218s）、FLARE22 cache hit（job `02da885c97d8`，0.001s）
+- `tools/seed_demo_cache.py`：幂等可重跑的预热脚本，7 字段 cache_key 计算后写 `job_summary.json`
+- `docs/local-cache-demo-runbook.md`：本地缓存演示复跑手册（启动命令、关键路径、cache_key 7 字段、4 个已知约束）
+- `docs/superpowers/specs/2026-06-01-local-cache-demo-design.md` 与 `docs/superpowers/plans/2026-06-01-local-cache-demo.md`
+- 后端依赖补充：在 `D:\BME2026\BME_CT_Seg\nnunet_env` 装 `fastapi 0.136.3 / uvicorn 0.48.0 / python-multipart 0.0.30`
+
 2026-05-31 已完成：
 - 显式 `label_taxonomy=auto|AMOS22|FLARE22` 功能，修复了 AMOS 标签被误判为 FLARE22 的问题
 - AMOS CT 高分辨率在线推理（768×768×103，fast profile，mean_dice=0.77724）
@@ -12,6 +19,7 @@
 当前进行中：
 - 高分辨率 CT 推理优化评估（预降采样方案）
 - server mode gating 修复
+- AMOS 预热预测 review 状态（stomach 0.556）的复跑或新训练权重接入
 
 ## 目标 1：CT 可浏览、三正交可联动
 
@@ -569,3 +577,31 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\checkpoint_best.
 - 本轮没有运行真实长耗时 persistent worker 推理；当前只能说明协议和 reader 复用路径稳定性改善，不能写成已验证加速。
 - 预测缓存仍按输入 CT、checkpoint 和推理配置复用；标签文件不进入预测 cache key，但 validation 不再随预测缓存复用。
 - 部分标签 remap 的目标是避免明显 FLARE22 子集被误判为 AMOS 原生标签；未知数据集和单 label 文件仍需要显式数据集 hint 或人工复核。
+
+## 2026-06-01 本地缓存演示验收记录
+
+范围：
+
+- 用 AMOS 0117 + FLARE22 Tr 0009 两例完成"本地缓存演示 7 步"：cache hit → 真实推理 → cache hit。
+- 新增 `tools/seed_demo_cache.py` 幂等预热脚本，让 2026-05-23 的历史 AMOS 推理 `009d4efdc5f6` 接入 `find_cached_prediction()`。
+- 新增 `docs/local-cache-demo-runbook.md` 运行手册，记录启动命令、关键路径、cache_key 7 字段和 4 个已知约束。
+
+验收证据：
+
+| 检查项 | 结果 |
+|---|---|
+| 后端依赖 | 在 `D:\BME2026\BME_CT_Seg\nnunet_env` 装 `fastapi 0.136.3 / uvicorn 0.48.0 / python-multipart 0.0.30`，`uvicorn` cwd 必须落在 `segmentation-gui-prototype/`。 |
+| 参考病例 | `SEGMENTATION_REFERENCE_CASES_JSON` 指向 `examples/reference_cases.json`，曝露 4 个 reference case；默认仅 `amos_0117`。 |
+| 预热脚本 | `tools/seed_demo_cache.py` 重算 7 字段 cache_key（input sha、model、profile、taxonomy、runtime_target、postproc、device），匹配后写 `job_summary.json` 让 `009d4efdc5f6` 进入缓存索引。 |
+| Phase A | AMOS 0117 cache hit，job `aea4e7cdbaf0`，命中 2026-05-23 历史 review 推理 `009d4efdc5f6`，mode = `cached-real-nnunetv2`。 |
+| Phase B | FLARE22 Tr 0009 真实推理，job `0aa7323a4c01`，218s，`remap_applied=true`、`remap_source=FLARE22`，mode = `real-nnunetv2`。 |
+| Phase C | FLARE22 Tr 0009 cache hit，job `02da885c97d8`，命中 Phase B 输出，命中耗时 0.001s，mode = `cached-real-nnunetv2`。 |
+| 文档同步 | `README.md`、`CLAUDE.md`、`AGENTS.md`、`CODE_MODULE_GUIDE.md`、`SEGMENTATION_RECENT_ROUNDS.md`、`SEGMENTATION_EXPERIMENT_COMPARISON.md`、`SEGMENTATION_METRICS_SUMMARY.md`、`REVIEW.md` 已记录本轮 cache demo。 |
+| 自动验证 | 本轮未引入新前后端逻辑改动，未单独跑 `npm test` / `npm run build`；仅新增 `tools/seed_demo_cache.py` 工具脚本和 `docs/` 文档。 |
+
+行为边界：
+
+- 本轮 cache demo 是工程链路演示，不替代 AMOS / FLARE22 正式质量基线：AMOS cache hit 命中的 `009d4efdc5f6` 来自 2026-05-23 历史，标签状态仍为 review（stomach 0.556），不能直接拿来当正式 AMOS 基线；本地 quality AMOS 真实推理 `b3c528cc9e20`（mean_dice 0.924780）和 fast preview `ad3d14eba3de`（mean_dice 0.77724）仍是不同口径。
+- FLARE22 真实推理 `0aa7323a4c01` 是单机 RTX 4060 Laptop 本地 fold0 路径，远低于 2026-05-28 `a717dacf42d3` 在线 mean_dice 0.926 的服务器配置，结果仅作 cache demo Phase B 链路证据，不写入跨数据集质量基线。
+- Cache key 仍按 `input_sha + model_dataset + profile + label_taxonomy + runtime_target + postprocess + device` 7 字段唯一索引；任意字段变化都视为不同 cache，不存在隐式 fallback。
+- 预热脚本 `tools/seed_demo_cache.py` 不复用旧 validation，命中后若当前请求带 `label_file` 仍重新 validation；演示中 AMOS cache hit 没有上传标签，所以走的是历史 validation 摘要，前端会标注 review 状态。

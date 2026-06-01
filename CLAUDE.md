@@ -13,7 +13,7 @@
 
 ## 当前运行状态
 
-截至 2026-05-31，项目已完成：
+截至 2026-06-01，项目已完成：
 - 本地在线推理链路（AMOS 0117、FLARE22 Tr 0009）
 - 自动 taxonomy remap（FLARE22 → AMOS22）
 - 显式 `label_taxonomy=auto|AMOS22|FLARE22` 功能，修复了 AMOS 标签被误判为 FLARE22 的问题
@@ -21,6 +21,9 @@
 - 影像量化分析与报告导出（HTML/JSON/PDF）
 - 底部实时推理进度展示与心跳机制
 - AMOS CT 高分辨率推理（768×768×103，mean_dice=0.77724，fast profile）
+- **本地缓存演示 7 步**：AMOS 0117 cache hit、FLARE22 Tr 0009 真实推理（218s）、FLARE22 cache hit（0.001s）
+- **新增脚本/文档**：`tools/seed_demo_cache.py`、`docs/local-cache-demo-runbook.md`、`docs/superpowers/specs/2026-06-01-local-cache-demo-design.md`、`docs/superpowers/plans/2026-06-01-local-cache-demo.md`
+- **后端依赖补充**：在 `D:\BME2026\BME_CT_Seg\nnunet_env` 装了 `fastapi 0.136.3 / uvicorn 0.48.0 / python-multipart 0.0.30`
 
 ## 常用命令
 
@@ -115,7 +118,7 @@ git diff --check
 
 ## 文档协作
 
-涉及局域网、服务器运行位置、验证口径、影像量化、报告 schema 或迁移策略的改动，要同步检查：
+涉及局域网、服务器运行位置、验证口径、影像量化、报告 schema、迁移策略或本地缓存演示的改动，要同步检查：
 
 - `README.md`
 - `ACCEPTANCE.md`
@@ -124,9 +127,10 @@ git diff --check
 - `SEGMENTATION_METRICS_SUMMARY.md`
 - `SEGMENTATION_RECENT_ROUNDS.md`
 - `CODE_MODULE_GUIDE.md`
+- `local-cache-demo-runbook.md`（本地缓存演示复跑手册）
 - `.planning/`
 
-当前下一轮工程入口是 `.planning/high-resolution-inference-optimization/`：高分辨率 CT 推理优化（预降采样、3D 模型评估），以及 `.planning/label-taxonomy-server-validation/` 中剩余的 server gating 修复和 AMOS/FLARE 服务器 validation 复跑。
+当前下一轮工程入口是 `.planning/2026-06-01-local-cache-demo/`（刚完成的本地缓存演示）+ `.planning/high-resolution-inference-optimization/`（高分辨率 CT 推理优化，预降采样、3D 模型评估），以及 `.planning/label-taxonomy-server-validation/` 中剩余的 server gating 修复和 AMOS/FLARE 服务器 validation 复跑。
 
 ## 云服务器迁移注意
 

@@ -2,9 +2,56 @@
 
 > 本文档按时间滚动覆写，只保留最近三轮成功或具备诊断价值的推理数据。历史完整记录见 `SEGMENTATION_EXPERIMENT_COMPARISON.md`。
 
-最近更新：2026-05-31
+最近更新：2026-06-01
 
-## 第 1 轮（最新）— label_taxonomy 修复与 AMOS CT 推理完成
+## 第 1 轮（最新）— 本地缓存演示 7 步验证
+
+| 项目 | 值 |
+|---|---|
+| 日期 | 2026-06-01 |
+| 病例 | AMOS 0117 + FLARE22 Tr 0009（项目自带 4 例 reference cases） |
+| 运行位置 | 本地 RTX 4060（`runtime_target=local`） |
+| 目的 | 跑通“同输入 → 真实 nnUNetv2 推理 → 缓存回填 → 二次命中”全链路，并沉淀可重跑脚本与运行说明 |
+| 新增脚本 | `tools/seed_demo_cache.py`（替换了仅 AMOS 版的 `tools/seed_amos_cache.py`） |
+| 新增运行说明 | `docs/local-cache-demo-runbook.md`（启动命令、关键路径、cache_key 7 字段、已知约束） |
+| 新增 spec/plan | `docs/superpowers/specs/2026-06-01-local-cache-demo-design.md`、`docs/superpowers/plans/2026-06-01-local-cache-demo.md` |
+| 后端依赖 | 在 `D:\BME2026\BME_CT_Seg\nnunet_env` 装了 `fastapi 0.136.3 / uvicorn 0.48.0 / python-multipart 0.0.30` |
+
+**4 步演示结果：**
+
+| 演示步骤 | job_id | mode | cache_key（前 16 位） | 耗时 | 结果 |
+|---|---|---|---|---|---|
+| AMOS 0117 cache hit | `aea4e7cdbaf0` | `cached-real-nnunetv2` | `4e0eb3cd29145b70` | ~3s | 命中手工 seed 的 `009d4efdc5f6`；validation `review`，mean_dice 0.891（stomach 0.556 偏低） |
+| FLARE 真实推理 | `0aa7323a4c01` | `real-nnunetv2` | `0f9c6d68e314b3d7` | 218s | RTX 4060，quality + TTA，3d_fullres，结果 120KB |
+| FLARE cache hit | `02da885c97d8` | `cached-real-nnunetv2` | `0f9c6d68e314b3d7` | 0.001s | 命中 `0aa7323a4c01` |
+
+**7 步任务验收：**
+
+| 阶段 | 状态 | 备注 |
+|---|---|---|
+| Task 1 装 fastapi/uvicorn | ✓ | fastapi 0.136.3 / uvicorn 0.48.0 / python-multipart 0.0.30 |
+| Task 2 启动后端 | ✓ | cwd=project subdir，`/api/health` ready=true；`/api/samples` 含 4 例（设置 `SEGMENTATION_REFERENCE_CASES_JSON` 后） |
+| Task 3 启动前端 | ✓ | Vite 6.4.2, http://127.0.0.1:5173/ → 200 |
+| Task 4 AMOS cache hit | ✓ | `aea4e7cdbaf0`, mode=cached, source=`009d4efdc5f6` |
+| Task 5 FLARE 真实推理 | ✓ | `0aa7323a4c01`, 218s, 120KB result |
+| Task 6 FLARE cache hit | ✓ | `02da885c97d8`, 0.001s, source=`0aa7323a4c01` |
+| Task 7 写 runbook | ✓ | `docs/local-cache-demo-runbook.md` |
+
+**cache_key 7 字段（任一不一致即失配）：**
+
+1. `input_sha256`（输入文件 SHA-256，非路径；重压缩即失配）
+2. `checkpoint_sha256`（`nnunetv2_files/checkpoint_best.pth` 的 SHA-256）
+3. `checkpoint_dataset_name`（如 `Dataset001_AMOS22`）
+4. `checkpoint_configuration`（如 `3d_fullres`）
+5. `labels_source`（内置 AMOS checkpoint label vs 用户上传 label）
+6. `runtime_target`（`local` vs `server`，互不混用）
+7. `inference_options`（`quality` vs `fast`，TTA、tile_step_size 也算）
+
+**结论：** 本地 4 步演示完整跑通，cache_key 7 字段隔离正确，二次命中耗时 < 5s；AMOS 预热预测的 review 状态（stomach 0.556）属于 5 月 23 日历史推理结果，本次未重训，复跑 AMOS 真实推理会得到更新更准的预测。`tools/seed_demo_cache.py` 幂等可重跑，便于在演示前预热 AMOS 缓存或在新机器上确认 FLARE 缓存存在。
+
+---
+
+## 第 2 轮 — label_taxonomy 修复与 AMOS CT 推理完成
 
 | 项目 | 值 |
 |---|---|
@@ -124,13 +171,13 @@
 
 ## 近三轮趋势
 
-| 维度 | 第 1 轮（本地高分辨率推理） | 第 2 轮（服务器 AMOS 异常） | 第 3 轮（服务器 FLARE） |
+| 维度 | 第 1 轮（本地缓存演示 7 步） | 第 2 轮（label_taxonomy 修复 + 本地高分辨率） | 第 3 轮（服务器 FLARE 5-fold） |
 |---|---|---|---|
-| 运行位置 | 本地 RTX 4060 | Ubuntu 服务器 5GPU | Ubuntu 服务器 5GPU |
-| 输入分辨率 | 768×768×103 | 标准 AMOS | 标准 FLARE22 |
-| 耗时 | 长耗时，最终 job 已完成 | 586s | 约 228s |
-| 验证状态 | review，fast profile mean_dice=0.77724 | review | review / 可用 |
-| 核心问题 | 高分辨率导致推理慢，fast 质量下降 | AMOS 可能被误判为 FLARE22 | 最低标签仍需人工复核 |
+| 运行位置 | 本地 RTX 4060，cache_key 7 字段 | 本地 RTX 4060 / 服务器 5GPU | Ubuntu 服务器 5GPU |
+| 病例 | AMOS 0117 + FLARE22 Tr 0009 | 768×768×103 高分辨率 | 标准 FLARE22 |
+| 耗时 | AMOS cache hit ~3s，FLARE 真实 218s，FLARE cache hit 0.001s | 268s+（fast profile） | 约 228s |
+| 验证状态 | AMOS review（stomach 0.556）、FLARE 真实 0 验证、FLARE cache hit 0.001s | review，mean_dice=0.77724 | review / 可用，mean Dice 约 0.891 |
+| 核心问题 | AMOS 预热预测 review 状态保留，复跑新 AMOS 真实推理可换更新预测 | 高分辨率导致推理慢 | 最低标签仍需人工复核 |
 
 ---
 
@@ -173,3 +220,13 @@
 **现状：** 影像量化分析已作为纯前端能力接入，计算依赖推理完成后的预测 mask 和 NIfTI spacing，不改变服务器推理、缓存或 validation 链路。
 
 **行动：** 后续每次做服务器 smoke 或报告验收时，在“结果下载并回填 GUI”之后补充检查：评估模块是否显示量化面板、HTML/JSON/PDF 报告是否包含 `quantification`，并确认壁厚和精确管腔指标仍显示为不可用/后续扩展。
+
+### 问题 5：AMOS 预热预测质量偏低（cache hit 暴露 review 状态）
+
+**现状：** 2026-06-01 本地缓存演示发现 AMOS 0117 预热预测（`009d4efdc5f6`，2026-05-23 推理，138KB）validation 为 review，mean_dice 0.891，stomach 0.556。该预测是当前唯一会被 cache hit 复用的 AMOS 推理结果；首次未缓存新推理可换更新预测（job `b3c528cc9e20` quality 模式 mean_dice 0.924780、stomach 0.846569）。
+
+**行动：**
+
+- 演示前允许 `tools/seed_demo_cache.py` 把 009d4efdc5f6 写为 cache hit，标签上明确是 review 不是 passed。
+- 若需 quality 模式 AMOS 验证，优先做真实新推理（已通过 `find_cached_prediction()` 复用现成 `b3c528cc9e20` 缓存）。
+- 后续如果 AMOS 重新训练或新 checkpoint 接入，需重跑 `tools/seed_demo_cache.py` 让 `cache_key` 重新指向新预测，否则历史 cache hit 会继续给出旧指标。

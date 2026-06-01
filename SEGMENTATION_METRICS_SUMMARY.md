@@ -4,6 +4,12 @@
 
 ## 当前运行状态
 
+2026-06-01 已完成：
+- 本地缓存演示 7 步：AMOS 0117 cache hit、FLARE22 Tr 0009 真实推理、FLARE22 cache hit
+- 新增 `tools/seed_demo_cache.py`（幂等可重跑）和 `docs/local-cache-demo-runbook.md`
+- 新增 spec/plan：`docs/superpowers/specs/2026-06-01-local-cache-demo-design.md`、`docs/superpowers/plans/2026-06-01-local-cache-demo.md`
+- 在 `D:\BME2026\BME_CT_Seg\nnunet_env` 装了 `fastapi 0.136.3 / uvicorn 0.48.0 / python-multipart 0.0.30`
+
 2026-05-31 已完成：
 - 显式 `label_taxonomy=auto|AMOS22|FLARE22` 功能，修复了 AMOS 标签被误判为 FLARE22 的问题
 - AMOS CT 高分辨率在线推理（768×768×103，fast profile，mean_dice=0.77724）
@@ -52,6 +58,7 @@ python tools\segmentation_metrics_summary.py `
 - 2026-05-31 校园网服务器 5GPU/5-fold smoke 已跑通并回填 GUI；FLARE 轮次 remap 后指标合理，AMOS 轮次出现 `mean Dice=0.076015`、`foreground Dice=0.979808` 且 `remap_source=FLARE22` 的异常。该 AMOS 数值暂列为 taxonomy 误判证据，不作为模型质量基线。
 - 2026-05-31 显式 `label_taxonomy=auto|AMOS22|FLARE22` 已实现，`detect_dataset()` 更保守：标签 ID 是 checkpoint 子集时不触发 remap。AMOS CT 高分辨率推理完成（fast profile，mean_dice=0.77724）。
 - 2026-05-31 新增的影像量化分析来自前端已回填的预测 mask 与 NIfTI spacing，输出体积、截面积和长度估算；它不改变本文件中的 Dice、IoU、Voxel Accuracy 或 Hausdorff Distance 口径。
+- 2026-06-01 本地缓存演示：AMOS 0117 cache hit（`aea4e7cdbaf0`，命中 `009d4efdc5f6`，review，mean_dice 0.891，stomach 0.556）；FLARE22 Tr 0009 真实推理（`0aa7323a4c01`，quality 模式，218s，结果 120KB）；FLARE22 cache hit（`02da885c97d8`，0.001s，命中 `0aa7323a4c01`）。该演示不修改本文件既有 AMOS 基线 `b3c528cc9e20`（mean_dice 0.924780）和新权重首跑 `27216eb73220`（mean_dice 0.924791）。`tools/seed_demo_cache.py` 是该演示的预热脚本，幂等可重跑；cache_key 7 字段隔离已实测正确。
 
 ## 当前 AMOS 基线运行
 
@@ -274,3 +281,4 @@ Checkpoint 元数据：
 - 2026-05-30 的运行位置选择、局域网配置和服务器 5-fold soft ensemble 编排入口已在 2026-05-31 完成服务器 smoke；当前 FLARE 服务器轮次可作为链路跑通证据，AMOS 服务器轮次因疑似 taxonomy 误判暂不替换当前 AMOS `quality` 基线。
 - 没有标准标签的病例不能计算 Dice、IoU 或 Hausdorff Distance，只能记录推理耗时、资源快照和人工复核结论。
 - 后续训练权重应保留每次的 JSON 原始输出，并把关键聚合指标追加到本文档。
+- 2026-06-01 本地缓存演示的 AMOS 0117 cache hit 命中 `009d4efdc5f6`（2026-05-23 历史推理，138KB，validation review，mean_dice 0.891，stomach 0.556）；当前 AMOS 基线指标与该 cache hit 复用的预测均已记录。如需 quality 模式 AMOS 验证，应使用 job `b3c528cc9e20`（mean_dice 0.924780）作为正式基线，不要把 cache hit 命中的 0.891 解读为正式 AMOS 质量基线。

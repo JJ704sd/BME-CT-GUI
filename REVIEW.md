@@ -2517,5 +2517,62 @@ job `a717dacf42d3`（FLARE22 Tr 0009 + 自动 taxonomy remap）：
 
 ---
 
-*文档版本：2026-05-31*
-*更新依据：当前 `src/main.tsx`、`src/inference/inferenceClient.ts`、`server/main.py`、`server/server_inference.py`、`package.json`、`README.md`、`ACCEPTANCE.md`、`SEGMENTATION_METRICS_SUMMARY.md`、`SEGMENTATION_EXPERIMENT_COMPARISON.md`、`SEGMENTATION_RECENT_ROUNDS.md`、`CODE_MODULE_GUIDE.md`、`.planning/lan-direct-and-tunnel/`、`.planning/campus-network-and-public-access/` 与 `deployment-packages/`。*
+## 52. 2026-06-01 本地缓存演示
+
+### 52.1 本轮目标
+
+为 BME 竞赛 PPT 演示准备一条最短的"本地缓存演示"链路：先用 AMOS 0117 演示 cache hit（已有历史预测能立刻复用），再用 FLARE22 Tr 0009 真实跑一次 nnUNetv2 推理证明本地推理仍可用，最后再 cache hit 一次同一份 FLARE22 输入证明缓存确实生效。本轮的目的是工程链路演示和 reproducible runbook，不重写正式质量基线，也不替代 AMOS / FLARE 的 quality profile 评估结果。
+
+### 52.2 本轮已完成
+
+1. **后端依赖与启动方式收口**
+   - 在 `D:\BME2026\BME_CT_Seg\nnunet_env` 增加 `fastapi 0.136.3`、`uvicorn 0.48.0`、`python-multipart 0.0.30`，让 nnunet 推理环境同时具备 GUI 后端能力。
+   - 确认 `uvicorn server.main:app` 的 cwd 必须落在 `D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\`，否则 `_resolve_project_root()` 解析不到 `nnunetv2_files/`、`examples/`、`server/`。
+   - 必须设置 `SEGMENTATION_REFERENCE_CASES_JSON=examples/reference_cases.json`，否则只暴露内置 `amos_0117`，FLARE22 Tr 0009 不会出现在 `/api/samples` 列表里。
+
+2. **AMOS 0117 预热（Phase A）**
+   - 编写 `tools/seed_demo_cache.py`：用 `compute_cache_key()` 的 7 字段（输入 SHA-256、模型 dataset、profile、label_taxonomy、runtime_target、postprocess、device）匹配 2026-05-23 的 review 状态预测 `009d4efdc5f6`，幂等回写 `job_summary.json` 后让 `find_cached_prediction()` 能命中。
+   - 真实演示一次 cache hit：job `aea4e7cdbaf0`，mode = `cached-real-nnunetv2`，命中 `009d4efdc5f6`，前端 timeline 立刻显示完成、`profile=quality`、AMOS 内置参考标签 validation 摘要。
+   - 该预热预测仍是 review 状态（stomach Dice 0.556），不能作为正式 AMOS 质量基线；正式基线仍是 `b3c528cc9e20`（mean_dice 0.924780）。
+
+3. **FLARE22 真实推理（Phase B）**
+   - 真实跑通 FLARE22 Tr 0009，job `0aa7323a4c01`，本地单机 RTX 4060 Laptop，fold0，profile `quality`，耗时 218s。
+   - `remap_applied=true`，`remap_source=FLARE22`，证明 `server/taxonomy.py` 的自动 remap 路径在本地推理也工作正常。
+   - 该轮 mean_dice 与 2026-05-28 在线服务器 5-fold ensemble `a717dacf42d3` 的 0.926 不可直接对比，仅作 cache demo Phase B 链路证据。
+
+4. **FLARE22 cache hit（Phase C）**
+   - 用相同输入再次提交，job `02da885c97d8`，mode = `cached-real-nnunetv2`，命中 Phase B 的 `0aa7323a4c01`。
+   - cache hit 总耗时 0.001s，明显比 Phase B 的 218s 短，肉眼可见缓存生效。
+   - 同样保持 `remap_applied=true`、`remap_source=FLARE22`。
+
+5. **文档与脚本**
+   - 新增 `docs/local-cache-demo-runbook.md`：启动命令、关键路径、参考病例 JSON 用法、3 个 job 的对照表、cache_key 7 字段、4 个已知约束（环境变量、cwd、reference cases JSON、AMOS 预热预测的 review 状态）。
+   - 新增 `docs/superpowers/specs/2026-06-01-local-cache-demo-design.md`：本轮设计稿。
+   - 新增 `docs/superpowers/plans/2026-06-01-local-cache-demo.md`：本轮实施计划。
+   - 新增 `tools/seed_demo_cache.py`：幂等预热脚本，可独立重跑。
+
+### 52.3 当前未完成
+
+- AMOS 预热预测 `009d4efdc5f6` 仍是 2026-05-23 的 review 状态（stomach 0.556），需要后续用新训练权重或 quality profile 复跑替换。
+- 本轮 cache demo 没有运行 `npm test` / `npm run build`：因为没有改动前后端 TypeScript / FastAPI 业务代码，只新增工具脚本和文档。后续如果要把 `tools/seed_demo_cache.py` 纳入回归，需要补 `tests/backendState.test.py` 或脚本级 smoke。
+- 高分辨率 CT 推理优化（预降采样、3D 模型评估）仍是 `.planning/high-resolution-inference-optimization/` 的下一步。
+- `runtime_target=server` 的 job 创建 gating 仍未修复，本轮 cache demo 全部走 `runtime_target=local`。
+- AMOS / FLARE 服务器轮次的显式 `label_taxonomy` 复跑仍在 `.planning/label-taxonomy-server-validation/` 中等待。
+
+### 52.4 行为边界
+
+- 本轮 cache demo 是 BME 竞赛 PPT 演示的工程链路证据，不替代任何正式质量基线：AMOS 基线仍是本地 quality `b3c528cc9e20`、跨数据集在线基线仍是服务器 5-fold ensemble `a717dacf42d3`。
+- `cached-real-nnunetv2` 只复用预测 NIfTI，不复用旧 job 的 validation：当前请求带 `label_file` 时会重新 validation；演示中 AMOS cache hit 没上传当前标签，所以走的是 AMOS 内置参考标签 validation 摘要，前端会标注 review 状态。
+- Cache key 仍按 7 字段唯一索引，任意字段变化都视为不同 cache，不存在隐式 fallback；这一点已经在 `docs/local-cache-demo-runbook.md` 单列说明。
+- FLARE22 Tr 0009 演示用本地 fold0 与服务器 5GPU/5-fold soft ensemble 不是同一推理路径，结果不能写成跨数据集质量基线。
+
+### 52.5 文档同步
+
+已同步 `README.md`、`ACCEPTANCE.md`、`SEGMENTATION_METRICS_SUMMARY.md`、`SEGMENTATION_EXPERIMENT_COMPARISON.md`、`SEGMENTATION_RECENT_ROUNDS.md`、`CODE_MODULE_GUIDE.md`、`CLAUDE.md`、`AGENTS.md`，统一口径为：2026-06-01 本地缓存演示完成 AMOS cache hit + FLARE22 真实推理 + FLARE22 cache hit 的 7 步；预热脚本 `tools/seed_demo_cache.py`、运行手册 `docs/local-cache-demo-runbook.md` 和 spec/plan 已落地；AMOS cache 命中的是 2026-05-23 review 预测，不作为正式 AMOS 基线。
+
+新增/待新增的 planning 子目录：`.planning/2026-06-01-local-cache-demo/`，沿用 `explanation.md` / `findings.md` / `progress.md` / `task_plan.md` 4 个文档结构，作为本轮回顾和下一轮工程入口候选。
+
+---
+
+*文档版本：2026-06-01*
+*更新依据：当前 `src/main.tsx`、`src/inference/inferenceClient.ts`、`server/main.py`、`server/server_inference.py`、`server/taxonomy.py`、`tools/seed_demo_cache.py`、`docs/local-cache-demo-runbook.md`、`docs/superpowers/specs/2026-06-01-local-cache-demo-design.md`、`docs/superpowers/plans/2026-06-01-local-cache-demo.md`、`package.json`、`README.md`、`ACCEPTANCE.md`、`SEGMENTATION_METRICS_SUMMARY.md`、`SEGMENTATION_EXPERIMENT_COMPARISON.md`、`SEGMENTATION_RECENT_ROUNDS.md`、`CODE_MODULE_GUIDE.md`、`.planning/lan-direct-and-tunnel/`、`.planning/campus-network-and-public-access/`、`.planning/label-taxonomy-server-validation/`、`.planning/high-resolution-inference-optimization/`、`.planning/2026-06-01-local-cache-demo/` 与 `deployment-packages/`。*

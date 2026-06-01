@@ -1,6 +1,6 @@
 # 分割实验对比
 
-生成日期：2026-05-31
+生成日期：2026-06-01
 
 本文档汇总历史分割实验记录，便于横向比较。它与 `SEGMENTATION_METRICS_SUMMARY.md` 配套使用：后者记录当前指标摘要和命令上下文，本文保留跨轮次对比表。
 
@@ -28,6 +28,7 @@
 - 2026-05-31 校园网 Linux 服务器端到端 smoke 已跑通：FLARE 服务器轮次 Dice 合理，AMOS 服务器轮次暴露自动 taxonomy 误判风险；服务器指标必须与本地 fold0/quality 基线分开解释。
 - 2026-05-31 显式 `label_taxonomy=auto|AMOS22|FLARE22` 已实现，`detect_dataset()` 更保守：标签 ID 是 checkpoint 子集时不触发 remap。AMOS CT 高分辨率推理完成（fast profile，mean_dice=0.77724）。服务器 runtime 包已更新为 `server-runtime-package-20260531.zip`，zip 内按 `server/...` 项目结构组织。
 - 2026-05-31 前端新增影像量化分析和报告 `quantification` 字段，只读取预测 mask 与 spacing 生成体积、截面积和长度估算，不改变下列表格中的历史 Dice、IoU、Hausdorff Distance 或耗时数值。
+- 2026-06-01 完成本地缓存演示 7 步：AMOS 0117 cache hit（`aea4e7cdbaf0`）、FLARE22 Tr 0009 真实推理（`0aa7323a4c01`, 218s）、FLARE22 cache hit（`02da885c97d8`, 0.001s）。新增 `tools/seed_demo_cache.py` 与 `docs/local-cache-demo-runbook.md`。本轮 AMOS cache hit 命中的是 2026-05-23 历史推理 `009d4efdc5f6`（review，mean_dice 0.891，stomach 0.556），不修改本表中的任何指标数值；新 quality AMOS 真实推理仍以 `b3c528cc9e20` 为基线。
 
 ## 实验名称说明
 
@@ -47,6 +48,9 @@
 | 服务器 FLARE smoke | 校园网服务器 5GPU/5-fold soft ensemble，FLARE 标签自动 remap | 服务器链路跑通证据，mean Dice 约 0.891 | 报告 `1780153055202` |
 | 服务器 AMOS 异常 | 校园网服务器 5GPU/5-fold soft ensemble，AMOS 标签疑似被误判为 FLARE22 | taxonomy 误判证据，不作为模型失败基线 | job `5d8f5eee7b75` |
 | 本地高分辨率推理 | AMOS CT 768×768×103，本地 RTX 4060，2D nnUNet 逐切片处理 | 高分辨率输入速度分析，非标准尺寸导致推理时间延长 | job `ad3d14eba3de` |
+| 本地缓存演示 AMOS cache hit | AMOS 0117 复跑 cache_key 命中 2026-05-23 历史推理 `009d4efdc5f6` | 演示同输入 cache hit，秒级回填；review 状态保留（stomach 0.556） | job `aea4e7cdbaf0` |
+| 本地缓存演示 FLARE 真实推理 | FLARE22 Tr 0009 首次未缓存 quality 推理 | 真实 nnUNetv2 推理写入 cache_key，218s，结果 120KB | job `0aa7323a4c01` |
+| 本地缓存演示 FLARE cache hit | FLARE22 Tr 0009 复跑命中 0aa7323a4c01 | 验证 cache_key 7 字段隔离正确，0.001s 返回 | job `02da885c97d8` |
 
 ## 实验总览
 
@@ -66,6 +70,9 @@
 | 服务器 FLARE smoke | `—` | FLARE22 | server quality，5-fold soft ensemble，自动 remap | review/可用 | false | ~228 | ~0.891 | ~0.657 | ~0.951 | — | — | — |
 | 服务器 AMOS 异常 | `5d8f5eee7b75` | AMOS 0117 | server quality，5-fold soft ensemble，疑似误 remap | review | false | 586.453 | 0.076015 | 0.000 | 0.979808 | — | — | — |
 | 本地高分辨率推理 | `ad3d14eba3de` | AMOS CT 768×768×103 | fast, TTA off, 2D nnUNet | review | false | 长耗时 | 0.77724 | — | — | — | — | — |
+| 本地缓存演示 AMOS cache hit | `aea4e7cdbaf0` | AMOS 0117 | cached-real-nnunetv2（命中 `009d4efdc5f6`） | review | true | ~3s | 0.891305 | 0.555985 | 0.971222 | N/A | N/A | N/A |
+| 本地缓存演示 FLARE 真实推理 | `0aa7323a4c01` | FLARE22 Tr 0009 | real-nnunetv2，quality，3d_fullres，TTA on | 无验证 | false | 218s | — | — | — | — | — | — |
+| 本地缓存演示 FLARE cache hit | `02da885c97d8` | FLARE22 Tr 0009 | cached-real-nnunetv2（命中 `0aa7323a4c01`） | 无验证 | true | 0.001s | — | — | — | — | — | — |
 
 ## 逐标签 Dice 对比
 
@@ -370,3 +377,13 @@
 | 跨数据集在线验证 | FLARE 自动 remap `a717dacf42d3` | 自动 taxonomy remap 上线后，在线验证 mean_dice=0.926，验证通过。 |
 
 补充口径：缓存命中耗时只能用于说明预测结果复用速度，不能替代未缓存推理性能；缓存命中后的 validation 也不能直接引用缓存来源 job，必须看当前请求是否有标签文件或内置参考标签。
+
+## 2026-06-01 本地缓存演示审核记录
+
+- 本轮新增 3 行：AMOS 0117 cache hit（`aea4e7cdbaf0`，命中 `009d4efdc5f6`）、FLARE22 Tr 0009 真实推理（`0aa7323a4c01`，218s）、FLARE22 cache hit（`02da885c97d8`，0.001s）。
+- AMOS cache hit 命中的是 2026-05-23 历史推理结果（138KB，mean_dice 0.891，stomach 0.556，validation review），与 `009d4efdc5f6` 旧表数据完全一致；不修改本表中其他任何指标数值。
+- FLARE 真实推理 + cache hit 走的是 `real-nnunetv2` + `cached-real-nnunetv2` 完整链路；没有 AMOS 原生标签自动 validation（`validation_available=false` 是 `reference_cases.local.json` 的设计选择），因此不参与 dice/IoU/HD 指标聚合。
+- cache_key 7 字段（`input_sha256` / `checkpoint_sha256` / `checkpoint_dataset_name` / `checkpoint_configuration` / `labels_source` / `runtime_target` / `inference_options`）隔离正确：FLARE cache hit `02da885c97d8` 与 FLARE 真实 `0aa7323a4c01` cache_key 前 16 位完全相同（`0f9c6d68e314b3d7`），但与 AMOS cache hit `aea4e7cdbaf0`（`4e0eb3cd29145b70`）和 quality AMOS `b3c528cc9e20` 完全不同。
+- 推荐基线表不变：正式 AMOS 报告仍以 `b3c528cc9e20`（mean Dice 0.924780）为基线；本地缓存演示是工程链路演示，不替代正式质量基线。
+- 新增 `tools/seed_demo_cache.py`：幂等可重跑；缺失 `009d4efdc5f6` 预测时返回明确提示，FLARE 真实推理缺失时返回"先在 GUI 跑一次 FLARE 推理" 的提示。
+- `cached-real-nnunetv2` 仅复用预测 NIfTI；本轮 FLARE cache hit 没有上传 label file，所以 `validation=null`，与 README 缓存语义说明一致。

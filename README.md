@@ -2,9 +2,16 @@
 
 本项目是面向腹部 CT 分割验证流程的本地 GUI 原型。前端使用 React + Vite，后端使用 FastAPI 桥接本机 nnUNetv2 环境，目标是完成 CT 浏览、三正交联动、器官 label 说明、真实模型推理回填、结果下载和验收记录。
 
-截至 2026-05-31，项目已经作为独立 GUI 仓库维护；真实 CT、NIfTI、checkpoint 权重和推理输出仍只保留在本机，不提交到 GitHub。当前已完成本地在线推理、标签上传、自动 taxonomy remap、报告导出、服务器 runtime 部署准备，以及校园网内 Windows 前端直连 Ubuntu 服务器 FastAPI 后端的 5GPU / 5-fold soft ensemble 在线推理回填。最新服务器运行显示：FLARE22 标签经自动 remap 后 Dice 较高，AMOS 原生标签被误判为 FLARE22 后 mean Dice 异常偏低；已实现显式 `label_taxonomy=auto|AMOS22|FLARE22` 功能，修复了 AMOS 标签被误判为 FLARE22 的问题。
+截至 2026-06-01，项目已经作为独立 GUI 仓库维护；真实 CT、NIfTI、checkpoint 权重和推理输出仍只保留在本机，不提交到 GitHub。当前已完成本地在线推理、标签上传、自动 taxonomy remap、报告导出、服务器 runtime 部署准备、校园网内 Windows 前端直连 Ubuntu 服务器 FastAPI 后端的 5GPU / 5-fold soft ensemble 在线推理回填，以及本地缓存演示 7 步验证（AMOS cache hit → FLARE 真实推理 → FLARE cache hit）。最新服务器运行显示：FLARE22 标签经自动 remap 后 Dice 较高，AMOS 原生标签被误判为 FLARE22 后 mean Dice 异常偏低；已实现显式 `label_taxonomy=auto|AMOS22|FLARE22` 功能，修复了 AMOS 标签被误判为 FLARE22 的问题。
 
 ## 当前运行状态
+
+2026-06-01 已完成：
+- **本地缓存演示 7 步**：AMOS 0117 cache hit（`aea4e7cdbaf0`，命中 2026-05-23 历史推理 `009d4efdc5f6`）、FLARE22 Tr 0009 真实推理（`0aa7323a4c01`，218s）、FLARE22 cache hit（`02da885c97d8`，0.001s）
+- **新增 `tools/seed_demo_cache.py`**：幂等可重跑的预热脚本，7 字段 cache_key 计算后写 `job_summary.json` 让 `009d4efdc5f6` 接入 `find_cached_prediction()`
+- **新增 `docs/local-cache-demo-runbook.md`**：本地缓存演示复跑手册（启动命令、关键路径、cache_key 7 字段、4 个已知约束）
+- **新增 spec/plan**：`docs/superpowers/specs/2026-06-01-local-cache-demo-design.md`、`docs/superpowers/plans/2026-06-01-local-cache-demo.md`
+- **后端依赖补充**：在 `D:\BME2026\BME_CT_Seg\nnunet_env` 装了 `fastapi 0.136.3 / uvicorn 0.48.0 / python-multipart 0.0.30`
 
 2026-05-31 已完成：
 - 显式 `label_taxonomy=auto|AMOS22|FLARE22` 功能，AMOS 原生标签不再被自动误判为 FLARE22
@@ -16,6 +23,7 @@
 - 服务器 AMOS/FLARE validation 复跑：显式选择 `AMOS22` / `FLARE22` 后分别确认 `remap_applied` 状态
 - server mode gating 继续收口：`runtime_target=server` 只依赖服务器 runtime 配置，不被本地 Windows nnUNet 文件缺失阻断
 - 高分辨率 CT 推理优化评估：预降采样与 3D 模型可行性
+- AMOS 预热预测的 review 状态（stomach 0.556）：复跑 quality 真实推理或新训练权重接入后可换更新预测
 
 ## 当前状态
 
@@ -250,6 +258,24 @@ FLARE22 Tr 0009 + 自动 taxonomy remap 在线验证：
 | 验证状态 | `passed` |
 
 自动 taxonomy remap 上线后，FLARE22 标签在线验证从 mean_dice=0.073 提升到 0.926。后端 `server/taxonomy.py` 自动检测 FLARE22 数据集并按器官名重映射标签 ID，无需手动干预。跨数据集在线验证链路正式打通。
+
+## 2026-06-01 本地缓存演示补充
+
+为竞赛 PPT 演示准备的"本地缓存演示 7 步"已经在 Windows 单机 RTX 4060 Laptop 跑通，演示 cache hit → 真实推理 → cache hit 的完整链路：
+
+| Phase | job id | mode | 耗时 | 备注 |
+|---|---|---|---|---|
+| A：AMOS 0117 cache hit | `aea4e7cdbaf0` | `cached-real-nnunetv2` | 命中 | 命中 2026-05-23 历史推理 `009d4efdc5f6`（review 状态，stomach 0.556），不是新一轮 AMOS 基线 |
+| B：FLARE22 Tr 0009 真实推理 | `0aa7323a4c01` | `real-nnunetv2` | `218s` | `remap_applied=true`，`remap_source=FLARE22`；本地单机 fold0，仅作 cache demo Phase B 链路证据 |
+| C：FLARE22 Tr 0009 cache hit | `02da885c97d8` | `cached-real-nnunetv2` | `0.001s` | 命中 Phase B `0aa7323a4c01` |
+
+该轮新增工具与文档：
+
+- `tools/seed_demo_cache.py`：幂等预热脚本，重算 7 字段 cache_key 后写 `job_summary.json` 让 `009d4efdc5f6` 进入缓存索引。
+- `docs/local-cache-demo-runbook.md`：本地缓存演示复跑手册，覆盖启动命令、关键路径、cache_key 7 字段和 4 个已知约束。
+- `docs/superpowers/specs/2026-06-01-local-cache-demo-design.md` 与 `docs/superpowers/plans/2026-06-01-local-cache-demo.md`。
+
+该记录是工程链路演示证据，**不替代** AMOS / FLARE22 正式质量基线：AMOS 基线仍是本地 quality `b3c528cc9e20`（mean_dice 0.924780），跨数据集在线基线仍是服务器 5-fold ensemble `a717dacf42d3`（mean_dice 0.926）。
 
 ## 2026-05-31 服务器在线推理补充
 

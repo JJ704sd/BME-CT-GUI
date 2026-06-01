@@ -4,15 +4,17 @@
 
 ## 当前运行状态
 
+2026-06-01 已完成：
+- 本地缓存演示 7 步：AMOS 0117 cache hit、FLARE22 Tr 0009 真实推理、FLARE22 cache hit
+- 新增 `tools/seed_demo_cache.py`（替换了仅 AMOS 版的 `tools/seed_amos_cache.py`）和 `docs/local-cache-demo-runbook.md`
+- 新增 spec/plan：`docs/superpowers/specs/2026-06-01-local-cache-demo-design.md`、`docs/superpowers/plans/2026-06-01-local-cache-demo.md`
+- 在 `D:\BME2026\BME_CT_Seg\nnunet_env` 装了 `fastapi 0.136.3 / uvicorn 0.48.0 / python-multipart 0.0.30`
+
 2026-05-31 已完成：
 - 显式 `label_taxonomy=auto|AMOS22|FLARE22` 功能，修复了 AMOS 标签被误判为 FLARE22 的问题
 - AMOS CT 高分辨率在线推理（768×768×103，fast profile，mean_dice=0.77724）
 - 服务器 5GPU/5-fold soft ensemble 校园网 smoke
 - 新部署包 `server-runtime-package-20260531.zip`
-
-当前进行中：
-- 高分辨率 CT 推理优化评估（预降采样方案）
-- server mode gating 修复
 
 ## 1. 推荐讲解路线
 
@@ -25,7 +27,8 @@
 7. 到 `deployment-packages/server-runtime-quickstart-20260531.md` 讲服务器 runtime 包的解压、环境变量、CORS、校园网 API 直连 smoke test、显式 `label_taxonomy` 参数和验证清单。
 8. 到 `server/taxonomy.py` 讲跨数据集标签 taxonomy 检测与自动重映射：FLARE22 标签定义、器官名别名映射、`detect_dataset()` 自动识别数据集来源（更保守策略：标签 ID 是 checkpoint 子集时不触发 remap）、`build_remap_mapping()` 按器官名建立 ID 映射、`apply_remap()` 用查找表重排参考标签数组。支持显式 `label_taxonomy=auto|AMOS22|FLARE22` 参数。
 9. 到 `tools/segmentation_metrics_summary.py` 讲 Dice、IoU、Voxel Accuracy 和 Hausdorff Distance 指标如何离线复算。
-10. 最后用 `tests/` 和文档说明验收边界：AMOS 原生 validation 与 FLARE22 自动 taxonomy-remap validation 的区别。
+10. 到 `tools/seed_demo_cache.py` 讲本地缓存演示预热：稳定 SHA-256 计算 `input_sha256` / `checkpoint_sha256`，用 7 字段 `build_cache_key()` 写 `job_summary.json`，让 AMOS 历史推理（`009d4efdc5f6`）成为 cache hit 源；FLARE 真实推理缺失时打印明确提示。
+11. 最后用 `tests/` 和文档说明验收边界：AMOS 原生 validation 与 FLARE22 自动 taxonomy-remap validation 的区别；并把 `docs/local-cache-demo-runbook.md` 作为本地缓存演示复跑手册。
 
 ## 2. 前端入口：`src/main.tsx`
 
@@ -246,11 +249,13 @@
 
 - `tools/segmentation_metrics_summary.py`：离线计算 Dice、IoU、Pixel/Voxel Accuracy、Hausdorff Distance，并生成 JSON/Markdown。
 - `tools/perf_no_cache_persistent.py`：执行无缓存推理性能对照，记录 job、资源和输出。
+- `tools/seed_demo_cache.py`：本地缓存演示预热脚本。稳定计算 `input_sha256` 和 `checkpoint_sha256`，调用 `build_cache_key()` 7 字段组合（`input_sha256` / `checkpoint_sha256` / `checkpoint_dataset_name` / `checkpoint_configuration` / `labels_source` / `runtime_target` / `inference_options`），把 `009d4efdc5f6` 的历史预测重新写成 `job_summary.json` 以让 AMOS cache hit 命中；FLARE 端不预热，扫描现有真实推理 job 目录判断 cache 状态。幂等可重跑。
 
 讲解重点：
 
 - 指标脚本可以用于 AMOS 原生 label，也可以用于 FLARE22 remapped reference，但文档必须明确区分解释边界。
 - 对外报告时，应优先引用 `SEGMENTATION_METRICS_SUMMARY.md` 中已经整理过的指标，而不是直接引用临时输出。
+- `tools/seed_demo_cache.py` 不启动 nnUNetv2 子进程，不产生新推理；它只是把现有真实推理结果接入 `find_cached_prediction()` 缓存查找，因此可以安全地在演示前预热。
 
 ## 14. 测试结构：`tests/`
 
@@ -325,5 +330,6 @@ npm run build
 - 真实 NIfTI、checkpoint、推理输出和私有 registry 不提交。
 - 局域网运行时，前端 API 地址由 `VITE_API_ENDPOINT` 配置，Vite 通过 `npm run dev:lan` 监听局域网地址，后端通过 `SEGMENTATION_ALLOWED_ORIGINS` 放行实际浏览器来源；不应长期使用无限制公网来源。
 - `AMOS_0117` 是当前自动 validation 的主要原生标签案例。
-- `FLARE22_Tr_0009` 已完成真实 `quality` 在线推理、标签上传在线 validation 和自动 taxonomy remap 验证。remap 前 job `bf20f0ec4456` 的 Dice 低是 taxonomy 错位历史证据；remap 后 job `a717dacf42d3` mean Dice 为 `0.926`。
+- `FLARE22_Tr_0009` 已完成真实 `quality` 在线推理、标签上传在线 validation、自动 taxonomy remap 验证和 2026-06-01 本地缓存演示。remap 前 job `bf20f0ec4456` 的 Dice 低是 taxonomy 错位历史证据；remap 后 job `a717dacf42d3` mean Dice 为 `0.926`；本地缓存演示 job `0aa7323a4c01`（真实 218s）和 `02da885c97d8`（cache hit 0.001s）是工程链路演示，不参与正式 AMOS/FLARE 质量基线。
 - 任何后续新增病例都应先判断 label taxonomy，再决定是否允许后端自动 validation；未知数据集和单 label 文件不能自动声明模型质量通过。
+- `docs/local-cache-demo-runbook.md` 是本地缓存演示复跑手册；`tools/seed_demo_cache.py` 是配套预热脚本。`docs/superpowers/specs/2026-06-01-local-cache-demo-design.md` 和 `docs/superpowers/plans/2026-06-01-local-cache-demo.md` 是设计与实施计划。

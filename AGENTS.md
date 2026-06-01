@@ -2,17 +2,21 @@
 
 ## 当前运行状态
 
-截至 2026-05-31，项目已完成：
+截至 2026-06-01，项目已完成：
 
 - 显式 `label_taxonomy=auto|AMOS22|FLARE22` 功能，修复了 AMOS 标签被误判为 FLARE22 的问题
 - AMOS CT 高分辨率在线推理（768×768×103，fast profile，mean_dice=0.77724）
 - 服务器 5GPU/5-fold soft ensemble 校园网 smoke 已跑通
 - 新部署包 `server-runtime-package-20260531.zip` 已创建
+- **本地缓存演示 7 步**：AMOS 0117 cache hit（`aea4e7cdbaf0`，命中 `009d4efdc5f6`）、FLARE22 Tr 0009 真实推理（`0aa7323a4c01`，218s）、FLARE22 cache hit（`02da885c97d8`，0.001s）
+- **新增脚本/文档**：`tools/seed_demo_cache.py`（幂等预热 AMOS cache hit）、`docs/local-cache-demo-runbook.md`（运行说明手册）、`docs/superpowers/specs/2026-06-01-local-cache-demo-design.md`、`docs/superpowers/plans/2026-06-01-local-cache-demo.md`
+- **后端依赖补充**：在 `D:\BME2026\BME_CT_Seg\nnunet_env` 装了 `fastapi 0.136.3 / uvicorn 0.48.0 / python-multipart 0.0.30`
 
 当前进行中：
 
 - 高分辨率 CT 推理优化评估（预降采样方案）
 - server mode gating 修复（`runtime_target=server` 不应依赖本地 Windows nnUNet 文件）
+- AMOS 预热预测 review 状态（stomach 0.556）的复跑或新训练权重接入
 
 ## 项目结构与模块组织
 
@@ -95,7 +99,7 @@ git diff --check
 - `CODE_MODULE_GUIDE.md`
 - `.planning/`
 
-AMOS 原生验证、FLARE22 自动 remap 在线验证、FLARE22 离线 remap 对照、fast preview、cached result、本地 fold0 和服务器 5-fold ensemble 必须分开表述，不能混成同一类证据。`cached-real-nnunetv2` 只表示预测 NIfTI 复用，validation 仍绑定当前请求标签文件或内置参考标签。2026-05-31 服务器 smoke 已跑通后，后续文档不得继续写成”服务器端到端待 smoke”；但服务器 AMOS 指标必须等显式 `label_taxonomy=AMOS22` 复跑并确认 `remap_applied=false` 后，才能纳入正式质量基线。显式 `label_taxonomy` 功能已实现，`detect_dataset()` 更保守：标签 ID 是 checkpoint 子集时不触发 remap。
+AMOS 原生验证、FLARE22 自动 remap 在线验证、FLARE22 离线 remap 对照、fast preview、cached result、本地 fold0 和服务器 5-fold ensemble 必须分开表述，不能混成同一类证据。`cached-real-nnunetv2` 只表示预测 NIfTI 复用，validation 仍绑定当前请求标签文件或内置参考标签。2026-05-31 服务器 smoke 已跑通后，后续文档不得继续写成”服务器端到端待 smoke”；但服务器 AMOS 指标必须等显式 `label_taxonomy=AMOS22` 复跑并确认 `remap_applied=false` 后，才能纳入正式质量基线。显式 `label_taxonomy` 功能已实现，`detect_dataset()` 更保守：标签 ID 是 checkpoint 子集时不触发 remap。2026-06-01 本地缓存演示新增的 AMOS 0117 cache hit 命中的是 2026-05-23 历史推理 `009d4efdc5f6`（review，stomach 0.556），与本地 quality AMOS 真实推理 `b3c528cc9e20`（mean_dice 0.924780）必须分开记录；该 cache hit 是工程链路演示，不替代正式质量基线。
 
 ## 提交与 PR 规范
 
