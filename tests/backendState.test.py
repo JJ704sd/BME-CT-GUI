@@ -294,6 +294,33 @@ def test_create_job_rejects_when_model_is_not_ready():
 
     assert response.status_code == 503
     assert "plans.json" in response.text
+    body = response.json()["detail"]
+    assert "本地 nnUNetv2" in body["message"]
+    assert "服务器" not in body["message"]
+
+
+def test_create_job_503_message_reflects_server_runtime():
+    server = load_server_module()
+
+    with patch.object(server, "get_model_state", return_value={
+        "ready": False,
+        "status": "incomplete",
+        "mode": "unavailable",
+        "runtime_target": "server",
+        "missing": ["server_evaluate_full.py", "server_dataset.json"],
+    }):
+        client = TestClient(server.app)
+        response = client.post(
+            "/api/segment/jobs",
+            files={"file": ("case_0000.nii.gz", b"nifti", "application/octet-stream")},
+            data={"model_id": "abdomen", "runtime_target": "server"},
+        )
+
+    assert response.status_code == 503
+    body = response.json()["detail"]
+    assert "服务器推理" in body["message"]
+    assert "本地 nnUNetv2" not in body["message"]
+    assert body["model_status"]["runtime_target"] == "server"
 
 
 def test_server_source_does_not_log_uploaded_filenames():

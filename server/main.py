@@ -2006,8 +2006,9 @@ async def create_job(
   taxonomy_hint = normalize_label_taxonomy(label_taxonomy)
   model_state = get_model_state(runtime)
   if not model_state["ready"]:
+    runtime_label = "服务器推理" if runtime == "server" else "本地 nnUNetv2"
     raise HTTPException(status_code=503, detail={
-      "message": "本地 nnUNetv2 模型配置不完整，无法创建真实推理任务。",
+      "message": f"{runtime_label} 配置不完整，无法创建真实推理任务。",
       "missing": model_state["missing"],
       "model_status": model_state,
     })
