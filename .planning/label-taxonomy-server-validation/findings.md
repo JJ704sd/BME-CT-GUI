@@ -72,3 +72,11 @@ server/requirements.txt
 ## 当前结论
 
 `label_taxonomy=auto|AMOS22|FLARE22` 已改善 validation/remap 解释链路，但它不改变原始 nnUNet 推理输出。`auto` 模式 2026-06-02 起在 AMOS 1-13 vs FLARE22 1-13 不可分的边界退化为保底（不 remap）；正式 taxonomy 应使用显式 `AMOS22` / `FLARE22` 或由前端按 `referenceCase.dataset` 字段自动设置。服务器 AMOS 轮次必须用 `AMOS22` hint 复跑，确认 `remap_applied=false` 后才能判断真实器官 Dice；不要继续把 AMOS `mean_dice=0.076015` 当作模型失败结论写入质量基线。
+
+## 2026-06-02：dataset_hint 字段打通 auto 边界
+
+**事实：** 0.85 coverage 守卫上线后，FLARE22 真实 1-13 标签也会被 `detect_dataset()` 判为 `None`，导致 FLARE22_Tr_0009 在 `auto` 模式下走不到 remap 路径。
+
+**修复：** 新增 `dataset_hint` 表单字段，前端在 `loadReferenceCase()` 成功载入参考标签后把 `referenceCase.dataset` 写入 `referenceCaseDatasetHint` 状态并随 job 提交；后端 `validate_against_custom_label()` 在 `label_taxonomy=auto` 但 `dataset_hint=FLARE22` 时强制 `detected = "FLARE22"`，覆盖 0.85 守卫的 None。上传自定义 NIfTI 时前端清空 `referenceCaseDatasetHint` 避免错误继承。
+
+**证据：** `tests/backendState.test.py` 新增 `test_validate_against_custom_label_uses_dataset_hint_when_taxonomy_is_auto`：在 `taxonomy=auto + dataset_hint=FLARE22` 下，FLARE22 真实 1-13 标签走 `detected="FLARE22"`，`remap_applied=true`，mean_dice 显著恢复；在 `taxonomy=auto + dataset_hint=AMOS22` 下保持 `None`，不误 remap。

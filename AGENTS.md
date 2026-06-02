@@ -6,6 +6,7 @@
 
 - 显式 `label_taxonomy=auto|AMOS22|FLARE22` 功能，修复了 AMOS 标签被误判为 FLARE22 的问题
 - **2026-06-02 detect_dataset 二轮收紧 + 前端按 dataset 预设 taxonomy**：AMOS 真实 label 只含 1-13（缺 14/15 bladder/prostate 体素），与 FLARE22 真实 1-13 在裸 ID 集合上不可分；`detect_dataset()` 在参考覆盖 ckpt 标签 ≥ 0.85 时直接返回 `None`（不再自动 remap），由前端 `loadReferenceCase()` 按 `referenceCase.dataset` 自动设置 `label_taxonomy`（AMOS → AMOS22、FLARE22 → FLARE22），用户仍可在 UI 切换。`auto` 退化为保底。
+- **2026-06-02 dataset_hint 字段打通 auto 边界**：`loadReferenceCase()` 成功载入参考标签后把 `referenceCase.dataset` 写入 `referenceCaseDatasetHint` 状态；创建 job 时通过新增 `dataset_hint` 表单字段提交给后端。后端 `validate_against_custom_label()` 在 `label_taxonomy=auto` 但 `dataset_hint=FLARE22` 时强制 remap（即便 `detect_dataset` 返回 `None`），保证 FLARE22_Tr_0009 这类参考病例在 `auto` 模式下也能正确 remap。
 - AMOS CT 高分辨率在线推理（768×768×103，fast profile，mean_dice=0.77724）
 - 服务器 5GPU/5-fold soft ensemble 校园网 smoke 已跑通
 - 新部署包 `server-runtime-package-20260531.zip` 已创建

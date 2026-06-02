@@ -2,7 +2,7 @@
 
 ## Context
 
-服务器在线推理已经能完成 5-fold + soft ensemble + 前端回填，但历史 AMOS_0117 带标签验证报告出现异常：`mean_dice=0.076015`、`foreground_dice=0.979808`，且后端自动应用了 `FLARE22 → 当前模型` remap。当前源码已实现显式 `label_taxonomy=auto|AMOS22|FLARE22` 和更保守的 `detect_dataset()`，并已生成 `server-runtime-package-20260531.zip`。2026-06-02 进一步收紧 `detect_dataset()`（0.85 coverage 守卫 + 前端按 `referenceCase.dataset` 预设 taxonomy）。下一轮目标是把修复部署到服务器，复跑 AMOS/FLARE validation，并收口 server 模式 gating。
+服务器在线推理已经能完成 5-fold + soft ensemble + 前端回填，但历史 AMOS_0117 带标签验证报告出现异常：`mean_dice=0.076015`、`foreground_dice=0.979808`，且后端自动应用了 `FLARE22 → 当前模型` remap。当前源码已实现显式 `label_taxonomy=auto|AMOS22|FLARE22` 和更保守的 `detect_dataset()`，并已生成 `server-runtime-package-20260531.zip`。2026-06-02 进一步收紧 `detect_dataset()`（0.85 coverage 守卫 + 前端按 `referenceCase.dataset` 预设 taxonomy），并新增 `dataset_hint` 表单字段在 `taxonomy=auto` 边界强制按参考病例 dataset 走 remap。下一轮目标是把修复部署到服务器，复跑 AMOS/FLARE validation，并收口 server 模式 gating。
 
 ## Phase 1：服务器代码更新 [待执行]
 

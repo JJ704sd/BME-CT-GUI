@@ -4,7 +4,36 @@
 
 最近更新：2026-06-02
 
-## 第 1 轮（最新）— detect_dataset 二轮收紧 + 前端按 dataset 预设 taxonomy
+## 第 1 轮（最新）— dataset_hint 字段打通 auto 边界
+
+| 项目 | 值 |
+|---|---|
+| 日期 | 2026-06-02 |
+| 修复内容 | 新增 `dataset_hint` 表单字段：前端 `loadReferenceCase()` 把 `referenceCase.dataset` 写入 `referenceCaseDatasetHint` 状态并随 job 提交；后端 `validate_against_custom_label()` 在 `taxonomy=auto + dataset_hint=FLARE22` 时强制 remap，覆盖 0.85 守卫的 None |
+| 受影响逻辑 | `server/main.py:Job.dataset_hint` / `create_job` / `validate_against_custom_label()`；`src/main.tsx:referenceCaseDatasetHint` 状态；`src/inference/inferenceClient.ts:createInferenceJob` 新增 `datasetHint` 选项 |
+| 回归测试 | `tests/backendState.test.py` 新增 `test_validate_against_custom_label_uses_dataset_hint_when_taxonomy_is_auto`（FLARE22 真实 1-13 + AMOS ckpt 1-15，验证 `taxonomy=auto + dataset_hint=FLARE22` 走 remap、`taxonomy=auto + dataset_hint=AMOS22` 不 remap） |
+| 自动验证 | `python tests/backendState.test.py`、`npm test`、`npm run build` 全过（`EXIT=0`） |
+
+**问题描述：**
+
+第 1 轮 0.85 coverage 守卫上线后，FLARE22 真实 1-13 标签也会被 `detect_dataset()` 返回 `None`，导致 FLARE22_Tr_0009 在 `taxonomy=auto` 模式下走不到 remap 路径——即使前端已经按 `referenceCase.dataset` 把 `label_taxonomy` 自动设成 `FLARE22`，但如果用户把 `label_taxonomy` 切回 `auto`，Dice 仍会跌到 0.073 量级。
+
+**修复要点：**
+
+| 修改项 | 说明 |
+|---|---|
+| 后端 Job 字段 | `Job.dataset_hint: str \| None = None`；`create_job` 接收 `dataset_hint: str \| None = Form(None)`，归一化（`strip().upper()`）后写入 job state |
+| 后端优先级 | `taxonomy_hint=AMOS22/FLARE22` → `dataset_hint=FLARE22/AMOS22` → `detect_dataset()`；`dataset_hint=FLARE22` 覆盖 0.85 守卫的 None |
+| 后端 action 文案 | 区分"已按用户选择" / "已按参考病例" / "已自动" |
+| 前端状态 | `referenceCaseDatasetHint` 在 `loadReferenceCase()` 成功后写入 `referenceCase.dataset`；catch / else / 上传自定义 NIfTI（`role === "source"`）时清空 |
+| 前端 inference client | `createInferenceJob` options 增加 `datasetHint?: string \| null`；`formData.append("dataset_hint", ...)` |
+| `auto` 行为 | 仍为保底；`dataset_hint` 是 auto 边界下让 FLARE22 真实 1-13 仍能 remap 的补充信号 |
+
+**结论：** FLARE22 真实 1-13 病例在 `taxonomy=auto` 下能正确 remap（`remap_applied=true`、`remap_source=FLARE22`）；`dataset_hint=AMOS22` 不误 remap；上传自定义 NIfTI 时 `referenceCaseDatasetHint` 自动清空。本轮不修改 `server/taxonomy.py` 的判定逻辑、不改变 nnUNetv2 推理、缓存复用、SSE 协议、影像量化或历史基线指标数值。
+
+---
+
+## 第 1 轮 — detect_dataset 二轮收紧 + 前端按 dataset 预设 taxonomy
 
 | 项目 | 值 |
 ||---|
@@ -28,7 +57,7 @@
 |---|---|
 | `detect_dataset()` 0.85 守卫 | `coverage = len(reference_ids ∩ ckpt_ids) / len(ckpt_ids) >= 0.85` → `None` |
 | 前端预设 | `loadReferenceCase()` 在拿到参考 label 后立即调用 `mapDatasetToLabelTaxonomy()`；AMOS/AMOS22 → `AMOS22`、FLARE/FLARE22 → `FLARE22`、其他保持原值 |
-| `auto` 行为 | 退化为保底策略；`label_taxonomy=AMOS22` / `FLARE22` 显式选择仍是正式质量基线入口 |
+| `auto` 行为 | 退化为保底策略；`label_taxonomy=AMOS22` / `FLARE22` 显式选择仍是正式质量基线入口；`dataset_hint` 字段补充 auto 边界下 FLARE22 真实 1-13 的 remap 路径 |
 | 用户体验 | 用户仍可在 UI 切换 taxonomy；前端预设只是默认值 |
 
 **回归测试覆盖：**
@@ -37,11 +66,11 @@
 |---|---|---|---|
 | AMOS 自指 1-15 | `{1..15}` | `{1..15}` | `None`（短路 `==`） |
 | AMOS 真实 1-13 | `{1..13}` | `{1..15}` | `None`（coverage 0.867 ≥ 0.85） |
-| FLARE22 真实 1-13 | `{1..13}` | `{1..15}` | `None`（coverage 0.867 ≥ 0.85；前端预设补） |
+| FLARE22 真实 1-13 | `{1..13}` | `{1..15}` | `None`（coverage 0.867 ≥ 0.85；前端预设补 / `dataset_hint=FLARE22` 覆盖） |
 | AMOS 子集 {1,2,6} | `{1,2,6}` | `{1..15}` | `None`（进入循环，mismatch=0 < 5） |
 | Partial {1,3} | `{1,3}` | `{1,3,6}` | `None`（`len(shared_ids) < 3` 守卫） |
 
-**结论：** `auto` 模式在裸 ID 不可分的边界（AMOS 1-13 vs FLARE22 1-13）退化为保底，避免错误 remap。正式 taxonomy 由前端 `loadReferenceCase()` 按 `referenceCase.dataset` 字段预设；用户仍可在 UI 切换。本修复不改变 nnUNetv2 推理、缓存复用、SSE 协议或影像量化逻辑。
+**结论：** `auto` 模式在裸 ID 不可分的边界（AMOS 1-13 vs FLARE22 1-13）退化为保底，避免错误 remap。正式 taxonomy 由前端 `loadReferenceCase()` 按 `referenceCase.dataset` 字段预设；`dataset_hint` 字段补充 `auto` 边界下 FLARE22 真实 1-13 的 remap 路径；用户仍可在 UI 切换。本修复不改变 nnUNetv2 推理、缓存复用、SSE 协议或影像量化逻辑。
 
 ---
 

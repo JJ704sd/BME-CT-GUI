@@ -2673,5 +2673,60 @@ AMOS ckpt 包含 1-15（共 15 个前景标签）。`amos_0117_label.nii` 实际
 
 ---
 
+## 五十五、2026-06-02 dataset_hint 字段打通 auto 边界
+
+### 55.1 现象
+
+第 54 节上线 0.85 coverage 守卫后，FLARE22 真实 1-13 标签（`{1..13}`）和 AMOS 真实 1-13 标签都直接被 `detect_dataset()` 返回 `None`。这意味着 FLARE22_Tr_0009 这类参考病例在 `auto` 模式下走不到 remap 路径——前端虽然已经按 `referenceCase.dataset` 把 `label_taxonomy` 自动设成 `FLARE22`，但如果用户手动把 `label_taxonomy` 切回 `auto`（或将来从其他入口提交时不携带 `label_taxonomy`），FLARE22 真实标签会落到"不 remap 但又被当成 AMOS 原生 ID"的边界上，Dice 再次跌到 0.073 量级。
+
+### 55.2 根因
+
+`auto` 模式与 `detect_dataset()` 的 0.85 守卫存在逻辑冲突：
+
+- AMOS 1-13 真实数据需要走 `None`（避免被错 remap）。
+- FLARE22 1-13 真实数据同样走 `None`（0.85 coverage 命中），但实际应该 remap。
+
+仅靠 `detect_dataset()` 在裸 ID 不可分时无法可靠判断；后端必须依赖其他信号——比如参考病例的 `dataset` 字段。
+
+### 55.3 修复
+
+| 修复点 | 文件 | 内容 |
+|---|---|---|
+| 后端 Job 字段 | `server/main.py` | `Job` dataclass 新增 `dataset_hint: str \| None = None`；`create_job` 接收 `dataset_hint: str \| None = Form(None)`，归一化（`strip().upper()`）后写入 job state 和 `job_summary.json`。 |
+| 后端优先级 | `server/main.py:validate_against_custom_label()` | 新增 `dataset_hint: str \| None = None` 参数；优先顺序：`taxonomy_hint=AMOS22/FLARE22` → `dataset_hint=FLARE22/AMOS22` → `detect_dataset()`。`dataset_hint=FLARE22` 强制 `detected="FLARE22"`，覆盖 0.85 守卫的 None。 |
+| 后端 action 文案 | `server/main.py` | `action` 区分"已按用户选择" / "已按参考病例" / "已自动"。 |
+| 前端状态 | `src/main.tsx` | 新增 `referenceCaseDatasetHint` 状态；`loadReferenceCase()` 成功后 `setReferenceCaseDatasetHint(referenceCase.dataset \|\| null)`；catch / else / 上传自定义 NIfTI（`role === "source"`）时清空。 |
+| 前端 inference client | `src/inference/inferenceClient.ts` | `createInferenceJob` options 增加 `datasetHint?: string \| null`；`formData.append("dataset_hint", ...)` 仅在 truthy 时提交。 |
+| 回归测试 | `tests/backendState.test.py` | 新增 `test_validate_against_custom_label_uses_dataset_hint_when_taxonomy_is_auto`：构造 AMOS ckpt 1-15 + FLARE22 真实 1-13 标签 + 预测 AMOS view；在 `taxonomy=auto + dataset_hint=FLARE22` 下验证走 remap、mean_dice > 0.5；在 `taxonomy=auto + dataset_hint=AMOS22` 下验证保持 `None`、mean_dice 很低。 |
+
+### 55.4 验收结果
+
+| 检查项 | 结果 |
+|---|---|
+| FLARE22 + taxonomy=auto + dataset_hint=FLARE22 | `detected="FLARE22"`（覆盖 0.85 守卫），`remap_applied=true`，mean_dice 显著恢复 |
+| FLARE22 + taxonomy=auto + dataset_hint=AMOS22 | `detected=None`，`remap_applied=false`（避免误 remap） |
+| AMOS + taxonomy=auto + dataset_hint 未设 | `detected=None`，`remap_applied=false`（与 54 节行为一致） |
+| 上传自定义 NIfTI | `referenceCaseDatasetHint` 自动清空，不继承上一参考病例的 dataset |
+| `npm test` / `python tests/backendState.test.py` / `npm run build` | 全过（`EXIT=0`） |
+
+### 55.5 行为边界
+
+- `dataset_hint` 不影响 `taxonomy_hint` 显式选择：用户选 `label_taxonomy=AMOS22/FLARE22` 时仍以 `taxonomy_hint` 为准。
+- `dataset_hint` 仅在 `taxonomy=auto` 时作为 `detect_dataset()` 之外的补充信号；当 `detect_dataset()` 已经能判定（如 `AMOS 1-15 == ckpt 1-15`）时仍走更具体的判定。
+- 上传自定义 NIfTI 时 `dataset_hint` 自动清空，避免错误继承——这是为了防止"上次载入 FLARE22 参考病例，本次上传 AMOS 标签"导致 AMOS 标签被错 remap。
+- 本轮不修改 `server/taxonomy.py` 的判定逻辑；`detect_dataset()` 的 0.85 守卫保持不变。`server/main.py` 三个 `validate_against_custom_label()` 调用点都同步传 `dataset_hint=job.dataset_hint`。
+
+### 55.6 文档同步
+
+9 份根文档（README/CLAUDE/AGENTS/ACCEPTANCE/REVIEW/CODE_MODULE_GUIDE/SEGMENTATION_RECENT_ROUNDS/SEGMENTATION_EXPERIMENT_COMPARISON/SEGMENTATION_METRICS_SUMMARY）+ `.planning/label-taxonomy-server-validation/{explanation,findings,progress,task_plan}.md` 4 份 planning 文档均已添加 "2026-06-02 dataset_hint 字段打通 auto 边界" 描述，统一口径为：
+
+- `validate_against_custom_label()` 的优先级：`taxonomy_hint` 显式选择 > `dataset_hint` 参考病例上下文 > `detect_dataset()` 自动检测。
+- `dataset_hint=FLARE22` 覆盖 0.85 守卫的 None，让 FLARE22_Tr_0009 在 `auto` 模式下仍能正确 remap。
+- `dataset_hint=AMOS22` 不再误 remap。
+- 上传自定义 NIfTI 时 `dataset_hint` 自动清空。
+- 本轮不改变 nnUNetv2 推理、缓存复用、SSE 协议、影像量化或历史基线指标数值。
+
+---
+
 *文档版本：2026-06-02*
 *更新依据：当前 `src/main.tsx`、`src/inference/inferenceClient.ts`、`server/main.py`、`server/server_inference.py`、`server/taxonomy.py`、`tools/seed_demo_cache.py`、`tools/rewrite_flare22_historical_summary.py`、`docs/local-cache-demo-runbook.md`、`docs/superpowers/specs/2026-06-01-local-cache-demo-design.md`、`docs/superpowers/plans/2026-06-01-local-cache-demo.md`、`package.json`、`README.md`、`ACCEPTANCE.md`、`SEGMENTATION_METRICS_SUMMARY.md`、`SEGMENTATION_EXPERIMENT_COMPARISON.md`、`SEGMENTATION_RECENT_ROUNDS.md`、`CODE_MODULE_GUIDE.md`、`CLAUDE.md`、`AGENTS.md`、`.planning/lan-direct-and-tunnel/`、`.planning/campus-network-and-public-access/`、`.planning/label-taxonomy-server-validation/`、`.planning/high-resolution-inference-optimization/`、`.planning/2026-06-01-local-cache-demo/` 与 `deployment-packages/`。*

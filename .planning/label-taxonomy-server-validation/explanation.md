@@ -8,6 +8,8 @@
 
 2026-06-02 增量：`detect_dataset()` 进一步收紧（参考覆盖 ckpt 标签 ≥ 0.85 时返回 `None`），并由前端 `loadReferenceCase()` 按 `referenceCase.dataset` 字段自动设置 `label_taxonomy`（AMOS 病例 → `AMOS22`、FLARE22 病例 → `FLARE22`、其他保持原值）。`auto` 退化为保底策略。
 
+2026-06-02 增量（dataset_hint 字段）：由于 `auto` 在 0.85 守卫下也会让 FLARE22 真实 1-13 标签返回 `None`，前端在 `loadReferenceCase()` 拿到参考病例后把 `referenceCase.dataset` 写入 `referenceCaseDatasetHint` 状态，创建 job 时通过新增的 `dataset_hint` 表单字段提交给后端。后端 `validate_against_custom_label()` 在 `label_taxonomy=auto` 但 `dataset_hint=FLARE22` 时强制 remap（即便 `detect_dataset` 返回 `None`），保证 FLARE22_Tr_0009 这类参考病例在 `auto` 模式下也能正确 remap；上传自定义 NIfTI 时 `dataset_hint` 自动清空避免错误继承。
+
 ## 核心概念
 
 ### 1. label taxonomy
@@ -169,6 +171,20 @@ validation 按当前模型标签体系解释
 ### auto 模式
 
 适合作为保底和演示默认值；正式质量基线建议使用显式 taxonomy。2026-06-02 起，`auto` 在 AMOS 真实 1-13 标签 vs FLARE22 真实 1-13 标签不可分的边界不再保证正确，应回退到 `AMOS22` / `FLARE22` 显式选择，或依靠参考病例 registry 的 `dataset` 字段自动预设。
+
+### dataset_hint 字段（auto 边界补充）
+
+前端在加载参考病例时把 `referenceCase.dataset` 写入 `referenceCaseDatasetHint` 状态，并在创建 job 时通过 `dataset_hint` 表单字段提交给后端。后端 `validate_against_custom_label()` 的优先顺序：
+
+```text
+1. taxonomy_hint = AMOS22    → detected = None（强制不 remap）
+2. taxonomy_hint = FLARE22   → detected = FLARE22（强制 remap）
+3. dataset_hint = FLARE22    → detected = FLARE22（auto 边界补充）
+4. dataset_hint = AMOS22     → detected = None
+5. else                      → detected = detect_dataset(...)
+```
+
+`dataset_hint` 字段解决的是 `auto` 模式下 AMOS 1-13 vs FLARE22 1-13 不可分时仍能正确 remap 的问题；上传自定义 NIfTI 时前端会清空该字段，避免错误继承。
 
 ## 与量化功能的关系
 

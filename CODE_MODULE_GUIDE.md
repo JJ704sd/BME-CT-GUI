@@ -138,7 +138,7 @@
 
 主要职责：
 
-- `createInferenceJob()`：提交源图、模型、运行位置、profile、后处理配置。可选附带 `label_file` 用于在线 Dice 验证。
+- `createInferenceJob()`：提交源图、模型、运行位置、profile、后处理配置。可选附带 `label_file` 用于在线 Dice 验证。可选附带 `dataset_hint` 用于在 `taxonomy=auto` 边界下告知后端参考病例的 dataset 上下文（前端在 `loadReferenceCase()` 成功后写入 `referenceCaseDatasetHint` 状态并提交）。
 - `parseInferenceEvent()`：解析 SSE 进度、完成、失败事件。
 - `downloadInferenceResult()`：下载后端生成的 NIfTI mask。
 - `fetchModelLabels()`：获取 checkpoint label 定义，保证前端器官列表和模型一致。
@@ -149,6 +149,7 @@
 - `quality` 是默认正式推理路径。
 - `fast` 只作为快速预览，界面和结果元信息都需要标记“需人工复核”。
 - `runtime_target` 会进入 job state、SSE complete event 和缓存 key，避免本地 fold0、服务器 5-fold ensemble、fast/quality 混用缓存。
+- `label_taxonomy=auto|AMOS22|FLARE22` 已实现并纳入缓存 key；`detect_dataset()` 在参考覆盖 ckpt 标签 ≥ 0.85 时返回 `None`；前端 `loadReferenceCase()` 按 `referenceCase.dataset` 自动设置 `label_taxonomy`，并通过 `dataset_hint` 字段把 dataset 上下文传给后端，覆盖 `auto` 边界下 0.85 守卫的 None。上传自定义 NIfTI 时 `dataset_hint` 自动清空避免错误继承。
 - 失败事件中的 `log_tail` 会被前端保留到结构化 timeline，便于从底部状态追溯后端错误摘要。
 
 ## 7. 器官与病例数据
@@ -208,6 +209,7 @@
 
 - `nnunetv2_files/`、`.test-output/`、`server/work/` 都是本地私有或临时输出，不进入 Git。
 - 自动 validation 的前提是 label taxonomy 与 checkpoint 原生一致，或后端能通过 `server/taxonomy.py` 识别并自动 remap。FLARE22 已支持在线自动 remap。显式 `label_taxonomy=auto|AMOS22|FLARE22` 已实现：`auto` 模式更保守（标签 ID 是 checkpoint 子集时不触发 remap），`AMOS22` 强制不 remap，`FLARE22` 强制 remap。该参数已纳入缓存 key。
+- `dataset_hint` 表单字段是 2026-06-02 增量：前端在 `loadReferenceCase()` 成功后把 `referenceCase.dataset` 写入 `referenceCaseDatasetHint` 状态并随 job 提交；后端 `validate_against_custom_label()` 在 `taxonomy=auto + dataset_hint=FLARE22` 时强制 `detected="FLARE22"`，覆盖 0.85 守卫的 None，保证 FLARE22_Tr_0009 这类参考病例在 `auto` 模式下也能正确 remap。上传自定义 NIfTI 时 `dataset_hint` 自动清空。
 - 心跳事件的 `heartbeat: true` 字段可用于前端区分心跳和真正的阶段进度；心跳失败不会中断推理。
 
 ## 10. 服务器推理编排：`server/server_inference.py`

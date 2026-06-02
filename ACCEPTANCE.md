@@ -665,3 +665,29 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\checkpoint_best.
 - `auto` 不再保证检测 FLARE22：在 AMOS 1-13 真实数据与 FLARE22 1-13 真实数据无法仅靠 ID 区分的边界，`auto` 退化为保底（不 remap）。`label_taxonomy=AMOS22` / `FLARE22` 显式选择仍是正式质量基线的入口。
 - `mapDatasetToLabelTaxonomy()` 只在 `dataset` 字段是 `AMOS22 / AMOS / FLARE22 / FLARE` 时才预设；其他字段（如 `unknown`、`custom`）保留用户当前选择。
 - 本改动不改变 nnUNetv2 模型推理、缓存复用、SSE 协议或影像量化逻辑。
+
+## 2026-06-02 dataset_hint 字段打通 auto 边界验收记录
+
+范围：
+
+- 在 `detect_dataset()` 0.85 守卫下，FLARE22 真实 1-13 标签也会被返回 `None`，导致 FLARE22_Tr_0009 这类参考病例在 `auto` 模式下走不到 remap 路径。
+- 新增 `dataset_hint` 表单字段：前端在 `loadReferenceCase()` 成功后把 `referenceCase.dataset` 写入 `referenceCaseDatasetHint` 状态并随 job 提交；后端 `validate_against_custom_label()` 在 `taxonomy=auto + dataset_hint=FLARE22` 时强制 `detected="FLARE22"`。
+- 上传自定义 NIfTI 时 `dataset_hint` 自动清空，避免错误继承。
+
+验收证据：
+
+| 检查项 | 结果 |
+|---|---|
+| 后端 `Job.dataset_hint` | 新增字段；`create_job` 接收 `dataset_hint: str \| None = Form(None)`，归一化后写入 job state 和 job_summary |
+| 后端优先级 | `taxonomy_hint=AMOS22/FLARE22` → `dataset_hint=FLARE22/AMOS22` → `detect_dataset()`；`dataset_hint=FLARE22` 覆盖 0.85 守卫的 None |
+| 后端 action 文案 | 区分"已按用户选择" / "已按参考病例" / "已自动" |
+| 前端状态 | `loadReferenceCase()` 成功后 `setReferenceCaseDatasetHint(referenceCase.dataset \|\| null)`；catch / else / 上传自定义 NIfTI 时清空 |
+| 前端 inference client | `createInferenceJob()` 增加 `datasetHint` 选项；`formData.append("dataset_hint", ...)` |
+| 回归测试 | `tests/backendState.test.py` 新增 `test_validate_against_custom_label_uses_dataset_hint_when_taxonomy_is_auto`：在 `taxonomy=auto + dataset_hint=FLARE22` 下，FLARE22 真实 1-13 标签走 remap，mean_dice 显著恢复；在 `taxonomy=auto + dataset_hint=AMOS22` 下保持 `None` 不误 remap |
+| 文档同步 | 9 份根文档 + `.planning/label-taxonomy-server-validation/` 4 份 planning 文档均已添加 dataset_hint 描述 |
+
+行为边界：
+
+- `dataset_hint` 不影响 `taxonomy_hint` 显式选择：`label_taxonomy=AMOS22/FLARE22` 优先级仍高于 `dataset_hint`。
+- 上传自定义 NIfTI 时 `referenceCaseDatasetHint` 自动清空，确保不会把上一个参考病例的 dataset 错误继承到当前请求。
+- 本轮不修改 `server/taxonomy.py` 的判定逻辑，只在 `validate_against_custom_label()` 调用点增加 `dataset_hint` 覆盖；`detect_dataset()` 的 0.85 守卫保持不变。

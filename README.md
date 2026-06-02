@@ -59,7 +59,7 @@
 - 后端会按当前模型 `dataset.json.file_ending` 规范化输入文件名；当前模型要求 `.nii.gz`，所以 `.nii` 上传会转为 nnUNet 可识别的 `_0000.nii.gz` 输入。
 - 推理运行中可点击”取消推理”，后端会请求终止当前 nnUNetv2 子进程并通过 SSE 回写取消状态。
 - 长时间推理期间后端会定期发送心跳事件（间隔 10 秒），前端底部进度 rail 更新已耗时和资源快照，避免界面显示停滞。
-- 支持通过"标签 CT 导入"按钮或拖拽上传标签 NIfTI 文件，推理完成后自动执行在线 Dice 验证。前端会提交 `label_taxonomy=auto|AMOS22|FLARE22`：`AMOS22` 强制不执行 FLARE remap，`FLARE22` 强制执行 FLARE22 → AMOS22 remap，`auto` 使用保守自动检测；validation 结果中的 `remap_applied`、`remap_source` 和 `label_taxonomy` 是解释 Dice 的关键字段。
+- 支持通过"标签 CT 导入"按钮或拖拽上传标签 NIfTI 文件，推理完成后自动执行在线 Dice 验证。前端会提交 `label_taxonomy=auto|AMOS22|FLARE22` 和 `dataset_hint`（由参考病例 `dataset` 字段在 `loadReferenceCase()` 阶段自动设置，AMOS22 / FLARE22 / 其他）：`AMOS22` 强制不执行 FLARE remap，`FLARE22` 强制执行 FLARE22 → AMOS22 remap，`auto` + `dataset_hint=FLARE22` 触发参考病例驱动的 remap（解决 FLARE22 真实 1-13 标签与 AMOS 真实 1-13 标签在裸 ID 集合上不可分的问题），`auto` 无 hint 时退化为保守自动检测；validation 结果中的 `remap_applied`、`remap_source`、`label_taxonomy` 和 `dataset_hint` 是解释 Dice 的关键字段。
 - 持久化 job summary、阶段耗时、结果大小、资源快照和 nnUNetv2 日志尾部。
 - 支持同输入、同 checkpoint、同推理配置的历史预测结果缓存回填：`cached-real-nnunetv2`。缓存只复用 NIfTI 预测结果；validation 会按本次请求的标签文件或内置参考标签重新计算，无当前标签时不复用旧 validation。
 - 支持导出分割报告（HTML / JSON / PDF 三种格式），报告包含概览、验证指标、逐标签指标、影像量化分析、器官列表、关键发现、测量点和推理时间线。JSON 报告当前使用 `schema_version: "1.1"` 并包含 `quantification` 字段；PDF 导出使用浏览器原生打印，不引入第三方 PDF 库。

@@ -39,6 +39,17 @@
 - [x] 配套 `server-runtime-quickstart-20260531.md` 已编写。
 - [x] zip 包内部已按 `server/...` 项目结构组织，可在服务器项目根目录直接解压覆盖。
 
+### 4a. dataset_hint 字段打通 auto 边界 [已完成]
+
+- [x] 后端 `Job` dataclass 增加 `dataset_hint: str | None = None`。
+- [x] `create_job` 接收 `dataset_hint: str | None = Form(None)`，写入 job state。
+- [x] `validate_against_custom_label()` 增加 `dataset_hint: str | None = None` 参数。
+- [x] 优先级：`taxonomy_hint=AMOS22/FLARE22` → `dataset_hint=FLARE22/AMOS22` → `detect_dataset()`。
+- [x] 前端 `referenceCaseDatasetHint` 状态在 `loadReferenceCase()` 成功后写入 `referenceCase.dataset`，catch/else 分支和上传自定义 NIfTI 时清空。
+- [x] `src/inference/inferenceClient.ts` 增加 `datasetHint` 选项和 `dataset_hint` FormData 字段。
+- [x] `tests/backendState.test.py` 新增 `test_validate_against_custom_label_uses_dataset_hint_when_taxonomy_is_auto`。
+- [x] action 文案区分"已按用户选择" / "已按参考病例" / "已自动"。
+
 ## 待完成
 
 ### 5. server mode gating 修复 [待执行]
@@ -57,4 +68,4 @@
 
 ## 当前结论
 
-taxonomy fix 已完成并验证通过。2026-06-02 `detect_dataset()` 二轮收紧：AMOS 真实 1-13 标签与 FLARE22 在裸 ID 集合上不可分，新加 0.85 coverage 守卫将 `auto` 在该边界退化为不 remap；正式 taxonomy 由前端 `loadReferenceCase()` 按 `referenceCase.dataset` 自动设置。AMOS 标签不再被误判为 FLARE22。下一轮工作应优先更新服务器、复跑显式 taxonomy validation，并修复/验证 server mode gating。
+taxonomy fix 已完成并验证通过。2026-06-02 `detect_dataset()` 二轮收紧：AMOS 真实 1-13 标签与 FLARE22 在裸 ID 集合上不可分，新加 0.85 coverage 守卫将 `auto` 在该边界退化为不 remap；正式 taxonomy 由前端 `loadReferenceCase()` 按 `referenceCase.dataset` 自动设置。2026-06-02 同时新增 `dataset_hint` 字段：在 `taxonomy=auto` 但参考病例来自 FLARE22 时强制 remap，覆盖 0.85 守卫的 None，让 FLARE22_Tr_0009 这类参考病例在 `auto` 模式下也能正确 remap。下一轮工作应优先更新服务器、复跑显式 taxonomy validation，并修复/验证 server mode gating。

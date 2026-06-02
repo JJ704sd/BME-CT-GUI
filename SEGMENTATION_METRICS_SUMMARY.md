@@ -7,8 +7,9 @@
 2026-06-02 已完成：
 - `detect_dataset()` 二轮收紧：参考覆盖 ckpt 标签 ≥ 0.85 时直接返回 `None`，避免 AMOS 1-13 真实数据被错判为 FLARE22。
 - 前端 `loadReferenceCase()` 按 `referenceCase.dataset` 自动设置 `label_taxonomy`：AMOS → `AMOS22`、FLARE22 → `FLARE22`、其他保持原值。`auto` 退化为保底策略。
-- `tests/backendState.test.py` 新增 AMOS 1-13 + ckpt 1-15 真实 case 测试，更新 FLARE22 1-13 + ckpt 1-15 用例注释。
-- 本文档既有 AMOS quality 基线 `b3c528cc9e20`（mean_dice 0.924780）和新权重首跑 `27216eb73220`（mean_dice 0.924791）保持不变；2026-06-02 修复仅影响 `auto` 模式下的 taxonomy 判定逻辑，不改变已记录的任何指标数值。
+- `dataset_hint` 字段打通 auto 边界：0.85 守卫下 FLARE22 真实 1-13 也会被返回 `None`，因此新增 `dataset_hint` 表单字段——前端在 `loadReferenceCase()` 成功后把 `referenceCase.dataset` 写入 `referenceCaseDatasetHint` 状态并随 job 提交，后端 `validate_against_custom_label()` 在 `taxonomy=auto + dataset_hint=FLARE22` 时强制 remap，覆盖 0.85 守卫的 None；上传自定义 NIfTI 时前端清空 `referenceCaseDatasetHint` 避免错误继承。
+- `tests/backendState.test.py` 新增 AMOS 1-13 + ckpt 1-15 真实 case 测试、`test_validate_against_custom_label_uses_dataset_hint_when_taxonomy_is_auto`，更新 FLARE22 1-13 + ckpt 1-15 用例注释。
+- 本文档既有 AMOS quality 基线 `b3c528cc9e20`（mean_dice 0.924780）和新权重首跑 `27216eb73220`（mean_dice 0.924791）保持不变；2026-06-02 修复仅影响 `auto` 模式下的 taxonomy 判定逻辑与 `auto` 边界下 FLARE22 的 remap 路径，不改变已记录的任何指标数值。
 
 2026-06-01 已完成：
 - 本地缓存演示 7 步：AMOS 0117 cache hit、FLARE22 Tr 0009 真实推理、FLARE22 cache hit
