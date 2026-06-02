@@ -3,7 +3,7 @@
 > 适用项目：`segmentation-gui-prototype`（腹部 CT 多器官自动分割 + 浏览器端交互验证系统）
 > 适用赛道：「呼吸-消化系统疾病」赛道 — 智能影像分析与评价（影像分析算法类）
 > 报告硬约束：前言 + 问题引入 ≤ 2 页，方案设计 + 结果展示 + 讨论 ≤ 8 页，整体 ≤ 12 页
-> 最近更新：2026-06-02（同步本地缓存演示 7 步 + 2026-06-01 cache 链路补丁）
+> 最近更新：2026-06-02（同步本地缓存演示 7 步 + 2026-06-01 cache 链路补丁 + auto taxonomy 边界加固）
 
 ---
 
@@ -101,7 +101,7 @@
 
 - **问题**：FLARE22 label ID 顺序与 AMOS22 checkpoint 不一致（仅 label 2 = 右肾恰好对齐），直接 Dice 会因语义错位接近 0（`mean_dice = 0.073`）。
 - **方法**：在 `server/taxonomy.py` 维护 FLARE22 标签表、器官别名映射（`postcava → ivc`、`gall_bladder → gallbladder` 等）；后端根据 label ID 集合自动检测数据集来源，按器官名把参考标签重映射到 checkpoint 标签空间。
-- **显式 hint**：前端提供 `label_taxonomy = auto | AMOS22 | FLARE22` 选项；`auto` 模式保守，**仅在多个明确错位 ID 时才触发 remap**，避免 AMOS 原生标签被误判。
+- **显式 hint**：前端提供 `label_taxonomy = auto | AMOS22 | FLARE22` 选项；`auto` 模式保守，**仅在多个明确错位 ID 时才触发 remap**，避免 AMOS 原生标签被误判（2026-06-02 进一步加固 coverage 守卫 + `dataset_hint` 字段，应对 AMOS / FLARE 真实 unique IDs 不可分场景）。
 - **结果**：FLARE22 Tr 0009 在线验证 `mean_dice` 从 `0.073` 提升到 `0.926`，`foreground_dice = 0.95`。
 - **cache 链路配套**（2026-06-01 补丁）：FLARE22 cache hit 在前端直接显示历史离线指标，避免重新推理再次触发"语义错位"误判；cache_key 7 字段（`input_sha + model_dataset + profile + label_taxonomy + runtime_target + postprocess + device`）保证 `label_taxonomy` 不同的请求不会共用 cache。
 
@@ -200,7 +200,7 @@
     - 当前数据集为单中心公开数据，多中心验证待扩展；
     - `confidenceThreshold` 当前是质控提示，不会真实作用概率图；
     - 2026-06-01 之前 cache hit 在前端展示的 validation 摘要曾出现"张冠李戴"（FLARE22 命中错位 cache_source），已通过 cache 链路补丁修复（`_load_cached_validation_summary()` + `find_cached_prediction()` 按 `has_validation_summary, mtime` 排序 + `tools/rewrite_flare22_historical_summary.py` 按历史指标改写 `validation_summary.json`）。
-3. **展望**：高分辨率 CT 预降采样 / 3D 模型；多中心数据集（TotalSegmentator、AMOS2022 后续版本）；云端 HTTPS + 鉴权；与 PACS / RIS 集成；扩展到肺部分割（FLARE 肺、ATM'22）；**跨数据集 cache 链路产品化（通用 `tools/rewrite_cached_validation_summary.py`）+ 演示启动脚本化**。
+3. **展望**：高分辨率 CT 预降采样 / 3D 模型；多中心数据集（TotalSegmentator、AMOS2022 后续版本）；云端 HTTPS + 鉴权；与 PACS / RIS 集成；扩展到肺部分割（FLARE 肺、ATM'22）；**跨数据集 cache 链路产品化（通用 `tools/rewrite_cached_validation_summary.py`）+ 演示启动脚本化**；**服务器端复跑 `label_taxonomy=AMOS22/FLARE22` 显式 hint，把服务器 AMOS 轮次纳入正式质量基线**；**auto taxonomy 边界加固需在更多非 AMOS 真实数据集（如 FLARE23、TotalSegmentator）上验证裸 ID 不可分场景下的稳定性**。
 
 ---
 
@@ -263,6 +263,7 @@
 
 - ❌ 使用 Mimics / 3D Slicer / ITK-SNAP 等人工交互软件（命题明文禁止）。
 - ❌ 把 FLARE22 remap 前 `0.073` 当模型失败基线（这是 taxonomy 错位）。
+- ❌ 把 2026-05-31 服务器 AMOS 轮次 `mean_dice=0.076015` 当模型失败基线（`remap_source=FLARE22`，是 AMOS 原生标签被自动误 remap，**非模型质量问题**；已在 2026-06-02 auto taxonomy 边界加固中收口，待服务器窗口复跑确认 `remap_applied=false` 后才能纳入正式质量基线）。
 - ❌ 把 persistent worker 没验证的"加速"写进结果。
 - ❌ 写"未经验证的多中心 / 跨中心"结论。
 - ❌ 提交真实 CT / NIfTI / checkpoint / 推理输出到 GitHub（`.gitignore` 已屏蔽）。
@@ -291,6 +292,7 @@
 - [ ] 仓库中不包含真实患者数据 / checkpoint
 - [ ] **本地缓存演示**（如现场演示）：启动前确认 `SEGMENTATION_REFERENCE_CASES_JSON=examples/reference_cases.json`，`/api/samples` 返回 4 个 case；FLARE22 cache hit 摘要标注"（历史离线缓存摘要）"
 - [ ] **工程亮点口径一致**：cache hit 数字以 2026-06-01 cache 链路补丁后的 `0.893127 / 0.67373 / 0.949908` 为准（不是旧的 `0.891`）
+- [ ] **taxonomy 修复口径一致**：不要把 0.076 当模型失败基线（已在 2026-06-02 auto taxonomy 边界加固中收口）
 
 ---
 
@@ -299,7 +301,7 @@
 - **训练 / 推理框架**：nnU-Net v2（5-fold cross-validation + soft ensemble + TTA）
 - **数据集**：AMOS22（训练 / 验证 15 个前景标签）、FLARE22（跨数据集 remap 验证）
 - **15 个 AMOS22 前景标签**：spleen, right_kidney, left_kidney, gallbladder, esophagus, liver, stomach, aorta, ivc, pancreas, right_adrenal_gland, left_adrenal_gland, duodenum, bladder, prostate_or_uterus
-- **训练后端**：`server/main.py`（FastAPI）、`server/server_inference.py`（5-GPU/5-fold 编排）、`server/taxonomy.py`（跨数据集 remap）
+- **训练后端**：`server/main.py`（FastAPI）、`server/server_inference.py`（5-GPU/5-fold 编排）、`server/taxonomy.py`（跨数据集 remap + 2026-06-02 auto taxonomy 边界加固）
 - **GUI 前端**：`src/main.tsx`、`src/components/OrthogonalViewer.tsx`、`src/imaging/quantification.ts`、`src/inference/inferenceClient.ts`
 - **报告导出**：`src/report/exportReport.ts`（HTML / JSON / PDF）
 - **指标工具**：`tools/segmentation_metrics_summary.py`
