@@ -1208,7 +1208,7 @@ def test_cached_prediction_revalidates_against_current_label_file():
 
     validated_label_paths: list[Path] = []
 
-    def fake_validate(result_path, label_path, labels, label_taxonomy="auto"):
+    def fake_validate(result_path, label_path, labels, label_taxonomy="auto", dataset_hint=None):
         validated_label_paths.append(label_path)
         assert result_path.name.endswith(".nii.gz")
         assert labels == [{"label": 1, "id": "spleen"}]
@@ -2074,12 +2074,67 @@ def test_taxonomy_returns_none_for_realistic_amos_1_to_13_reference():
     assert detected is None, f"Realistic AMOS 1-13 should not be detected, got {detected}"
 
 
+def test_validate_against_custom_label_uses_dataset_hint_when_taxonomy_is_auto():
+    """auto + dataset_hint=FLARE22 应触发 remap（即使 detect_dataset 返回 None）"""
+    import sys
+    import nibabel as nib
+    import numpy as np
+    from pathlib import Path
+    import tempfile
+
+    server = load_server_module()
+    tmp = Path(tempfile.mkdtemp(prefix="seg-dataset-hint-"))
+    try:
+        # 1-13 范围内的 FLARE22 风格标签，1=liver, 3=spleen
+        flare_label = np.zeros((4, 4, 4), dtype=np.int16)
+        flare_label[0:1, 0:2, 0:2] = 1  # FLARE22 liver
+        flare_label[1:2, 0:2, 0:2] = 3  # FLARE22 spleen
+        # AMOS22 ckpt 视角下：ID 1=spleen, ID 6=liver, ID 3=left_kidney
+        # 不 remap 时 FLARE22 liver(1) 撞 ckpt spleen(1) → 错配
+        # remap 后 FLARE22 liver(1) → AMOS22 liver(6) → 与 prediction[6] 对比
+        amos_labels = [
+            {"label": 1, "id": "spleen", "nameEn": "spleen", "nameZh": "脾脏"},
+            {"label": 2, "id": "right_kidney", "nameEn": "right_kidney", "nameZh": "右肾"},
+            {"label": 3, "id": "left_kidney", "nameEn": "left_kidney", "nameZh": "左肾"},
+            {"label": 6, "id": "liver", "nameEn": "liver", "nameZh": "肝脏"},
+        ]
+        # prediction: AMOS 视角下，spleen 在 1，liver 在 6
+        prediction = np.zeros((4, 4, 4), dtype=np.int16)
+        prediction[0:1, 0:2, 0:2] = 6  # ckpt 把这里预测为 liver
+        prediction[1:2, 0:2, 0:2] = 1  # ckpt 把这里预测为 spleen
+        label_path = tmp / "label.nii.gz"
+        pred_path = tmp / "pred.nii.gz"
+        nib.save(nib.Nifti1Image(flare_label, np.eye(4)), str(label_path))
+        nib.save(nib.Nifti1Image(prediction, np.eye(4)), str(pred_path))
+
+        # auto + dataset_hint=FLARE22 → 应 remap
+        result = server.validate_against_custom_label(
+            pred_path, label_path, amos_labels, label_taxonomy="auto", dataset_hint="FLARE22"
+        )
+        assert result.get("remap_applied") is True, f"Expected remap with FLARE22 hint, got {result}"
+        assert result.get("remap_source") == "FLARE22"
+        assert "已按参考病例" in (result.get("message") or "")
+        # remap 后 dice 应该高（liver 通道对 liver 通道、spleen 通道对 spleen 通道）
+        assert result.get("mean_dice", 0) > 0.5, f"Expected high dice after remap, got {result.get('mean_dice')}"
+
+        # auto + dataset_hint=AMOS22 → 不 remap，dice 应该低（错位）
+        result = server.validate_against_custom_label(
+            pred_path, label_path, amos_labels, label_taxonomy="auto", dataset_hint="AMOS22"
+        )
+        assert result.get("remap_applied") is not True, f"AMOS22 hint should not remap, got {result}"
+        # 不 remap 时 FLARE22 liver(1) vs AMOS prediction[1]=spleen → dice=0
+        assert result.get("mean_dice", 1) < 0.5, f"Expected low dice without remap, got {result.get('mean_dice')}"
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     test_taxonomy_detects_flare22_and_remaps_label_ids()
     test_taxonomy_detects_partial_flare22_labels_when_ids_are_mismatched()
     test_taxonomy_returns_none_for_amos_native_labels()
     test_taxonomy_returns_none_when_amos_reference_matches_full_amos_checkpoint()
     test_taxonomy_returns_none_for_realistic_amos_1_to_13_reference()
+    test_validate_against_custom_label_uses_dataset_hint_when_taxonomy_is_auto()
     test_validate_against_custom_label_respects_explicit_taxonomy_hints()
     test_model_state_reports_missing_required_files()
     test_server_runtime_ready_does_not_require_local_model_files()

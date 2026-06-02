@@ -214,6 +214,7 @@ class Job:
   resource_log_path: Path | None = None
   label_path: Path | None = None
   label_taxonomy: str = "auto"
+  dataset_hint: str | None = None
   runtime_target: str = "local"
   cancel_requested: bool = False
   process: subprocess.Popen[str] | None = field(default=None, repr=False, compare=False)
@@ -641,6 +642,7 @@ def build_job_summary(job: Job) -> dict[str, Any]:
     "cancel_requested": job.cancel_requested,
     "label_path": str(job.label_path) if job.label_path else None,
     "label_taxonomy": job.label_taxonomy,
+    "dataset_hint": job.dataset_hint,
     "validation": job.validation,
   }
 
@@ -1112,7 +1114,7 @@ def normalize_label_taxonomy(value: str | None = None) -> str:
   return normalize_taxonomy_hint(value)
 
 
-def validate_against_custom_label(prediction_path: Path, label_path: Path, labels: list[dict[str, Any]], sample_id: str = "custom", label_taxonomy: str = "auto") -> dict[str, Any]:
+def validate_against_custom_label(prediction_path: Path, label_path: Path, labels: list[dict[str, Any]], sample_id: str = "custom", label_taxonomy: str = "auto", dataset_hint: str | None = None) -> dict[str, Any]:
   try:
     import nibabel as nib
     import numpy as np
@@ -1128,13 +1130,25 @@ def validate_against_custom_label(prediction_path: Path, label_path: Path, label
   checkpoint_labels = {int(item["label"]) for item in labels}
   reference_labels = set(np.unique(reference).astype(int)) - {0}
   taxonomy_hint = normalize_label_taxonomy(label_taxonomy)
+  dataset_hint_normalized = str(dataset_hint or "").strip().upper() or None
+  if dataset_hint_normalized not in {"AMOS22", "FLARE22", None}:
+    dataset_hint_normalized = None
 
   try:
     from server.taxonomy import detect_dataset, build_remap_mapping, apply_remap
   except ModuleNotFoundError:
     from taxonomy import detect_dataset, build_remap_mapping, apply_remap
 
-  detected = None if taxonomy_hint == "AMOS22" else ("FLARE22" if taxonomy_hint == "FLARE22" else detect_dataset(reference_labels, labels))
+  if taxonomy_hint == "AMOS22":
+    detected = None
+  elif taxonomy_hint == "FLARE22":
+    detected = "FLARE22"
+  elif dataset_hint_normalized == "FLARE22":
+    detected = "FLARE22"
+  elif dataset_hint_normalized == "AMOS22":
+    detected = None
+  else:
+    detected = detect_dataset(reference_labels, labels)
   if detected:
     try:
       mapping = build_remap_mapping(labels, detected)
@@ -1146,7 +1160,7 @@ def validate_against_custom_label(prediction_path: Path, label_path: Path, label
         result["remap_applied"] = True
         result["remap_source"] = detected
         result["remap_mapping"] = {str(k): v for k, v in mapping.items()}
-        action = "已按用户选择" if taxonomy_hint == "FLARE22" else "已自动"
+        action = "已按用户选择" if taxonomy_hint == "FLARE22" else ("已按参考病例" if dataset_hint_normalized == "FLARE22" else "已自动")
         result["message"] = f"{action}重映射标签 ID（{detected} → 当前模型）。" + (result.get("message") or "")
         return result
     except Exception as remap_exc:
@@ -1661,7 +1675,7 @@ def complete_cached_job(job: Job, input_path: Path, cache: dict[str, Any]) -> No
   result_path = copy_cached_result(cache, output_dir, job.id)
   validation = None
   if job.label_path and job.label_path.exists():
-    validation = validate_against_custom_label(result_path, job.label_path, read_labels(), label_taxonomy=job.label_taxonomy)
+    validation = validate_against_custom_label(result_path, job.label_path, read_labels(), label_taxonomy=job.label_taxonomy, dataset_hint=job.dataset_hint)
   elif is_debug_original_upload(input_path):
     validation = validate_against_debug_label(result_path)
   if validation is None and not cache.get("legacy", False):
@@ -1823,7 +1837,7 @@ def run_server_job_pipeline(job: Job, input_dir: Path, output_dir: Path, case_na
   if job.label_path and job.label_path.exists():
     push_event(job, {"type": "progress", "progress": 96, "stage": "使用用户提供的标签验证服务器结果"})
     start_job_phase(job, "validation")
-    validation = validate_against_custom_label(result_path, job.label_path, read_labels(), label_taxonomy=job.label_taxonomy)
+    validation = validate_against_custom_label(result_path, job.label_path, read_labels(), label_taxonomy=job.label_taxonomy, dataset_hint=job.dataset_hint)
     write_validation_summary(output_dir, validation)
     evaluate_command = build_server_evaluate_command(config, ensemble_output_dir, job.label_path)
     if evaluate_command:
@@ -1877,7 +1891,7 @@ def run_local_job_pipeline(job: Job, input_path: Path, input_dir: Path, output_d
   if job.label_path and job.label_path.exists():
     push_event(job, {"type": "progress", "progress": 96, "stage": "使用用户提供的标签验证推理结果"})
     start_job_phase(job, "validation")
-    validation = validate_against_custom_label(result_path, job.label_path, read_labels(), label_taxonomy=job.label_taxonomy)
+    validation = validate_against_custom_label(result_path, job.label_path, read_labels(), label_taxonomy=job.label_taxonomy, dataset_hint=job.dataset_hint)
     write_validation_summary(output_dir, validation)
     finish_job_phase(job, "validation")
   elif is_debug_original_upload(input_path):
@@ -2036,6 +2050,7 @@ async def create_job(
   inference_profile: str | None = Form(None),
   runtime_target: str | None = Form(None),
   label_taxonomy: str | None = Form(None),
+  dataset_hint: str | None = Form(None),
 ) -> dict[str, Any]:
   if not file.filename or not file.filename.lower().endswith((".nii", ".nii.gz")):
     raise HTTPException(status_code=400, detail="请上传 .nii 或 .nii.gz 格式的 CT 原图。")
@@ -2076,6 +2091,7 @@ async def create_job(
     inference_options=inference_options,
     label_path=custom_label_path,
     label_taxonomy=taxonomy_hint,
+    dataset_hint=str(dataset_hint or "").strip().upper() or None,
     runtime_target=runtime,
   )
   with jobs_lock:
@@ -2091,6 +2107,7 @@ async def create_job(
       "postprocess": postprocess,
       "mode": job.mode,
       "label_taxonomy": job.label_taxonomy,
+      "dataset_hint": job.dataset_hint,
       "runtime_target": job.runtime_target,
       "model_status": model_state,
       "cached_result": True,

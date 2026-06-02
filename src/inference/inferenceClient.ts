@@ -335,7 +335,7 @@ export async function fetchModelLabels(endpoint: string): Promise<OrganLabel[]> 
 export async function createInferenceJob(
   endpoint: string,
   file: File,
-  options: { modelId: string; confidenceThreshold: number; postprocess: Record<string, boolean>; inferenceProfile?: InferenceProfile; runtimeTarget?: RuntimeTarget; labelTaxonomy?: LabelTaxonomy; labelFile?: File }
+  options: { modelId: string; confidenceThreshold: number; postprocess: Record<string, boolean>; inferenceProfile?: InferenceProfile; runtimeTarget?: RuntimeTarget; labelTaxonomy?: LabelTaxonomy; datasetHint?: string | null; labelFile?: File }
 ) {
   const formData = new FormData();
   formData.append("file", file, file.name);
@@ -348,6 +348,9 @@ export async function createInferenceJob(
   formData.append("inference_profile", options.inferenceProfile ?? "quality");
   formData.append("runtime_target", options.runtimeTarget ?? "server");
   formData.append("label_taxonomy", options.labelTaxonomy ?? "auto");
+  if (options.datasetHint) {
+    formData.append("dataset_hint", options.datasetHint);
+  }
 
   const response = await fetch(`${endpoint}/api/segment/jobs`, { method: "POST", body: formData });
   if (!response.ok) {

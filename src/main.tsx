@@ -570,6 +570,7 @@ function App() {
   const [sampleLoadState, setSampleLoadState] = useState<{ status: "idle" | "loading" | "ready" | "failed"; message: string }>({ status: "idle", message: "等待载入内置参考病例" });
   const [referenceCases, setReferenceCases] = useState<ReferenceCase[]>(DEFAULT_REFERENCE_CASES);
   const [selectedReferenceCaseId, setSelectedReferenceCaseId] = useState(DEFAULT_REFERENCE_CASES[0]?.id ?? "");
+  const [referenceCaseDatasetHint, setReferenceCaseDatasetHint] = useState<string | null>(null);
   const [selectedOrganDetail, setSelectedOrganDetail] = useState<{ id: string; label?: number; coord: VoxelCoord } | null>(null);
   const [dragTarget, setDragTarget] = useState<UploadRole | null>(null);
   const [lastImport, setLastImport] = useState("等待导入本地影像或分割结果图");
@@ -1070,6 +1071,7 @@ function App() {
         inferenceProfile: selectedInferenceProfile,
         runtimeTarget: selectedRuntimeTarget,
         labelTaxonomy: selectedLabelTaxonomy,
+        datasetHint: referenceCaseDatasetHint,
         labelFile: labelFile ?? undefined,
       });
       activeJobIdRef.current = job.job_id;
@@ -1442,6 +1444,7 @@ function App() {
     if (role === "source") {
       setLoadedImage(image);
       setValidationSummary(null);
+      setReferenceCaseDatasetHint(null);
       if (image.volume) setSelectedSlice((image.sliceIndex ?? Math.floor(image.volume.slices / 2)) + 1);
       if (image.volume) setVoxelCoord({ x: Math.floor(image.volume.columns / 2), y: Math.floor(image.volume.rows / 2), z: image.sliceIndex ?? Math.floor(image.volume.slices / 2) });
       if (image.volume) syncOrganLayers(modelLabels);
@@ -1494,13 +1497,16 @@ function App() {
             setLabelFile(labelFileObj);
             const taxonomyForDataset = mapDatasetToLabelTaxonomy(referenceCase.dataset);
             if (taxonomyForDataset) setSelectedLabelTaxonomy(taxonomyForDataset);
+            setReferenceCaseDatasetHint(referenceCase.dataset || null);
             setLogs((items) => [`参考标签已载入：${referenceCase.labelFilename}`, ...items].slice(0, 8));
             setToast(`参考标签已同步：${referenceCase.name} 推理时将自动计算 Dice`);
           } else {
             setLabelFile(null);
+            setReferenceCaseDatasetHint(null);
           }
         } catch (labelError) {
           setLabelFile(null);
+          setReferenceCaseDatasetHint(null);
           const labelMessage = labelError instanceof Error ? labelError.message : "参考标签载入失败";
           setToast(`${referenceCase.name} 原图已载入，但参考标签载入失败：${labelMessage}`);
         }
