@@ -1,6 +1,6 @@
 # 分割实验对比
 
-生成日期：2026-06-01
+生成日期：2026-06-02
 
 本文档汇总历史分割实验记录，便于横向比较。它与 `SEGMENTATION_METRICS_SUMMARY.md` 配套使用：后者记录当前指标摘要和命令上下文，本文保留跨轮次对比表。
 
@@ -30,6 +30,7 @@
 - 2026-05-31 前端新增影像量化分析和报告 `quantification` 字段，只读取预测 mask 与 spacing 生成体积、截面积和长度估算，不改变下列表格中的历史 Dice、IoU、Hausdorff Distance 或耗时数值。
 - 2026-06-01 完成本地缓存演示 7 步：AMOS 0117 cache hit（`aea4e7cdbaf0`）、FLARE22 Tr 0009 真实推理（`0aa7323a4c01`, 218s）、FLARE22 cache hit（`02da885c97d8`, 0.001s）。新增 `tools/seed_demo_cache.py` 与 `docs/local-cache-demo-runbook.md`。本轮 AMOS cache hit 命中的是 2026-05-23 历史推理 `009d4efdc5f6`（review，mean_dice 0.891，stomach 0.556），不修改本表中的任何指标数值；新 quality AMOS 真实推理仍以 `b3c528cc9e20` 为基线。
 - 2026-06-01 晚间完成 cache 链路补丁：FLARE22 cache hit（`02da885c97d8`）现在能正确显示 2026-05-26 remap 后的指标（mean_dice 0.893127、min_dice 0.67373、fg 0.949908、15 标签），并标注"（历史离线缓存摘要）"；新增 `tools/rewrite_flare22_historical_summary.py` 把该历史摘要写入 0aa7323a4c01 的 output。`server/main.py` 的 `complete_cached_job()` 增加 historical 回退，`find_cached_prediction()` 候选排序改为 `(has_validation_summary, mtime)` 降序。本轮不修改本表中任何基线指标数值，仅修正 cache hit 时的 validation 显示口径。
+- 2026-06-02 完成 `detect_dataset()` 二轮收紧：AMOS 真实 `amos_0117_label.nii/amos_0117(2).nii` 实际 unique IDs 为 `{1..13}`（缺 14/15 bladder/prostate），与 FLARE22 真实 1-13 在裸 ID 集合上不可分。`detect_dataset()` 新增 0.85 coverage 守卫：参考覆盖 ckpt 标签 ≥ 0.85 时直接返回 `None`（`auto` 退化为保底）。前端 `loadReferenceCase()` 按 `referenceCase.dataset` 自动设置 `label_taxonomy`：AMOS 病例 → `AMOS22`、FLARE22 病例 → `FLARE22`、其他保持原值。`tests/backendState.test.py` 新增 AMOS 1-13 + ckpt 1-15 真实 case 测试。本轮不修改本表中任何基线指标数值，仅修正 `auto` 模式在裸 ID 不可分边界上的判定逻辑。
 
 ## 实验名称说明
 

@@ -2620,5 +2620,58 @@ job `a717dacf42d3`（FLARE22 Tr 0009 + 自动 taxonomy remap）：
 
 ---
 
-*文档版本：2026-06-01*
-*更新依据：当前 `src/main.tsx`、`src/inference/inferenceClient.ts`、`server/main.py`、`server/server_inference.py`、`server/taxonomy.py`、`tools/seed_demo_cache.py`、`docs/local-cache-demo-runbook.md`、`docs/superpowers/specs/2026-06-01-local-cache-demo-design.md`、`docs/superpowers/plans/2026-06-01-local-cache-demo.md`、`package.json`、`README.md`、`ACCEPTANCE.md`、`SEGMENTATION_METRICS_SUMMARY.md`、`SEGMENTATION_EXPERIMENT_COMPARISON.md`、`SEGMENTATION_RECENT_ROUNDS.md`、`CODE_MODULE_GUIDE.md`、`.planning/lan-direct-and-tunnel/`、`.planning/campus-network-and-public-access/`、`.planning/label-taxonomy-server-validation/`、`.planning/high-resolution-inference-optimization/`、`.planning/2026-06-01-local-cache-demo/` 与 `deployment-packages/`。*
+## 五十四、2026-06-02 detect_dataset 二轮收紧 + 前端按 dataset 预设 taxonomy
+
+### 54.1 现象
+
+- 现场用 AMOS 0117 走"参考病例 → 推理 → 查看 Dice"时，发现 `remap_applied=true`、`remap_source=FLARE22`，mean_dice 异常偏低（与 2026-05-30 服务器 AMOS 轮次相似的错误 remap 模式）。
+- 但 2026-05-31 已经实现显式 `label_taxonomy=auto|AMOS22|FLARE22` 和"标签 ID 是 checkpoint 子集时不触发 remap"的保守 `detect_dataset()`，为什么 AMOS 还是被错判？
+
+### 54.2 根因
+
+读取 `amos_0117_label.nii/amos_0117(2).nii` 实际 unique IDs：
+
+```text
+AMOS 真实 label unique IDs = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}  # 缺 14, 15
+FLARE22 真实 label unique IDs = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}
+```
+
+AMOS ckpt 包含 1-15（共 15 个前景标签）。`amos_0117_label.nii` 实际只有 1-13（无膀胱/前列腺/子宫体素），这与 FLARE22 真实 1-13 在裸 ID 集合上**完全一致**。
+
+旧 `detect_dataset()` 走"reference_ids ≠ ckpt_ids → 进入 dataset 循环 → shared_ids 13 个里 12 个 FLARE22 命名 ≠ ckpt 命名"→ 12/13 mismatch ≥ 5 → 返回 `FLARE22`。问题：AMOS 自指在 ID 子集视角下根本无法被自动识别。
+
+### 54.3 修复
+
+| 修复点 | 文件 | 内容 |
+|---|---|---|
+| 0.85 coverage 守卫 | `server/taxonomy.py:detect_dataset()` | `coverage = len(reference_ids ∩ ckpt_ids) / len(ckpt_ids) >= 0.85` → `None`。比 `reference_ids == ckpt_ids` 更宽松，覆盖 AMOS 1-13 这种"实际 ID 数量略少于 ckpt"的情况。 |
+| 前端预设 | `src/main.tsx:mapDatasetToLabelTaxonomy()` | 新增工具函数：AMOS / AMOS22 → `AMOS22`、FLARE / FLARE22 → `FLARE22`、其他保持原值。`loadReferenceCase()` 在拿到参考 label 后立即调用并 `setSelectedLabelTaxonomy()`。 |
+| `auto` 退化为保底 | 文档/UI | `label_taxonomy=auto` 在 AMOS 1-13 vs FLARE22 1-13 不可分的边界不再保证正确；正式质量基线应使用显式 `AMOS22` / `FLARE22`，或依赖参考病例 registry 的 `dataset` 字段。 |
+| 回归测试 | `tests/backendState.test.py` | 新增 `test_taxonomy_returns_none_for_realistic_amos_1_to_13_reference`（AMOS 1-13 + ckpt 1-15）。同步更新 FLARE22 1-13 + ckpt 1-15 用例注释（新行为下也是 `None`，由前端预设补）。 |
+
+### 54.4 验收结果
+
+| 检查项 | 结果 |
+|---|---|
+| AMOS 1-15 vs ckpt 1-15 | `None`（短路 `reference_ids == ckpt_ids`） |
+| AMOS 1-13 真实 vs ckpt 1-15 | `None`（coverage 0.867 ≥ 0.85） |
+| FLARE22 1-13 真实 vs ckpt 1-15 | `None`（coverage 0.867 ≥ 0.85；由前端 `mapDatasetToLabelTaxonomy()` 预设 `FLARE22`） |
+| AMOS {1,2,6} vs ckpt 1-15 | `None`（mismatch=0 < 5） |
+| Partial {1,3} vs 3-label ckpt | `None`（`len(shared_ids) < 3` 守卫） |
+| `npm test` / `python tests/backendState.test.py` / `npm run build` | 全过（`EXIT=0`） |
+
+### 54.5 行为边界
+
+- `auto` 模式在裸 ID 不可分边界（AMOS 1-13 vs FLARE22 1-13）退化为保底（不 remap），但不会把 AMOS 自身错 remap 为 FLARE22。
+- 显式 `label_taxonomy=AMOS22` / `FLARE22` 仍是正式质量基线入口；用户上传的 FLARE22 标签文件仍可选 `FLARE22` 强制 remap。
+- `mapDatasetToLabelTaxonomy()` 只在 `dataset` 字段是 `AMOS22 / AMOS / FLARE22 / FLARE` 时才预设；其他字段（`unknown` / `custom`）保留用户当前选择。
+- 本修复不改变 nnUNetv2 推理、缓存复用、SSE 协议或影像量化逻辑；不修改 `SEGMENTATION_METRICS_SUMMARY.md` 中任何基线指标数值。
+
+### 54.6 文档同步
+
+9 份核心文档（README/CLAUDE/AGENTS/ACCEPTANCE/REVIEW/CODE_MODULE_GUIDE/SEGMENTATION_RECENT_ROUNDS/SEGMENTATION_EXPERIMENT_COMPARISON/SEGMENTATION_METRICS_SUMMARY）已添加"2026-06-02 detect_dataset 二轮收紧"或同等描述，统一口径为：`detect_dataset()` 0.85 coverage 守卫 + 前端 `loadReferenceCase()` 按 `referenceCase.dataset` 预设 `label_taxonomy`；`auto` 退化为保底；AMOS 真实 1-13 数据走 `None`，由前端 `mapDatasetToLabelTaxonomy()` 把 FLARE22 病例自动设成 `FLARE22`、AMOS 病例自动设成 `AMOS22`。
+
+---
+
+*文档版本：2026-06-02*
+*更新依据：当前 `src/main.tsx`、`src/inference/inferenceClient.ts`、`server/main.py`、`server/server_inference.py`、`server/taxonomy.py`、`tools/seed_demo_cache.py`、`tools/rewrite_flare22_historical_summary.py`、`docs/local-cache-demo-runbook.md`、`docs/superpowers/specs/2026-06-01-local-cache-demo-design.md`、`docs/superpowers/plans/2026-06-01-local-cache-demo.md`、`package.json`、`README.md`、`ACCEPTANCE.md`、`SEGMENTATION_METRICS_SUMMARY.md`、`SEGMENTATION_EXPERIMENT_COMPARISON.md`、`SEGMENTATION_RECENT_ROUNDS.md`、`CODE_MODULE_GUIDE.md`、`CLAUDE.md`、`AGENTS.md`、`.planning/lan-direct-and-tunnel/`、`.planning/campus-network-and-public-access/`、`.planning/label-taxonomy-server-validation/`、`.planning/high-resolution-inference-optimization/`、`.planning/2026-06-01-local-cache-demo/` 与 `deployment-packages/`。*

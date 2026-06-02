@@ -2,9 +2,10 @@
 
 ## 当前运行状态
 
-截至 2026-06-01，项目已完成：
+截至 2026-06-02，项目已完成：
 
 - 显式 `label_taxonomy=auto|AMOS22|FLARE22` 功能，修复了 AMOS 标签被误判为 FLARE22 的问题
+- **2026-06-02 detect_dataset 二轮收紧 + 前端按 dataset 预设 taxonomy**：AMOS 真实 label 只含 1-13（缺 14/15 bladder/prostate 体素），与 FLARE22 真实 1-13 在裸 ID 集合上不可分；`detect_dataset()` 在参考覆盖 ckpt 标签 ≥ 0.85 时直接返回 `None`（不再自动 remap），由前端 `loadReferenceCase()` 按 `referenceCase.dataset` 自动设置 `label_taxonomy`（AMOS → AMOS22、FLARE22 → FLARE22），用户仍可在 UI 切换。`auto` 退化为保底。
 - AMOS CT 高分辨率在线推理（768×768×103，fast profile，mean_dice=0.77724）
 - 服务器 5GPU/5-fold soft ensemble 校园网 smoke 已跑通
 - 新部署包 `server-runtime-package-20260531.zip` 已创建
@@ -100,7 +101,7 @@ git diff --check
 - `CODE_MODULE_GUIDE.md`
 - `.planning/`
 
-AMOS 原生验证、FLARE22 自动 remap 在线验证、FLARE22 离线 remap 对照、fast preview、cached result、本地 fold0 和服务器 5-fold ensemble 必须分开表述，不能混成同一类证据。`cached-real-nnunetv2` 只表示预测 NIfTI 复用，validation 仍绑定当前请求标签文件或内置参考标签。2026-05-31 服务器 smoke 已跑通后，后续文档不得继续写成”服务器端到端待 smoke”；但服务器 AMOS 指标必须等显式 `label_taxonomy=AMOS22` 复跑并确认 `remap_applied=false` 后，才能纳入正式质量基线。显式 `label_taxonomy` 功能已实现，`detect_dataset()` 更保守：标签 ID 是 checkpoint 子集时不触发 remap。2026-06-01 本地缓存演示新增的 AMOS 0117 cache hit 命中的是 2026-05-23 历史推理 `009d4efdc5f6`（review，stomach 0.556），与本地 quality AMOS 真实推理 `b3c528cc9e20`（mean_dice 0.924780）必须分开记录；该 cache hit 是工程链路演示，不替代正式质量基线。
+AMOS 原生验证、FLARE22 自动 remap 在线验证、FLARE22 离线 remap 对照、fast preview、cached result、本地 fold0 和服务器 5-fold ensemble 必须分开表述，不能混成同一类证据。`cached-real-nnunetv2` 只表示预测 NIfTI 复用，validation 仍绑定当前请求标签文件或内置参考标签。2026-05-31 服务器 smoke 已跑通后，后续文档不得继续写成”服务器端到端待 smoke”；但服务器 AMOS 指标必须等显式 `label_taxonomy=AMOS22` 复跑并确认 `remap_applied=false` 后，才能纳入正式质量基线。显式 `label_taxonomy` 功能已实现。`detect_dataset()` 在 2026-06-02 进一步收紧：参考标签覆盖 ckpt 标签 ≥ 0.85 时返回 `None`（避免 AMOS 1-13 真实数据被错判为 FLARE22）。正式 taxonomy 选择由前端 `loadReferenceCase()` 按 `referenceCase.dataset` 字段预设（AMOS → AMOS22，FLARE22 → FLARE22）；`auto` 模式仅作保底策略。2026-06-01 本地缓存演示新增的 AMOS 0117 cache hit 命中的是 2026-05-23 历史推理 `009d4efdc5f6`（review，stomach 0.556），与本地 quality AMOS 真实推理 `b3c528cc9e20`（mean_dice 0.924780）必须分开记录；该 cache hit 是工程链路演示，不替代正式质量基线。
 
 ## 提交与 PR 规范
 

@@ -16,10 +16,18 @@
 - AMOS CT 高分辨率在线推理（768×768×103，fast profile，mean_dice=0.77724）
 - 新部署包 `server-runtime-package-20260531.zip` 已创建
 
+2026-06-02 已完成：
+- `detect_dataset()` 二轮收紧：AMOS 真实 label 只含 1-13（缺 14/15 bladder/prostate 体素），与 FLARE22 真实 1-13 在裸 ID 集合上不可分；服务端在参考覆盖 ckpt 标签 ≥ 0.85 时直接返回 `None`，不再自动 remap。
+- 前端 `loadReferenceCase()` 按 `referenceCase.dataset` 自动设置 `label_taxonomy`：AMOS 病例 → `AMOS22`、FLARE22 病例 → `FLARE22`、其他 → 保持原值。`auto` 退化为保底策略。
+- 新增 `mapDatasetToLabelTaxonomy()` 工具函数（`src/main.tsx`），同步 `selectedLabelTaxonomy` 状态。
+- 回归测试 `tests/backendState.test.py` 增加 2 个用例：FLARE22 1-13 + AMOS ckpt 1-15 真实 case 走 `None`、AMOS 1-13 + ckpt 1-15 走 `None`、AMOS 1-15 + ckpt 1-15 走 `None`、Partial {1,3} 走 `None`。
+- `npm test`、`python tests/backendState.test.py`、`npm run build` 全过。
+
 当前进行中：
 - 高分辨率 CT 推理优化评估（预降采样方案）
 - server mode gating 修复
 - AMOS 预热预测 review 状态（stomach 0.556）的复跑或新训练权重接入
+- 服务器 AMOS/FLARE 显式 taxonomy 复跑验证 `remap_applied` 状态
 
 ## 目标 1：CT 可浏览、三正交可联动
 
@@ -632,3 +640,28 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\checkpoint_best.
 - "历史离线缓存摘要"明确表示数据来自 cache_source_job 的 `validation_summary.json`，不是当前请求的重新计算；前端以"（历史离线缓存摘要）"文案标注。
 - 方案 B（`tools/rewrite_flare22_historical_summary.py`）按 2026-05-26 remap 后的 metrics 改写 0aa7323a4c01 的历史摘要，严格意义上不是同一份预测的指标；GUI 必须显示"（历史离线缓存摘要）"并明确 `source_job_id`。
 - `SEGMENTATION_REFERENCE_CASES_JSON` 必须指向 `examples/reference_cases.json` 或自定义 4-case 配置文件，否则 `/api/samples` 只返回内置 `amos_0117`，FLARE22 Tr 0009 不可选。
+
+## 2026-06-02 detect_dataset 二轮收紧验收记录
+
+范围：
+
+- 修复 2026-06-01 现场复测时 AMOS 自身标签在 `detect_dataset()` 中仍被错判为 FLARE22，导致 `remap_applied=true`、AMOS Dice 异常偏低的问题。
+- 进一步收紧 `detect_dataset()`：参考标签覆盖 ckpt 标签 ≥ 0.85 时直接返回 `None`，不再走语义对比。
+- 让前端在加载参考病例时按 `referenceCase.dataset` 字段主动设置 `label_taxonomy`，避免 `auto` 模式命中边界的歧义。
+
+验收证据：
+
+| 检查项 | 结果 |
+|---|---|
+| 真实 AMOS label | `amos_0117_label.nii/amos_0117(2).nii` 实际 unique IDs = `{1..13}`（缺 14/15 bladder/prostate 体素），与 FLARE22 真实 1-13 在裸 ID 集合上不可分。 |
+| 0.85 守卫 | `detect_dataset()` 新增 `coverage = len(reference_ids ∩ ckpt_ids) / len(ckpt_ids) >= 0.85` → `None`。 |
+| 前端预设 | `src/main.tsx` 新增 `mapDatasetToLabelTaxonomy()`：AMOS/AMOS22 → `AMOS22`、FLARE/FLARE22 → `FLARE22`、其他 → 原值。`loadReferenceCase()` 在拿到参考 label 后立即调用。 |
+| 后端边界 | AMOS 1-15 vs ckpt 1-15 仍走 `reference_ids == ckpt_ids` 短路返回 `None`；Partial {1,3} vs 3-label ckpt 走 `len(shared_ids) < 3` 守卫返回 `None`。 |
+| 回归测试 | `tests/backendState.test.py` 增加 `test_taxonomy_returns_none_for_realistic_amos_1_to_13_reference`（AMOS 1-13 + ckpt 1-15）；同步更新 FLARE22 1-13 + ckpt 1-15 用例注释（新行为下也是 `None`）。 |
+| 自动验证 | `python tests/backendState.test.py`、`npm test`、`npm run build` 全过（`EXIT=0`）。 |
+
+行为边界：
+
+- `auto` 不再保证检测 FLARE22：在 AMOS 1-13 真实数据与 FLARE22 1-13 真实数据无法仅靠 ID 区分的边界，`auto` 退化为保底（不 remap）。`label_taxonomy=AMOS22` / `FLARE22` 显式选择仍是正式质量基线的入口。
+- `mapDatasetToLabelTaxonomy()` 只在 `dataset` 字段是 `AMOS22 / AMOS / FLARE22 / FLARE` 时才预设；其他字段（如 `unknown`、`custom`）保留用户当前选择。
+- 本改动不改变 nnUNetv2 模型推理、缓存复用、SSE 协议或影像量化逻辑。

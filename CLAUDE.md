@@ -13,10 +13,11 @@
 
 ## 当前运行状态
 
-截至 2026-06-01，项目已完成：
+截至 2026-06-02，项目已完成：
 - 本地在线推理链路（AMOS 0117、FLARE22 Tr 0009）
 - 自动 taxonomy remap（FLARE22 → AMOS22）
 - 显式 `label_taxonomy=auto|AMOS22|FLARE22` 功能，修复了 AMOS 标签被误判为 FLARE22 的问题
+- **2026-06-02 detect_dataset 二轮收紧**：AMOS 真实 label 只含 1-13（缺 14/15 bladder/prostate 体素），与 FLARE22 真实 1-13 在裸 ID 集合上不可分；`detect_dataset()` 在参考覆盖 ckpt 标签 ≥ 0.85 时直接返回 `None`（不再触发 FLARE22 自动 remap），改由前端 `loadReferenceCase()` 按 `referenceCase.dataset` 自动选择 `label_taxonomy`（AMOS 病例 → AMOS22、FLARE22 病例 → FLARE22），用户仍可在 UI 手动切换。`auto` 退化为保底策略。
 - 服务器 5GPU/5-fold soft ensemble 校园网 smoke
 - 影像量化分析与报告导出（HTML/JSON/PDF）
 - 底部实时推理进度展示与心跳机制
@@ -92,7 +93,7 @@ python tools/segmentation_metrics_summary.py --prediction <pred.nii.gz> --refere
 - 公网入口必须配置鉴权、HTTPS、大文件上传限制和 SSE 反代参数，不裸露未授权后端端口。
 - 缓存只复用预测 NIfTI，不复用旧 job 的 validation 结果；`runtime_target` 必须进入缓存 key。
 - `quality` 是正式报告路径，`fast` 仅作预览。
-- 显式 `label_taxonomy=auto|AMOS22|FLARE22` 已实现，`server/taxonomy.py` 的 `detect_dataset()` 现在更保守：标签 ID 是 checkpoint 子集时不触发 remap，避免 AMOS 原生标签被误判为 FLARE22。
+- 显式 `label_taxonomy=auto|AMOS22|FLARE22` 已实现，`server/taxonomy.py` 的 `detect_dataset()` 在参考标签覆盖 ckpt 标签 ≥ 0.85 时返回 `None`（避免 AMOS 1-13 真实数据被错判为 FLARE22）；`auto` 退化为保底策略，正式 taxonomy 选择由前端 `loadReferenceCase()` 按 `referenceCase.dataset` 字段预设（AMOS → AMOS22，FLARE22 → FLARE22）。
 - `runtime_target=server` 创建 job 时应只依赖 server runtime 配置，不应被本地 Windows nnUNet 文件缺失阻断。
 
 ## 测试与验收

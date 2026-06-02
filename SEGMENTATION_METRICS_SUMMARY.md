@@ -4,6 +4,12 @@
 
 ## 当前运行状态
 
+2026-06-02 已完成：
+- `detect_dataset()` 二轮收紧：参考覆盖 ckpt 标签 ≥ 0.85 时直接返回 `None`，避免 AMOS 1-13 真实数据被错判为 FLARE22。
+- 前端 `loadReferenceCase()` 按 `referenceCase.dataset` 自动设置 `label_taxonomy`：AMOS → `AMOS22`、FLARE22 → `FLARE22`、其他保持原值。`auto` 退化为保底策略。
+- `tests/backendState.test.py` 新增 AMOS 1-13 + ckpt 1-15 真实 case 测试，更新 FLARE22 1-13 + ckpt 1-15 用例注释。
+- 本文档既有 AMOS quality 基线 `b3c528cc9e20`（mean_dice 0.924780）和新权重首跑 `27216eb73220`（mean_dice 0.924791）保持不变；2026-06-02 修复仅影响 `auto` 模式下的 taxonomy 判定逻辑，不改变已记录的任何指标数值。
+
 2026-06-01 已完成：
 - 本地缓存演示 7 步：AMOS 0117 cache hit、FLARE22 Tr 0009 真实推理、FLARE22 cache hit
 - 新增 `tools/seed_demo_cache.py`（幂等可重跑）和 `docs/local-cache-demo-runbook.md`

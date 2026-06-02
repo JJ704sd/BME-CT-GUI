@@ -59,6 +59,16 @@ server/requirements.txt
 3. 服务器实际模型的 `dataset.json`、checkpoint 标签定义和 `/api/models` 返回 labels 是否一致。
 4. `runtime_target=server` 创建 job 是否仍会被本地 Windows nnUNet 文件缺失阻断。
 
+## 2026-06-02：AMOS 真实 1-13 标签与 FLARE22 在裸 ID 集合上不可分
+
+**事实：** AMOS 真实 `amos_0117_label.nii/amos_0117(2).nii` 实际 unique IDs = `{1..13}`（无 bladder/prostate 体素），FLARE22 真实 1-13 与之完全一致。在仅有裸 ID 信息的前提下，两者无法被任何 `detect_dataset()` 唯一分辨。
+
+**判断：** 旧 `detect_dataset()`（"reference_ids ≠ ckpt_ids → 进入 dataset 循环 → 12/13 命名错位 ≥ 5" → `FLARE22`）会把 AMOS 真实 1-13 数据错判为 FLARE22，触发 `remap_applied=true`、AMOS Dice 严重下降。这是 2026-06-01 现场复测 AMOS 自身 dice 异常低的真正根因。
+
+**修复：** `detect_dataset()` 新增 0.85 coverage 守卫（`len(reference_ids ∩ ckpt_ids) / len(ckpt_ids) >= 0.85 → None`），把这种边界直接退回到不 remap；正式 taxonomy 选择由前端 `loadReferenceCase()` 按 `referenceCase.dataset` 字段自动设置（AMOS 病例 → `AMOS22`、FLARE22 病例 → `FLARE22`）。
+
+**证据：** 跑 `python tests/backendState.test.py`、`npm test`、`npm run build` 全过（`EXIT=0`）。`tests/backendState.test.py` 新增 `test_taxonomy_returns_none_for_realistic_amos_1_to_13_reference`。
+
 ## 当前结论
 
-`label_taxonomy=auto|AMOS22|FLARE22` 已改善 validation/remap 解释链路，但它不改变原始 nnUNet 推理输出。服务器 AMOS 轮次必须用 `AMOS22` hint 复跑，确认 `remap_applied=false` 后才能判断真实器官 Dice；不要继续把 AMOS `mean_dice=0.076015` 当作模型失败结论写入质量基线。
+`label_taxonomy=auto|AMOS22|FLARE22` 已改善 validation/remap 解释链路，但它不改变原始 nnUNet 推理输出。`auto` 模式 2026-06-02 起在 AMOS 1-13 vs FLARE22 1-13 不可分的边界退化为保底（不 remap）；正式 taxonomy 应使用显式 `AMOS22` / `FLARE22` 或由前端按 `referenceCase.dataset` 字段自动设置。服务器 AMOS 轮次必须用 `AMOS22` hint 复跑，确认 `remap_applied=false` 后才能判断真实器官 Dice；不要继续把 AMOS `mean_dice=0.076015` 当作模型失败结论写入质量基线。

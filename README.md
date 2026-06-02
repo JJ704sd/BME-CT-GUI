@@ -2,7 +2,7 @@
 
 本项目是面向腹部 CT 分割验证流程的本地 GUI 原型。前端使用 React + Vite，后端使用 FastAPI 桥接本机 nnUNetv2 环境，目标是完成 CT 浏览、三正交联动、器官 label 说明、真实模型推理回填、结果下载和验收记录。
 
-截至 2026-06-01，项目已经作为独立 GUI 仓库维护；真实 CT、NIfTI、checkpoint 权重和推理输出仍只保留在本机，不提交到 GitHub。当前已完成本地在线推理、标签上传、自动 taxonomy remap、报告导出、服务器 runtime 部署准备、校园网内 Windows 前端直连 Ubuntu 服务器 FastAPI 后端的 5GPU / 5-fold soft ensemble 在线推理回填，以及本地缓存演示 7 步验证（AMOS cache hit → FLARE 真实推理 → FLARE cache hit）。最新服务器运行显示：FLARE22 标签经自动 remap 后 Dice 较高，AMOS 原生标签被误判为 FLARE22 后 mean Dice 异常偏低；已实现显式 `label_taxonomy=auto|AMOS22|FLARE22` 功能，修复了 AMOS 标签被误判为 FLARE22 的问题。
+截至 2026-06-02，项目已经作为独立 GUI 仓库维护；真实 CT、NIfTI、checkpoint 权重和推理输出仍只保留在本机，不提交到 GitHub。当前已完成本地在线推理、标签上传、自动 taxonomy remap、报告导出、服务器 runtime 部署准备、校园网内 Windows 前端直连 Ubuntu 服务器 FastAPI 后端的 5GPU / 5-fold soft ensemble 在线推理回填，以及本地缓存演示 7 步验证（AMOS cache hit → FLARE 真实推理 → FLARE cache hit）。最新服务器运行显示：FLARE22 标签经自动 remap 后 Dice 较高，AMOS 原生标签曾被误判为 FLARE22 后 mean Dice 异常偏低；2026-05-31 已实现显式 `label_taxonomy=auto|AMOS22|FLARE22`，2026-06-02 发现 AMOS 真实标签只有 1-13（缺 14/15）与 FLARE22 在裸 ID 集合上无法仅靠 auto 区分，进一步收紧 `detect_dataset()` 在参考覆盖 ckpt ≥ 0.85 时返回 `None`，并由前端 `loadReferenceCase()` 按 `referenceCase.dataset` 自动预设 `label_taxonomy`（AMOS → AMOS22、FLARE22 → FLARE22），用户仍可在 UI 切换。
 
 ## 当前运行状态
 

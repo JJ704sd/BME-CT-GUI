@@ -57,4 +57,4 @@
 
 ## 当前结论
 
-taxonomy fix 已完成并验证通过。AMOS 标签不再被误判为 FLARE22。下一轮工作应优先更新服务器、复跑显式 taxonomy validation，并修复/验证 server mode gating。
+taxonomy fix 已完成并验证通过。2026-06-02 `detect_dataset()` 二轮收紧：AMOS 真实 1-13 标签与 FLARE22 在裸 ID 集合上不可分，新加 0.85 coverage 守卫将 `auto` 在该边界退化为不 remap；正式 taxonomy 由前端 `loadReferenceCase()` 按 `referenceCase.dataset` 自动设置。AMOS 标签不再被误判为 FLARE22。下一轮工作应优先更新服务器、复跑显式 taxonomy validation，并修复/验证 server mode gating。

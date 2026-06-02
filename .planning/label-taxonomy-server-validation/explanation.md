@@ -6,6 +6,8 @@
 
 2026-05-31 已完成显式 `label_taxonomy=auto|AMOS22|FLARE22` 和更保守的 `detect_dataset()`。当前说明的重点不再是“是否要实现 taxonomy hint”，而是服务器更新后如何复跑并解释 AMOS/FLARE validation。
 
+2026-06-02 增量：`detect_dataset()` 进一步收紧（参考覆盖 ckpt 标签 ≥ 0.85 时返回 `None`），并由前端 `loadReferenceCase()` 按 `referenceCase.dataset` 字段自动设置 `label_taxonomy`（AMOS 病例 → `AMOS22`、FLARE22 病例 → `FLARE22`、其他保持原值）。`auto` 退化为保底策略。
+
 ## 核心概念
 
 ### 1. label taxonomy
@@ -56,7 +58,7 @@ label_taxonomy=auto|AMOS22|FLARE22
 
 - `AMOS22`：参考标签已经是 AMOS/current model 体系，不执行 FLARE remap。
 - `FLARE22`：参考标签来自 FLARE22，强制执行 FLARE22 → 当前模型 remap。
-- `auto`：保留自动检测，但策略更保守；如果参考标签 ID 是 checkpoint 标签 ID 的子集，不会自动触发 remap。
+- `auto`：保留自动检测，但策略更保守；如果参考标签 ID 是 checkpoint 标签 ID 的子集，不会自动触发 remap。2026-06-02 进一步收紧：参考覆盖 ckpt 标签 ≥ 0.85 时直接返回 `None`（`auto` 退化为保底）；正式 taxonomy 由前端 `loadReferenceCase()` 按 `referenceCase.dataset` 字段自动设置。
 
 `label_taxonomy` 已纳入 cache key，避免不同标签体系的 validation 或预测语义混用。
 
@@ -166,7 +168,7 @@ validation 按当前模型标签体系解释
 
 ### auto 模式
 
-适合作为保底和演示默认值；正式质量基线建议使用显式 taxonomy。
+适合作为保底和演示默认值；正式质量基线建议使用显式 taxonomy。2026-06-02 起，`auto` 在 AMOS 真实 1-13 标签 vs FLARE22 真实 1-13 标签不可分的边界不再保证正确，应回退到 `AMOS22` / `FLARE22` 显式选择，或依靠参考病例 registry 的 `dataset` 字段自动预设。
 
 ## 与量化功能的关系
 

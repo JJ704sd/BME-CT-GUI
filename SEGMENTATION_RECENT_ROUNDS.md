@@ -2,9 +2,50 @@
 
 > 本文档按时间滚动覆写，只保留最近三轮成功或具备诊断价值的推理数据。历史完整记录见 `SEGMENTATION_EXPERIMENT_COMPARISON.md`。
 
-最近更新：2026-06-01
+最近更新：2026-06-02
 
-## 第 1 轮（最新）— 本地缓存演示 7 步验证
+## 第 1 轮（最新）— detect_dataset 二轮收紧 + 前端按 dataset 预设 taxonomy
+
+| 项目 | 值 |
+||---|
+| 日期 | 2026-06-02 |
+| 修复内容 | `detect_dataset()` 收紧：参考覆盖 ckpt 标签 ≥ 0.85 时返回 `None`（`auto` 退化为保底）；前端 `loadReferenceCase()` 按 `referenceCase.dataset` 自动设置 `label_taxonomy` |
+| 受影响逻辑 | `server/taxonomy.py:detect_dataset()`、`src/main.tsx:mapDatasetToLabelTaxonomy()` 与 `loadReferenceCase()` |
+| 回归测试 | `tests/backendState.test.py` 新增 AMOS 1-13 + ckpt 1-15 真实 case 测试；更新 FLARE22 1-13 + ckpt 1-15 用例注释 |
+| 自动验证 | `python tests/backendState.test.py`、`npm test`、`npm run build` 全过（`EXIT=0`） |
+
+**问题描述：**
+
+2026-06-01 现场复测时发现，AMOS 0117 自身标签在 `detect_dataset()` 中仍可能被错判为 FLARE22，触发 `remap_applied=true`，AMOS 推理 Dice 异常偏低。原因：
+
+- AMOS 真实 `amos_0117_label.nii/amos_0117(2).nii` 实际 unique IDs 为 `{1..13}`，缺 14/15（bladder/prostate）。
+- FLARE22 真实标签 unique IDs 也是 `{1..13}`。
+- 两者在裸 ID 集合上不可分，仅靠命名对比无法稳定区分。
+
+**修复要点：**
+
+| 修改项 | 说明 |
+|---|---|
+| `detect_dataset()` 0.85 守卫 | `coverage = len(reference_ids ∩ ckpt_ids) / len(ckpt_ids) >= 0.85` → `None` |
+| 前端预设 | `loadReferenceCase()` 在拿到参考 label 后立即调用 `mapDatasetToLabelTaxonomy()`；AMOS/AMOS22 → `AMOS22`、FLARE/FLARE22 → `FLARE22`、其他保持原值 |
+| `auto` 行为 | 退化为保底策略；`label_taxonomy=AMOS22` / `FLARE22` 显式选择仍是正式质量基线入口 |
+| 用户体验 | 用户仍可在 UI 切换 taxonomy；前端预设只是默认值 |
+
+**回归测试覆盖：**
+
+| 用例 | reference | checkpoint | 期望 |
+|---|---|---|---|
+| AMOS 自指 1-15 | `{1..15}` | `{1..15}` | `None`（短路 `==`） |
+| AMOS 真实 1-13 | `{1..13}` | `{1..15}` | `None`（coverage 0.867 ≥ 0.85） |
+| FLARE22 真实 1-13 | `{1..13}` | `{1..15}` | `None`（coverage 0.867 ≥ 0.85；前端预设补） |
+| AMOS 子集 {1,2,6} | `{1,2,6}` | `{1..15}` | `None`（进入循环，mismatch=0 < 5） |
+| Partial {1,3} | `{1,3}` | `{1,3,6}` | `None`（`len(shared_ids) < 3` 守卫） |
+
+**结论：** `auto` 模式在裸 ID 不可分的边界（AMOS 1-13 vs FLARE22 1-13）退化为保底，避免错误 remap。正式 taxonomy 由前端 `loadReferenceCase()` 按 `referenceCase.dataset` 字段预设；用户仍可在 UI 切换。本修复不改变 nnUNetv2 推理、缓存复用、SSE 协议或影像量化逻辑。
+
+---
+
+## 第 2 轮 — 本地缓存演示 7 步验证
 
 | 项目 | 值 |
 |---|---|

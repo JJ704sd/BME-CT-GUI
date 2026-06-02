@@ -4,6 +4,10 @@
 
 ## 当前运行状态
 
+2026-06-02 已完成：
+- `detect_dataset()` 二轮收紧：参考覆盖 ckpt 标签 ≥ 0.85 时直接返回 `None`，避免 AMOS 1-13 真实数据被错判为 FLARE22。
+- 前端 `loadReferenceCase()` 新增 `mapDatasetToLabelTaxonomy()` 预设：AMOS 病例 → `AMOS22`、FLARE22 病例 → `FLARE22`、其他保持原值；`auto` 退化为保底。
+
 2026-06-01 已完成：
 - 本地缓存演示 7 步：AMOS 0117 cache hit、FLARE22 Tr 0009 真实推理、FLARE22 cache hit
 - 新增 `tools/seed_demo_cache.py`（替换了仅 AMOS 版的 `tools/seed_amos_cache.py`）和 `docs/local-cache-demo-runbook.md`
@@ -25,7 +29,7 @@
 5. 到 `src/report/exportReport.ts` 讲报告导出：HTML/JSON/PDF 三种格式、自包含 HTML 模板和数据收集。
 6. 到 `server/main.py`、`server/server_inference.py` 和 `server/persistent_nnunet_worker.py` 讲 FastAPI 后端如何桥接 nnUNetv2、管理任务、缓存、validation，以及如何按 `runtime_target` 选择本地保底路径或服务器 5-fold soft ensemble 路径。`label_taxonomy` 参数已纳入缓存 key。
 7. 到 `deployment-packages/server-runtime-quickstart-20260531.md` 讲服务器 runtime 包的解压、环境变量、CORS、校园网 API 直连 smoke test、显式 `label_taxonomy` 参数和验证清单。
-8. 到 `server/taxonomy.py` 讲跨数据集标签 taxonomy 检测与自动重映射：FLARE22 标签定义、器官名别名映射、`detect_dataset()` 自动识别数据集来源（更保守策略：标签 ID 是 checkpoint 子集时不触发 remap）、`build_remap_mapping()` 按器官名建立 ID 映射、`apply_remap()` 用查找表重排参考标签数组。支持显式 `label_taxonomy=auto|AMOS22|FLARE22` 参数。
+8. 到 `server/taxonomy.py` 讲跨数据集标签 taxonomy 检测与自动重映射：FLARE22 标签定义、器官名别名映射、`detect_dataset()` 自动识别数据集来源（2026-06-02 收紧：参考覆盖 ckpt 标签 ≥ 0.85 时返回 `None`；`auto` 退化为保底）、`build_remap_mapping()` 按器官名建立 ID 映射、`apply_remap()` 用查找表重排参考标签数组。支持显式 `label_taxonomy=auto|AMOS22|FLARE22` 参数；前端 `loadReferenceCase()` 按 `referenceCase.dataset` 自动预设 taxonomy。
 9. 到 `tools/segmentation_metrics_summary.py` 讲 Dice、IoU、Voxel Accuracy 和 Hausdorff Distance 指标如何离线复算。
 10. 到 `tools/seed_demo_cache.py` 讲本地缓存演示预热：稳定 SHA-256 计算 `input_sha256` / `checkpoint_sha256`，用 7 字段 `build_cache_key()` 写 `job_summary.json`，让 AMOS 历史推理（`009d4efdc5f6`）成为 cache hit 源；FLARE 真实推理缺失时打印明确提示。
 11. 到 `tools/rewrite_flare22_historical_summary.py` 讲 cache 链路补丁：当 cache_source 的新预测与历史 remap 指标字节不一致时，按离线 remap 后的 metrics 改写 cache_source 的 `validation_summary.json`，加 `historical: true` 和 `source_job_id` 标记；这是"cache hit 显示历史 validation 摘要"的实现支撑。
