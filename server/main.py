@@ -48,7 +48,25 @@ DEBUG_LABEL = NNUNET_FILES / "amos_0117(2).nii.gz"
 DEBUG_ORIGINAL = NNUNET_FILES / "amos_0117(3).nii.gz"
 FALLBACK_LABEL = NNUNET_FILES / "amos_0117_label.nii" / "amos_0117(2).nii"
 PROJECT_CHECKPOINT = NNUNET_FILES / "checkpoint_best.pth"
-REFERENCE_CASES_JSON = Path(os.environ.get("SEGMENTATION_REFERENCE_CASES_JSON", ROOT / "reference_cases.json"))
+REFERENCE_CASES_CANDIDATES: tuple[Path, ...] = (
+  ROOT / "reference_cases.json",
+  NNUNET_FILES / "reference_cases.local.json",
+)
+
+
+def _resolve_reference_cases_json() -> Path | None:
+  env_path = os.environ.get("SEGMENTATION_REFERENCE_CASES_JSON")
+  if env_path:
+    candidate = Path(env_path)
+    if candidate.exists():
+      return candidate
+  for candidate in REFERENCE_CASES_CANDIDATES:
+    if candidate.exists():
+      return candidate
+  return None
+
+
+REFERENCE_CASES_JSON = _resolve_reference_cases_json() or (ROOT / "reference_cases.json")
 
 FLARE_MODEL_DIR = NNUNET_RESULTS / "Dataset001_FLARE" / "nnUNetTrainer__nnUNetPlans__2d"
 FLARE_DATASET_JSON = FLARE_MODEL_DIR / "dataset.json"
@@ -138,6 +156,25 @@ def reference_case_records() -> list[dict[str, Any]]:
       "_label_path": label_path,
     })
   return records
+
+
+def log_reference_case_warnings() -> None:
+  for record in reference_case_records():
+    issues: list[str] = []
+    if not record["has_original"]:
+      issues.append(f"original missing: {record['original'] or '<unset>'}")
+    if record["label"] and not record["has_label"]:
+      issues.append(f"label missing: {record['label']}")
+    if not record["label"] and record["role"] != "external-reference":
+      issues.append("label not configured")
+    if issues:
+      print(
+        f"[reference-cases] WARN {record['id']} ({record['dataset']}): " + "; ".join(issues),
+        flush=True,
+      )
+
+
+log_reference_case_warnings()
 
 
 def find_reference_case(sample_id: str) -> dict[str, Any] | None:
