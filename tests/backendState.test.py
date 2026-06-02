@@ -708,11 +708,35 @@ def test_validation_summary_json_preserves_chinese_without_bom():
 
 
 def test_samples_api_exposes_reference_case_metadata():
-    server = load_server_module()
-    client = TestClient(server.app)
-    response = client.get("/api/samples")
-    body = response.json()
-    sample = body["samples"][0]
+    temp_root = make_test_output_dir("reference-case-default-metadata")
+    debug_original = temp_root / "amos_0117(3).nii.gz"
+    debug_label = temp_root / "amos_0117(2).nii.gz"
+    debug_original.write_bytes(b"debug-original")
+    debug_label.write_bytes(b"debug-label")
+    registry = temp_root / "reference_cases.json"
+    registry.write_text(json.dumps({
+        "samples": [
+            {
+                "id": "amos_0117",
+                "name": "AMOS 0117",
+                "dataset": "AMOS22",
+                "modality": "CT",
+                "role": "built-in-reference",
+                "description": "内置参考病例，用于演示、回归和标准答案 Dice 验证。",
+                "original": str(debug_original),
+                "label": str(debug_label),
+                "original_filename": "amos_0117_original.nii.gz",
+                "label_filename": "amos_0117_label.nii.gz",
+            }
+        ]
+    }, ensure_ascii=False), encoding="utf-8")
+
+    with patch.dict(os.environ, {"SEGMENTATION_REFERENCE_CASES_JSON": str(registry)}):
+        server = load_server_module()
+        client = TestClient(server.app)
+        response = client.get("/api/samples")
+        body = response.json()
+        sample = body["samples"][0]
 
     assert response.status_code == 200
     assert sample["id"] == "amos_0117"
@@ -728,6 +752,88 @@ def test_samples_api_exposes_reference_case_metadata():
     assert isinstance(sample["has_original"], bool)
     assert isinstance(sample["has_label"], bool)
     assert sample["validation_available"] == (sample["has_original"] and sample["has_label"])
+
+
+def test_local_reference_cases_include_flare22_with_label():
+    """Regression: the local reference case file (loaded by the candidates fallback)
+    must expose FLARE22 Tr 0009 with its label so the GUI dropdown is selectable.
+    """
+    local_registry = (PROJECT_ROOT / "nnunetv2_files" / "reference_cases.local.json").resolve()
+    if not local_registry.exists():
+        print("[skip] local reference_cases.local.json not present in this environment")
+        return
+    with patch.dict(os.environ, {"SEGMENTATION_REFERENCE_CASES_JSON": str(local_registry)}):
+        server = load_server_module()
+        client = TestClient(server.app)
+        response = client.get("/api/samples")
+        body = response.json()
+
+    ids = {sample["id"]: sample for sample in body["samples"]}
+    assert "amos_0117" in ids
+    assert ids["amos_0117"]["has_original"] is True
+    assert ids["amos_0117"]["has_label"] is True
+    assert "flare22_tr_0009" in ids
+    assert ids["flare22_tr_0009"]["has_original"] is True
+    assert ids["flare22_tr_0009"]["has_label"] is True, (
+        "FLARE22 Tr 0009 must have a resolvable label file in the local registry"
+    )
+
+
+def test_log_reference_case_warnings_emits_for_missing_files():
+    from contextlib import redirect_stdout
+    from io import StringIO
+    server = load_server_module()
+    temp_root = make_test_output_dir("reference-case-warnings")
+    present_original = temp_root / "present.nii.gz"
+    present_label = temp_root / "present_label.nii.gz"
+    present_original.write_bytes(b"present")
+    present_label.write_bytes(b"present-label")
+    missing_label = temp_root / "missing_label.nii.gz"
+    registry = temp_root / "reference_cases.json"
+    registry.write_text(json.dumps({
+        "samples": [
+            {
+                "id": "case_present",
+                "name": "Case Present",
+                "dataset": "FLARE",
+                "modality": "CT",
+                "role": "built-in-reference",
+                "description": "all good",
+                "original": str(present_original),
+                "label": str(present_label),
+            },
+            {
+                "id": "case_missing_label",
+                "name": "Case Missing Label",
+                "dataset": "FLARE",
+                "modality": "CT",
+                "role": "external-reference",
+                "description": "label file is missing on disk",
+                "original": str(present_original),
+                "label": str(missing_label),
+            },
+            {
+                "id": "case_missing_original",
+                "name": "Case Missing Original",
+                "dataset": "FLARE",
+                "modality": "CT",
+                "role": "external-reference",
+                "description": "original file is missing on disk",
+                "original": str(temp_root / "missing_original.nii.gz"),
+            },
+        ]
+    }, ensure_ascii=False), encoding="utf-8")
+    with patch.dict(os.environ, {"SEGMENTATION_REFERENCE_CASES_JSON": str(registry)}):
+        server2 = load_server_module()
+        sink = StringIO()
+        with redirect_stdout(sink):
+            server2.log_reference_case_warnings()
+    captured = sink.getvalue()
+    assert "case_present" not in captured
+    assert "case_missing_label" in captured
+    assert "label missing" in captured
+    assert "case_missing_original" in captured
+    assert "original missing" in captured
 
 
 def test_samples_api_reads_configured_reference_cases():
@@ -1841,15 +1947,19 @@ def test_taxonomy_detects_flare22_and_remaps_label_ids():
         {"label": 11, "id": "right-adrenal-gland", "nameEn": "right_adrenal_gland", "nameZh": "右肾上腺"},
         {"label": 12, "id": "left-adrenal-gland", "nameEn": "left_adrenal_gland", "nameZh": "左肾上腺"},
         {"label": 13, "id": "duodenum", "nameEn": "duodenum", "nameZh": "十二指肠"},
+        {"label": 14, "id": "bladder", "nameEn": "bladder", "nameZh": "膀胱"},
+        {"label": 15, "id": "prostate-or-uterus", "nameEn": "prostate_or_uterus", "nameZh": "前列腺/子宫"},
     ]
 
-    # FLARE22 reference has IDs {1..13}
+    # FLARE22 reference has IDs {1..13}, all of which fall inside the AMOS
+    # checkpoint's {1..15}. With the new coverage guard, auto-detect returns
+    # None because the reference covers 13/15 of the checkpoint labels. The
+    # frontend is expected to set the taxonomy explicitly when a reference
+    # case declares its dataset.
     flare22_ids = set(range(1, 14))
 
-    # New behavior: FLARE22 IDs are subset of checkpoint IDs, so auto-detect returns None
-    # User must explicitly select label_taxonomy=FLARE22
     detected = taxonomy.detect_dataset(flare22_ids, amos_labels)
-    assert detected is None, f"Expected None (conservative), got {detected}"
+    assert detected is None, f"Expected auto-detect to be conservative, got {detected}"
 
     # Explicit FLARE22 selection should work
     mapping = taxonomy.build_remap_mapping(amos_labels, "FLARE22")
@@ -1871,7 +1981,7 @@ def test_taxonomy_detects_flare22_and_remaps_label_ids():
 
 
 def test_taxonomy_detects_partial_flare22_labels_when_ids_are_mismatched():
-    """少量 FLARE22 标签：新逻辑下不再自动检测，需显式选择。"""
+    """共享 ID 不足时不做自动检测，需显式选择数据集。"""
     import sys
     taxonomy_path = PROJECT_ROOT / "server" / "taxonomy.py"
     spec = importlib.util.spec_from_file_location("taxonomy", taxonomy_path)
@@ -1885,9 +1995,9 @@ def test_taxonomy_detects_partial_flare22_labels_when_ids_are_mismatched():
         {"label": 6, "id": "liver", "nameEn": "liver", "nameZh": "肝脏"},
     ]
 
-    # New behavior: partial labels are subset of checkpoint, no auto-detect
+    # 共享 ID 只有 2 个，未达到最低 3 个的证据门槛，避免把偶然重叠误判为 FLARE22
     detected = taxonomy.detect_dataset({1, 3}, amos_labels)
-    assert detected is None, f"Expected None (conservative), got {detected}"
+    assert detected is None, f"Expected None when shared IDs < 3, got {detected}"
 
     # Explicit FLARE22 selection should work
     mapping = taxonomy.build_remap_mapping(amos_labels, "FLARE22")
@@ -1915,10 +2025,61 @@ def test_taxonomy_returns_none_for_amos_native_labels():
     assert detected is None, f"Should not detect any dataset for AMOS-native labels, got {detected}"
 
 
+def test_taxonomy_returns_none_when_amos_reference_matches_full_amos_checkpoint():
+    """AMOS 1-15 对 AMOS ckpt 1-15：共享 ID 全 match，绝不能被错判成 FLARE22。"""
+    import sys
+    taxonomy_path = PROJECT_ROOT / "server" / "taxonomy.py"
+    spec = importlib.util.spec_from_file_location("taxonomy", taxonomy_path)
+    taxonomy = importlib.util.module_from_spec(spec)
+    sys.modules["taxonomy"] = taxonomy
+    spec.loader.exec_module(taxonomy)
+
+    amos_labels = [
+        {"label": 1, "id": "spleen", "nameEn": "spleen", "nameZh": "脾脏"},
+        {"label": 2, "id": "right-kidney", "nameEn": "right_kidney", "nameZh": "右肾"},
+        {"label": 3, "id": "left-kidney", "nameEn": "left_kidney", "nameZh": "左肾"},
+        {"label": 4, "id": "gallbladder", "nameEn": "gall_bladder", "nameZh": "胆囊"},
+        {"label": 5, "id": "esophagus", "nameEn": "esophagus", "nameZh": "食管"},
+        {"label": 6, "id": "liver", "nameEn": "liver", "nameZh": "肝脏"},
+        {"label": 7, "id": "stomach", "nameEn": "stomach", "nameZh": "胃"},
+        {"label": 8, "id": "aorta", "nameEn": "aorta", "nameZh": "主动脉"},
+        {"label": 9, "id": "ivc", "nameEn": "postcava", "nameZh": "下腔静脉"},
+        {"label": 10, "id": "pancreas", "nameEn": "pancreas", "nameZh": "胰腺"},
+        {"label": 11, "id": "right-adrenal-gland", "nameEn": "right_adrenal_gland", "nameZh": "右肾上腺"},
+        {"label": 12, "id": "left-adrenal-gland", "nameEn": "left_adrenal_gland", "nameZh": "左肾上腺"},
+        {"label": 13, "id": "duodenum", "nameEn": "duodenum", "nameZh": "十二指肠"},
+        {"label": 14, "id": "bladder", "nameEn": "bladder", "nameZh": "膀胱"},
+        {"label": 15, "id": "prostate-or-uterus", "nameEn": "prostate_or_uterus", "nameZh": "前列腺/子宫"},
+    ]
+    detected = taxonomy.detect_dataset(set(range(1, 16)), amos_labels)
+    assert detected is None, f"AMOS-vs-AMOS should not be detected, got {detected}"
+
+
+def test_taxonomy_returns_none_for_realistic_amos_1_to_13_reference():
+    """真实 AMOS label 只有 1-13（无 bladder/prostate）vs ckpt 1-15：
+    不能因为 FLARE22 表错位而被错判 FLARE22。
+    """
+    import sys
+    taxonomy_path = PROJECT_ROOT / "server" / "taxonomy.py"
+    spec = importlib.util.spec_from_file_location("taxonomy", taxonomy_path)
+    taxonomy = importlib.util.module_from_spec(spec)
+    sys.modules["taxonomy"] = taxonomy
+    spec.loader.exec_module(taxonomy)
+
+    amos_labels = [
+        {"label": i, "id": f"organ_{i}", "nameEn": f"organ_{i}", "nameZh": f"器官{i}"}
+        for i in range(1, 16)
+    ]
+    detected = taxonomy.detect_dataset(set(range(1, 14)), amos_labels)
+    assert detected is None, f"Realistic AMOS 1-13 should not be detected, got {detected}"
+
+
 if __name__ == "__main__":
     test_taxonomy_detects_flare22_and_remaps_label_ids()
     test_taxonomy_detects_partial_flare22_labels_when_ids_are_mismatched()
     test_taxonomy_returns_none_for_amos_native_labels()
+    test_taxonomy_returns_none_when_amos_reference_matches_full_amos_checkpoint()
+    test_taxonomy_returns_none_for_realistic_amos_1_to_13_reference()
     test_validate_against_custom_label_respects_explicit_taxonomy_hints()
     test_model_state_reports_missing_required_files()
     test_server_runtime_ready_does_not_require_local_model_files()
@@ -1940,6 +2101,8 @@ if __name__ == "__main__":
     test_validation_summary_json_preserves_chinese_without_bom()
     test_samples_api_exposes_reference_case_metadata()
     test_samples_api_reads_configured_reference_cases()
+    test_local_reference_cases_include_flare22_with_label()
+    test_log_reference_case_warnings_emits_for_missing_files()
     test_job_state_reports_result_readiness_after_completion()
     test_running_job_can_be_cancelled_and_process_is_terminated()
     test_job_summary_json_records_runtime_and_output_size()

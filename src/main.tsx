@@ -47,7 +47,7 @@ import { summarizeSegmentationQuantification, formatQuantificationValue } from "
 import { renderNiftiSliceToDataUrl as renderOrientedNiftiSliceToDataUrl } from "./imaging/sliceRenderer";
 import type { VoxelCoord } from "./imaging/voxelMapping";
 import { buildOrganLayersFromLabels, formatOrganScore, getMeanOrganDice, type OrganLayer as Organ, type OrganLayerQuality as QualityState } from "./organLayerLogic";
-import { DEFAULT_REFERENCE_CASES, getReferenceCaseOriginalUrl, normalizeReferenceCases, type ReferenceCase } from "./referenceCases";
+import { DEFAULT_REFERENCE_CASES, getReferenceCaseLabelUrl, getReferenceCaseOriginalUrl, normalizeReferenceCases, type ReferenceCase } from "./referenceCases";
 import { buildCustomCaseId, getAlignmentCaptionCopy, getCustomCasePanelCopy, getDisplayAspectRatio, getRegistrationStatus, getSelectedSliceForVoxelCoord, getSplitPositionFromClientX, getStableSliceWindowStart, getVoxelCoordDragCommit, getVoxelCoordForSelectedSliceSync, shouldUpdateVoxelCoord, volumesShareDisplayGrid, type SelectedSliceSyncSource } from "./viewerLogic";
 import "./styles.css";
 
@@ -227,6 +227,14 @@ const labelTaxonomyOptions: { id: LabelTaxonomy; label: string; detail: string; 
   { id: "AMOS22", label: "AMOS22 原生", detail: "不执行 FLARE 重映射", meta: "AMOS 标签推荐" },
   { id: "FLARE22", label: "FLARE22", detail: "强制映射到当前模型", meta: "FLARE 标签推荐" }
 ];
+
+function mapDatasetToLabelTaxonomy(dataset: string | undefined): LabelTaxonomy | null {
+  if (!dataset) return null;
+  const normalized = dataset.trim().toUpperCase();
+  if (normalized === "AMOS22" || normalized === "AMOS") return "AMOS22";
+  if (normalized === "FLARE22" || normalized === "FLARE") return "FLARE22";
+  return null;
+}
 
 const windowPresets = [
   { id: "soft", label: "软组织", level: 40, width: 360 },
@@ -1477,6 +1485,28 @@ function App() {
       }
       setLogs((items) => [`内置参考病例已载入：${referenceCase.name} / ${file.name}`, ...items].slice(0, 8));
       setToast(`参考病例已载入：${referenceCase.name}`);
+      if (referenceCase.hasLabel && referenceCase.labelUrl) {
+        try {
+          const labelResponse = await fetch(getReferenceCaseLabelUrl(API_ENDPOINT, referenceCase));
+          if (labelResponse.ok) {
+            const labelBuffer = await labelResponse.arrayBuffer();
+            const labelFileObj = new File([labelBuffer], referenceCase.labelFilename, { type: "application/octet-stream" });
+            setLabelFile(labelFileObj);
+            const taxonomyForDataset = mapDatasetToLabelTaxonomy(referenceCase.dataset);
+            if (taxonomyForDataset) setSelectedLabelTaxonomy(taxonomyForDataset);
+            setLogs((items) => [`参考标签已载入：${referenceCase.labelFilename}`, ...items].slice(0, 8));
+            setToast(`参考标签已同步：${referenceCase.name} 推理时将自动计算 Dice`);
+          } else {
+            setLabelFile(null);
+          }
+        } catch (labelError) {
+          setLabelFile(null);
+          const labelMessage = labelError instanceof Error ? labelError.message : "参考标签载入失败";
+          setToast(`${referenceCase.name} 原图已载入，但参考标签载入失败：${labelMessage}`);
+        }
+      } else {
+        setLabelFile(null);
+      }
       setSampleLoadState({ status: "ready", message: `${referenceCase.name} 已载入 · ${referenceCase.dataset} · ${referenceCase.validationAvailable ? "有标准答案" : "无标准答案"}` });
       setLastImport(`原图就绪：${file.name}`);
       setActiveModule("分割");

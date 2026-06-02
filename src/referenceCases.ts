@@ -78,3 +78,8 @@ export function getReferenceCaseOriginalUrl(endpoint: string, referenceCase: Ref
   if (/^https?:\/\//.test(referenceCase.originalUrl)) return referenceCase.originalUrl;
   return `${endpoint.replace(/\/$/, "")}${referenceCase.originalUrl.startsWith("/") ? "" : "/"}${referenceCase.originalUrl}`;
 }
+
+export function getReferenceCaseLabelUrl(endpoint: string, referenceCase: ReferenceCase): string {
+  if (/^https?:\/\//.test(referenceCase.labelUrl)) return referenceCase.labelUrl;
+  return `${endpoint.replace(/\/$/, "")}${referenceCase.labelUrl.startsWith("/") ? "" : "/"}${referenceCase.labelUrl}`;
+}

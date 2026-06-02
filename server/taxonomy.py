@@ -84,15 +84,20 @@ def detect_dataset(
 ) -> str | None:
     """Detect which known dataset the reference labels belong to.
 
-    Strategy: compare the reference label IDs with the checkpoint label IDs.
-    If the reference IDs are a subset of the checkpoint IDs, the reference
-    is likely from the same dataset (no remap needed).
+    Heuristic:
+    1. If the reference's ID set equals the checkpoint's ID set, treat the
+       reference as the checkpoint's own dataset. No remap is needed.
+    2. Otherwise, walk the registered datasets (e.g. FLARE22). At the IDs
+       shared by reference ∩ dataset ∩ checkpoint, compare the dataset's
+       organ name to the checkpoint's organ name. If most shared IDs
+       disagree on organ meaning (strong semantic evidence that the
+       reference uses the dataset's ID scheme rather than the checkpoint's),
+       return that dataset name.
 
-    Only detect a different dataset if:
-    1. The reference has IDs NOT in the checkpoint (strong evidence of different dataset)
-    2. OR the user explicitly selects a different dataset via label_taxonomy hint
-
-    Returns the detected dataset name, or None if no match.
+    The "shared IDs disagree" criterion handles the FLARE22+AMOS case
+    (FLARE22 IDs 1..13 fall inside the AMOS checkpoint's 1..15, but the
+    organ names are very different), while the equality shortcut keeps
+    AMOS-vs-AMOS from being misclassified as FLARE22.
     """
     if not reference_ids:
         return None
@@ -102,47 +107,38 @@ def detect_dataset(
         return None
 
     ckpt_ids = set(ckpt_map.keys())
-
-    # If reference IDs are a subset of checkpoint IDs, assume same dataset
-    # This prevents AMOS labels from being detected as FLARE22
-    if reference_ids.issubset(ckpt_ids):
+    if reference_ids == ckpt_ids:
         return None
 
-    # Only try to detect if reference has IDs NOT in checkpoint
-    # This is strong evidence of a different dataset
+    # A reference whose ID set closely matches the checkpoint's ID set is
+    # likely the checkpoint's own dataset. We use a coverage threshold
+    # because the equality shortcut misses the common case where the
+    # AMOS reference only labels 1..13 (no bladder/prostate voxels), which
+    # would otherwise collide with FLARE22's 1..13 ID range. When coverage
+    # is high we deliberately do not call out a different dataset, even
+    # if the FLARE22 naming table disagrees on those shared IDs.
+    coverage = len(reference_ids.intersection(ckpt_ids)) / max(1, len(ckpt_ids))
+    if coverage >= 0.85:
+        return None
+
     best_match: str | None = None
     best_score = 0
 
     for dataset_name, dataset_labels in KNOWN_DATASETS.items():
-        # Only consider datasets whose IDs overlap with reference
         dataset_ids = set(dataset_labels.keys())
         if not reference_ids.intersection(dataset_ids):
             continue
 
-        # Check if the reference has IDs that match this dataset but not checkpoint
-        # This is stronger evidence than just comparing label tables
-        ref_only_ids = reference_ids - ckpt_ids
-        if not ref_only_ids.intersection(dataset_ids):
-            continue
-
-        # Compare organ names at shared IDs
         shared_ids = reference_ids.intersection(dataset_ids).intersection(ckpt_ids)
-        if not shared_ids:
+        if len(shared_ids) < 3:
             continue
 
-        match_count = sum(
+        mismatch_count = sum(
             1 for lid in shared_ids
-            if dataset_labels[lid] == ckpt_map[lid]
+            if dataset_labels[lid] != ckpt_map[lid]
         )
-        mismatch_count = len(shared_ids) - match_count
 
-        # Require very strong mismatch evidence (most IDs differ)
-        # AND reference has IDs not in checkpoint
-        strong_mismatch = (
-            mismatch_count > match_count and
-            mismatch_count >= 5  # Require at least 5 mismatches
-        )
-        if strong_mismatch:
+        if mismatch_count >= 5 and mismatch_count > len(shared_ids) / 2:
             score = mismatch_count
             if score > best_score:
                 best_score = score
