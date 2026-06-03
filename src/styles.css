@@ -416,6 +416,23 @@ h1 {
   100% { opacity: 0; }
 }
 
+.toast {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  max-width: 360px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(15, 23, 32, 0.92);
+  color: #d6f5e8;
+  font-size: 13px;
+  line-height: 1.5;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  z-index: 1000;
+  pointer-events: none;
+  animation: preset-toast-fade 2.8s ease-in-out forwards;
+}
+
 .tool-help-strip {
   display: grid;
   grid-template-columns: repeat(6, minmax(86px, 1fr));

@@ -23,6 +23,7 @@ const mainSource = readFileSync(new URL("../src/main.tsx", import.meta.url), "ut
 const inferenceClientSource = readFileSync(new URL("../src/inference/inferenceClient.ts", import.meta.url), "utf8");
 const orthogonalViewerSource = readFileSync(new URL("../src/components/OrthogonalViewer.tsx", import.meta.url), "utf8");
 const stylesSource = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+const exportReportSource = readFileSync(new URL("../src/report/exportReport.ts", import.meta.url), "utf8");
 
 for (const copy of ["载入 AMOS " + "样例", "本地 AMOS " + "样例", "AMOS CT " + "样例"]) {
   assert.equal(mainSource.includes(copy), false, `UI should not use AMOS-only copy: ${copy}`);
@@ -448,3 +449,112 @@ try {
 } finally {
   globalThis.fetch = originalFetch;
 }
+
+// --- IoU coverage in inference client / exported HTML report ---
+assert.equal(inferenceClientSource.includes("mean_iou"), true, "ValidationSummary type should expose mean_iou");
+assert.equal(inferenceClientSource.includes("foreground_iou"), true, "ValidationSummary type should expose foreground_iou");
+assert.equal(inferenceClientSource.includes("union_voxels"), true, "per-label validation should expose union_voxels for IoU computation");
+for (const key of ["mean_iou", "min_iou", "foreground_iou"]) {
+  assert.equal(
+    inferenceClientSource.includes(`"${key}"`),
+    true,
+    `normalizeValidation whitelist should include ${key}`
+  );
+}
+assert.equal(exportReportSource.includes("mean_iou"), true, "HTML report should render mean_iou");
+assert.equal(exportReportSource.includes("foreground_iou"), true, "HTML report should render foreground_iou");
+assert.equal(exportReportSource.includes("平均 IoU"), true, "HTML report should label mean IoU in Chinese");
+assert.equal(exportReportSource.includes("前景 IoU"), true, "HTML report should label foreground IoU in Chinese");
+assert.equal(exportReportSource.includes("metricBarHtml(l.iou"), true, "per-label table should render IoU column with bar visualization");
+assert.equal(exportReportSource.includes("--accent:"), true, "HTML report should use a unified accent color variable for visual coherence");
+assert.equal(exportReportSource.includes("metric-card.bar-good"), true, "HTML report should color-code metric cards by score tier");
+assert.equal(exportReportSource.includes(".metric-bar-fill"), true, "HTML report should render inline metric bar visualizations");
+
+// --- Quality assessment coverage: pixel accuracy + HD / HD95 / ASD ---
+for (const key of [
+  "mean_pixel_accuracy",
+  "min_pixel_accuracy",
+  "foreground_pixel_accuracy",
+  "mean_asd",
+  "max_asd",
+  "foreground_asd",
+  "mean_hd",
+  "max_hd",
+  "foreground_hd",
+  "mean_hd95",
+  "max_hd95",
+  "foreground_hd95"
+] as const) {
+  assert.equal(inferenceClientSource.includes(`${key}?:`), true, `ValidationSummary type should declare ${key}`);
+  assert.equal(
+    inferenceClientSource.includes(`"${key}"`),
+    true,
+    `normalizeValidation whitelist should include ${key}`
+  );
+}
+for (const key of ["pixel_accuracy", "asd", "hd", "hd95"] as const) {
+  assert.equal(
+    inferenceClientSource.includes(`metric.${key}`),
+    true,
+    `normalizeValidation should parse per-label ${key}`
+  );
+}
+assert.equal(inferenceClientSource.includes("surface_distance_unit"), true, "ValidationSummary should propagate surface distance unit");
+assert.equal(inferenceClientSource.includes("raw.spacing"), true, "ValidationSummary should propagate NIfTI spacing array");
+const completeWithDistance = parseInferenceEvent(
+  'data: {"type":"complete","progress":100,"stage":"完成","validation":{"status":"review","sample_id":"case_42","mean_dice":0.83,"min_dice":0.61,"foreground_dice":0.91,"mean_iou":0.71,"min_iou":0.45,"foreground_iou":0.84,"pixel_accuracy":0.95,"mean_pixel_accuracy":0.74,"min_pixel_accuracy":0.62,"foreground_pixel_accuracy":0.96,"mean_asd":1.42,"max_asd":4.21,"foreground_asd":1.18,"mean_hd":8.55,"max_hd":15.43,"foreground_hd":7.12,"mean_hd95":3.01,"max_hd95":5.27,"foreground_hd95":2.85,"surface_distance_unit":"mm","spacing":[1.0,1.0,2.0],"labels":[{"label":1,"name":"liver","dice":0.9,"iou":0.81,"pixel_accuracy":0.96,"asd":0.42,"hd":2.1,"hd95":1.4,"prediction_voxels":120,"reference_voxels":115,"intersection_voxels":108,"union_voxels":127}]}}\n\n'
+) as Extract<ReturnType<typeof parseInferenceEvent>, { type: "complete" }>;
+assert.equal(completeWithDistance.type, "complete");
+const distanceValidation = completeWithDistance.validation;
+assert.equal(distanceValidation?.pixel_accuracy, 0.95);
+assert.equal(distanceValidation?.mean_pixel_accuracy, 0.74);
+assert.equal(distanceValidation?.foreground_pixel_accuracy, 0.96);
+assert.equal(distanceValidation?.mean_asd, 1.42);
+assert.equal(distanceValidation?.max_asd, 4.21);
+assert.equal(distanceValidation?.foreground_asd, 1.18);
+assert.equal(distanceValidation?.mean_hd, 8.55);
+assert.equal(distanceValidation?.max_hd, 15.43);
+assert.equal(distanceValidation?.foreground_hd, 7.12);
+assert.equal(distanceValidation?.mean_hd95, 3.01);
+assert.equal(distanceValidation?.max_hd95, 5.27);
+assert.equal(distanceValidation?.foreground_hd95, 2.85);
+assert.equal(distanceValidation?.surface_distance_unit, "mm");
+assert.deepEqual(distanceValidation?.spacing, [1.0, 1.0, 2.0]);
+assert.equal(distanceValidation?.labels?.[0].pixel_accuracy, 0.96);
+assert.equal(distanceValidation?.labels?.[0].asd, 0.42);
+assert.equal(distanceValidation?.labels?.[0].hd, 2.1);
+assert.equal(distanceValidation?.labels?.[0].hd95, 1.4);
+
+assert.equal(exportReportSource.includes("总准确率"), true, "HTML report should label overall pixel accuracy");
+assert.equal(exportReportSource.includes("平均类别准确率"), true, "HTML report should label mean class accuracy");
+assert.equal(exportReportSource.includes("前景准确率"), true, "HTML report should label foreground accuracy");
+assert.equal(exportReportSource.includes("平均 HD"), true, "HTML report should label mean HD");
+assert.equal(exportReportSource.includes("最大 HD"), true, "HTML report should label max HD");
+assert.equal(exportReportSource.includes("平均 HD95"), true, "HTML report should label mean HD95");
+assert.equal(exportReportSource.includes("平均 ASD"), true, "HTML report should label mean ASD");
+assert.equal(exportReportSource.includes("ASD (mm)"), true, "per-label table should show ASD column with mm unit");
+assert.equal(exportReportSource.includes("HD95 (mm)"), true, "per-label table should show HD95 column with mm unit");
+assert.equal(exportReportSource.includes("HD (mm)"), true, "per-label table should show HD column with mm unit");
+assert.equal(exportReportSource.includes("像素准确率"), true, "per-label table should have a pixel accuracy column header");
+for (const metric of ["metricBarHtml(l.pixel_accuracy", "metricBarHtml(l.asd", "metricBarHtml(l.hd95", "metricBarHtml(l.hd"] as const) {
+  assert.equal(exportReportSource.includes(metric), true, `per-label row should call ${metric}`);
+}
+for (const card of [
+  "metricCard(\"总准确率\"",
+  "metricCard(\"平均类别准确率\"",
+  "metricCard(\"前景准确率\"",
+  "metricCard(\"平均 HD\"",
+  "metricCard(\"最大 HD\"",
+  "metricCard(\"前景 HD\"",
+  "metricCard(\"平均 HD95\"",
+  "metricCard(\"最大 HD95\"",
+  "metricCard(\"前景 HD95\"",
+  "metricCard(\"平均 ASD\"",
+  "metricCard(\"最大 ASD\"",
+  "metricCard(\"前景 ASD\""
+] as const) {
+  assert.equal(exportReportSource.includes(card), true, `HTML report should render ${card}`);
+}
+assert.equal(exportReportSource.includes("dist-good"), true, "HTML report should style distance bars");
+assert.equal(exportReportSource.includes("pix-good"), true, "HTML report should style pixel accuracy bars");
+assert.equal(exportReportSource.includes("distBarPercent"), true, "HTML report should invert distance bars so smaller is better");

@@ -6,6 +6,24 @@ export type ValidationSummary = {
   mean_dice?: number | null;
   min_dice?: number | null;
   foreground_dice?: number | null;
+  mean_iou?: number | null;
+  min_iou?: number | null;
+  foreground_iou?: number | null;
+  pixel_accuracy?: number | null;
+  mean_pixel_accuracy?: number | null;
+  min_pixel_accuracy?: number | null;
+  foreground_pixel_accuracy?: number | null;
+  mean_asd?: number | null;
+  max_asd?: number | null;
+  foreground_asd?: number | null;
+  mean_hd?: number | null;
+  max_hd?: number | null;
+  foreground_hd?: number | null;
+  mean_hd95?: number | null;
+  max_hd95?: number | null;
+  foreground_hd95?: number | null;
+  surface_distance_unit?: string;
+  spacing?: number[];
   accepted?: boolean;
   message?: string;
   taxonomy_match?: boolean;
@@ -22,9 +40,15 @@ export type ValidationSummary = {
     label: number;
     name?: string;
     dice: number | null;
+    iou?: number | null;
+    pixel_accuracy?: number | null;
+    asd?: number | null;
+    hd?: number | null;
+    hd95?: number | null;
     prediction_voxels?: number;
     reference_voxels?: number;
     intersection_voxels?: number;
+    union_voxels?: number;
   }[];
 };
 
@@ -90,12 +114,36 @@ function normalizeValidation(payload: unknown): ValidationSummary | undefined {
     : "unavailable";
   const summary: ValidationSummary = { status };
   if (raw.sample_id !== undefined) summary.sample_id = String(raw.sample_id);
-  for (const key of ["mean_dice", "min_dice", "foreground_dice"] as const) {
+  for (const key of [
+    "mean_dice",
+    "min_dice",
+    "foreground_dice",
+    "mean_iou",
+    "min_iou",
+    "foreground_iou",
+    "pixel_accuracy",
+    "mean_pixel_accuracy",
+    "min_pixel_accuracy",
+    "foreground_pixel_accuracy",
+    "mean_asd",
+    "max_asd",
+    "foreground_asd",
+    "mean_hd",
+    "max_hd",
+    "foreground_hd",
+    "mean_hd95",
+    "max_hd95",
+    "foreground_hd95"
+  ] as const) {
     if (raw[key] === null) {
       summary[key] = null;
     } else if (raw[key] !== undefined && Number.isFinite(Number(raw[key]))) {
       summary[key] = Number(raw[key]);
     }
+  }
+  if (typeof raw.surface_distance_unit === "string") summary.surface_distance_unit = raw.surface_distance_unit;
+  if (Array.isArray(raw.spacing) && raw.spacing.every((value) => Number.isFinite(Number(value)))) {
+    summary.spacing = raw.spacing.map((value) => Number(value));
   }
   if (typeof raw.accepted === "boolean") summary.accepted = raw.accepted;
   if (typeof raw.taxonomy_match === "boolean") summary.taxonomy_match = raw.taxonomy_match;
@@ -122,9 +170,15 @@ function normalizeValidation(payload: unknown): ValidationSummary | undefined {
         label,
         name: metric.name === undefined ? undefined : String(metric.name),
         dice: metric.dice === null ? null : Number.isFinite(Number(metric.dice)) ? Number(metric.dice) : null,
+        iou: metric.iou === null ? null : Number.isFinite(Number(metric.iou)) ? Number(metric.iou) : null,
+        pixel_accuracy: metric.pixel_accuracy === null ? null : Number.isFinite(Number(metric.pixel_accuracy)) ? Number(metric.pixel_accuracy) : null,
+        asd: metric.asd === null ? null : Number.isFinite(Number(metric.asd)) ? Number(metric.asd) : null,
+        hd: metric.hd === null ? null : Number.isFinite(Number(metric.hd)) ? Number(metric.hd) : null,
+        hd95: metric.hd95 === null ? null : Number.isFinite(Number(metric.hd95)) ? Number(metric.hd95) : null,
         prediction_voxels: Number.isFinite(Number(metric.prediction_voxels)) ? Number(metric.prediction_voxels) : undefined,
         reference_voxels: Number.isFinite(Number(metric.reference_voxels)) ? Number(metric.reference_voxels) : undefined,
-        intersection_voxels: Number.isFinite(Number(metric.intersection_voxels)) ? Number(metric.intersection_voxels) : undefined
+        intersection_voxels: Number.isFinite(Number(metric.intersection_voxels)) ? Number(metric.intersection_voxels) : undefined,
+        union_voxels: Number.isFinite(Number(metric.union_voxels)) ? Number(metric.union_voxels) : undefined
       }];
     });
   }

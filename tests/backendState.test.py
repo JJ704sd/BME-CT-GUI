@@ -681,8 +681,235 @@ def test_label_metrics_compare_prediction_with_reference():
     assert report["mean_dice"] == 0.733333
     assert report["min_dice"] == 0.666667
     assert report["foreground_dice"] == 0.909091
+    assert report["mean_iou"] == 0.583333
+    assert report["min_iou"] == 0.5
+    assert report["foreground_iou"] == 0.833333
     assert report["labels"][0]["dice"] == 0.8
+    assert report["labels"][0]["iou"] == 0.666667
+    assert report["labels"][0]["union_voxels"] == 3
+    assert report["labels"][1]["dice"] == 0.666667
+    assert report["labels"][1]["iou"] == 0.5
+    assert report["labels"][1]["union_voxels"] == 4
     assert report["labels"][1]["intersection_voxels"] == 2
+    assert report["surface_distance_unit"] == "mm"
+    assert report["spacing"] == [1.0, 1.0]
+    assert report["pixel_accuracy"] == 0.75
+    assert report["mean_pixel_accuracy"] is not None
+    assert report["min_pixel_accuracy"] is not None
+    assert report["foreground_pixel_accuracy"] is not None
+    for label_metric in report["labels"]:
+        assert "pixel_accuracy" in label_metric
+        assert "asd" in label_metric
+        assert "hd" in label_metric
+        assert "hd95" in label_metric
+
+
+def test_label_metrics_surface_distance_handles_empty_masks():
+    server = load_server_module()
+
+    prediction = [
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+    ]
+    reference = [
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+    ]
+    report = server.compute_label_metrics(
+        prediction,
+        reference,
+        [
+            {"label": 1, "nameZh": "肝脏"},
+        ],
+        spacing=(1.0, 1.0),
+    )
+
+    assert report["status"] == "passed"
+    assert report["mean_dice"] is None
+    assert report["mean_asd"] is None
+    assert report["max_asd"] is None
+    assert report["mean_hd"] is None
+    assert report["mean_hd95"] is None
+    assert report["surface_distance_unit"] == "mm"
+
+
+def test_label_metrics_hd95_and_asd_decrease_with_better_overlap():
+    server = load_server_module()
+
+    reference = [[0, 0, 0, 0, 0, 0, 0, 0]] * 8
+    for row_index, row in enumerate(reference):
+        reference[row_index] = list(row)
+        for column in range(2, 6):
+            reference[row_index][column] = 1
+
+    close_prediction = [list(row) for row in reference]
+    far_prediction = [[0] * 8 for _ in range(8)]
+    for row_index in range(8):
+        for column in range(0, 4):
+            far_prediction[row_index][column] = 1
+
+    close_report = server.compute_label_metrics(
+        close_prediction,
+        reference,
+        [{"label": 1, "nameZh": "肝脏"}],
+        spacing=(1.0, 1.0),
+    )
+    far_report = server.compute_label_metrics(
+        far_prediction,
+        reference,
+        [{"label": 1, "nameZh": "肝脏"}],
+        spacing=(1.0, 1.0),
+    )
+
+    close_label = close_report["labels"][0]
+    far_label = far_report["labels"][0]
+    assert close_label["dice"] == 1.0
+    assert close_label["asd"] is not None and close_label["asd"] == 0.0
+    assert close_label["hd95"] is not None and close_label["hd95"] == 0.0
+    assert far_label["dice"] is not None and far_label["dice"] < close_label["dice"]
+    assert far_label["asd"] is not None and far_label["asd"] > close_label["asd"]
+    assert far_label["hd95"] is not None and far_label["hd95"] > close_label["hd95"]
+    assert close_report["mean_asd"] == 0.0
+    assert close_report["max_asd"] == 0.0
+    assert close_report["mean_hd95"] == 0.0
+    assert close_report["max_hd95"] == 0.0
+
+
+def test_surface_distances_matches_legacy_individual_functions():
+    """Regression guard: the merged surface_distances() must produce values that
+    match the three legacy functions (average_surface_distance, hausdorff_95,
+    hausdorff_distance_full) to floating-point precision, across diverse mask
+    shapes and overlap patterns.
+    """
+    import numpy as np
+
+    server = load_server_module()
+    surface_distances = server.surface_distances
+    average_surface_distance = server.average_surface_distance
+    hausdorff_95 = server.hausdorff_95
+    hausdorff_distance_full = server.hausdorff_distance_full
+
+    rng = np.random.default_rng(20260603)
+    shapes = [(6, 6), (8, 8, 4), (12, 10, 8), (4, 4, 4, 3)]
+    spacings = [(1.0, 1.0), (1.0, 1.0, 1.0), (0.5, 0.7, 2.5), (1.0, 1.0, 1.0, 1.0)]
+
+    for shape, spacing in zip(shapes, spacings):
+        for scenario in range(8):
+            pred = (rng.random(shape) < 0.35).astype(bool)
+            ref = (rng.random(shape) < 0.35).astype(bool)
+            if scenario == 0:
+                pred = np.zeros(shape, dtype=bool)
+            elif scenario == 1:
+                ref = np.zeros(shape, dtype=bool)
+            elif scenario == 2:
+                pred = np.zeros(shape, dtype=bool)
+                ref = np.zeros(shape, dtype=bool)
+            elif scenario == 3:
+                pred = ref  # perfect overlap, only surface is the outer ring
+            elif scenario == 4:
+                ref = ~pred & (rng.random(shape) < 0.3)  # disjoint
+            elif scenario == 5:
+                # one-voxel-thick sheet that should still produce a non-empty surface
+                pred = np.zeros(shape, dtype=bool)
+                if pred.ndim >= 2:
+                    pred[(slice(None),) * 2 + (0,) * (pred.ndim - 2)] = True
+                ref = pred.copy()
+            elif scenario == 6:
+                # single-voxel mask — surface should equal the mask itself
+                pred = np.zeros(shape, dtype=bool)
+                pred[(0,) * pred.ndim] = True
+                ref = np.zeros(shape, dtype=bool)
+                ref[(0,) * pred.ndim] = True
+            # scenario 7 is the default random case
+
+            merged = surface_distances(pred, ref, spacing)
+            legacy_asd = average_surface_distance(pred, ref, spacing)
+            legacy_hd = hausdorff_distance_full(pred, ref, spacing)
+            legacy_hd95 = hausdorff_95(pred, ref, spacing)
+
+            if merged is None:
+                assert legacy_asd is None, f"shape={shape} scenario={scenario}: ASD mismatch (legacy={legacy_asd}, merged=None)"
+                assert legacy_hd is None, f"shape={shape} scenario={scenario}: HD mismatch (legacy={legacy_hd}, merged=None)"
+                assert legacy_hd95 is None, f"shape={shape} scenario={scenario}: HD95 mismatch (legacy={legacy_hd95}, merged=None)"
+            else:
+                assert legacy_asd is not None
+                assert legacy_hd is not None
+                assert legacy_hd95 is not None
+                assert abs(merged["asd"] - legacy_asd) < 1e-9, f"shape={shape} scenario={scenario}: ASD {merged['asd']} vs {legacy_asd}"
+                assert abs(merged["hd"] - legacy_hd) < 1e-9, f"shape={shape} scenario={scenario}: HD {merged['hd']} vs {legacy_hd}"
+                assert abs(merged["hd95"] - legacy_hd95) < 1e-9, f"shape={shape} scenario={scenario}: HD95 {merged['hd95']} vs {legacy_hd95}"
+
+
+def test_surface_distances_uses_fewer_distance_transforms_than_legacy():
+    """Performance guard: surface_distances() must call distance_transform_edt at
+    most 2 times per invocation, while the three legacy functions call it 6 times
+    combined. Count via patching scipy.ndimage.distance_transform_edt directly
+    (surface_distances imports scipy.ndimage locally, so we patch the source).
+    """
+    import numpy as np
+    from unittest.mock import patch
+    from scipy import ndimage
+
+    server = load_server_module()
+    surface_distances = server.surface_distances
+    pred = np.zeros((10, 10, 10), dtype=bool)
+    pred[2:5, 2:5, 2:5] = True
+    ref = np.zeros((10, 10, 10), dtype=bool)
+    ref[3:6, 3:6, 3:6] = True
+
+    call_counter = {"count": 0}
+    real_edt = ndimage.distance_transform_edt
+
+    def counting_edt(*args, **kwargs):
+        call_counter["count"] += 1
+        return real_edt(*args, **kwargs)
+
+    with patch("scipy.ndimage.distance_transform_edt", side_effect=counting_edt):
+        result = surface_distances(pred, ref, (1.0, 1.0, 1.0))
+
+    assert result is not None
+    assert call_counter["count"] == 2, f"surface_distances should call EDT exactly twice, got {call_counter['count']}"
+
+
+def test_compute_label_metrics_with_surface_distances_faster_than_legacy():
+    """Sanity check that the per-label path through surface_distances() is
+    faster than the three legacy functions in series. Not a strict benchmark,
+    just a smoke guard against future regressions that re-introduce redundant
+    crops/surfaces/EDTs.
+    """
+    import numpy as np
+    import time
+
+    server = load_server_module()
+    rng = np.random.default_rng(7)
+    shape = (60, 60, 30)
+    pred = (rng.random(shape) < 0.25).astype(bool)
+    ref = (rng.random(shape) < 0.25).astype(bool)
+    spacing = (0.8, 0.8, 2.0)
+
+    t0 = time.perf_counter()
+    legacy = [
+        server.average_surface_distance(pred, ref, spacing),
+        server.hausdorff_95(pred, ref, spacing),
+        server.hausdorff_distance_full(pred, ref, spacing),
+    ]
+    legacy_seconds = time.perf_counter() - t0
+
+    t0 = time.perf_counter()
+    merged = server.surface_distances(pred, ref, spacing)
+    merged_seconds = time.perf_counter() - t0
+
+    assert merged is not None
+    assert all(value is not None for value in legacy)
+    assert abs(merged["asd"] - legacy[0]) < 1e-9
+    assert abs(merged["hd95"] - legacy[1]) < 1e-9
+    assert abs(merged["hd"] - legacy[2]) < 1e-9
+    # Merged path does 2 EDTs vs legacy 6 EDTs. Allow 30% margin for tiny shapes
+    # where the constant overhead of cropping/surface extraction dominates.
+    assert merged_seconds < legacy_seconds * 0.7, (
+        f"surface_distances should be at least 30% faster than the 3 legacy "
+        f"functions combined; legacy={legacy_seconds:.3f}s merged={merged_seconds:.3f}s"
+    )
 
 
 def test_validation_summary_json_preserves_chinese_without_bom():

@@ -365,11 +365,195 @@ def dice_from_counts(intersection: int, prediction_count: int, reference_count: 
   return 2 * intersection / denominator
 
 
+def iou_from_counts(intersection: int, union_count: int) -> float | None:
+  if union_count == 0:
+    return None
+  return intersection / union_count
+
+
+def _crop_to_union(mask_a: np.ndarray, mask_b: np.ndarray, margin: int = 1) -> tuple[np.ndarray, np.ndarray]:
+  import numpy as np
+
+  coords = np.argwhere(mask_a | mask_b)
+  if coords.size == 0:
+    return mask_a, mask_b
+  starts = np.maximum(coords.min(axis=0) - margin, 0)
+  stops = np.minimum(coords.max(axis=0) + margin + 1, mask_a.shape)
+  slices = tuple(slice(int(start), int(stop)) for start, stop in zip(starts, stops))
+  return mask_a[slices], mask_b[slices]
+
+
+def _surface_mask(mask: np.ndarray) -> np.ndarray:
+  if not bool(mask.any()):
+    return mask
+  from scipy import ndimage
+
+  structure = ndimage.generate_binary_structure(mask.ndim, 1)
+  eroded = ndimage.binary_erosion(mask, structure=structure, border_value=0)
+  return mask & ~eroded
+
+
+def surface_distances(
+  prediction_mask: np.ndarray,
+  reference_mask: np.ndarray,
+  spacing: tuple[float, ...] | None = None,
+) -> dict[str, float | None] | None:
+  """Compute ASD / HD / HD95 in one pass.
+
+  Crops to the union of both masks once, derives the two surfaces once, runs the
+  symmetric distance transform twice, and reduces each direction's value array
+  for all three statistics. Cuts the per-label distance-transform count from
+  six (one per metric × two directions) to two.
+
+  Returns a dict with `asd`, `hd`, `hd95` (the symmetric aggregate values) and
+  the per-direction `forward_*` / `backward_*` breakdowns. Returns `None` when
+  either side is empty or when erosion empties both surfaces.
+  """
+  if not bool(prediction_mask.any()) or not bool(reference_mask.any()):
+    return None
+  spacing_tuple = spacing or (1.0,) * prediction_mask.ndim
+  cropped_pred, cropped_ref = _crop_to_union(prediction_mask, reference_mask)
+  pred_surface = _surface_mask(cropped_pred)
+  ref_surface = _surface_mask(cropped_ref)
+  if not bool(pred_surface.any()) or not bool(ref_surface.any()):
+    return None
+
+  from scipy import ndimage
+  import numpy as np
+
+  dist_pred_to_ref = ndimage.distance_transform_edt(~ref_surface, sampling=spacing_tuple)
+  dist_ref_to_pred = ndimage.distance_transform_edt(~pred_surface, sampling=spacing_tuple)
+  forward_values = dist_pred_to_ref[pred_surface]
+  backward_values = dist_ref_to_pred[ref_surface]
+  if forward_values.size == 0 or backward_values.size == 0:
+    return None
+
+  forward_mean = float(forward_values.mean())
+  backward_mean = float(backward_values.mean())
+  forward_max = float(forward_values.max())
+  backward_max = float(backward_values.max())
+  forward_hd95 = float(np.percentile(forward_values, 95))
+  backward_hd95 = float(np.percentile(backward_values, 95))
+
+  return {
+    "asd": (forward_mean + backward_mean) / 2.0,
+    "hd": max(forward_max, backward_max),
+    "hd95": max(forward_hd95, backward_hd95),
+    "forward_mean": forward_mean,
+    "backward_mean": backward_mean,
+    "forward_max": forward_max,
+    "backward_max": backward_max,
+    "forward_hd95": forward_hd95,
+    "backward_hd95": backward_hd95,
+  }
+
+
+def _directed_surface_stats(
+  source: np.ndarray,
+  target: np.ndarray,
+  spacing: tuple[float, ...],
+) -> dict[str, float | None]:
+  """Compute mean / 95th-percentile distance from `source` surface to `target` surface.
+
+  Returns dict with `mean` and `hd95` keys (mm via spacing). Both are None when source is empty.
+  """
+  import numpy as np
+  from scipy import ndimage
+
+  if not bool(source.any()):
+    return {"mean": None, "hd95": None}
+  distances = ndimage.distance_transform_edt(~target, sampling=spacing)
+  values = distances[source]
+  if values.size == 0:
+    return {"mean": None, "hd95": None}
+  return {
+    "mean": float(values.mean()),
+    "hd95": float(np.percentile(values, 95)),
+  }
+
+
+def average_surface_distance(
+  prediction_mask: np.ndarray,
+  reference_mask: np.ndarray,
+  spacing: tuple[float, ...] | None = None,
+) -> float | None:
+  """Symmetric Average Surface Distance (ASD / ASSD) in mm.
+
+  Returns the mean of bidirectional surface distances, or None when either mask is empty.
+  """
+  if not bool(prediction_mask.any()) or not bool(reference_mask.any()):
+    return None
+  spacing_tuple = spacing or (1.0,) * prediction_mask.ndim
+  cropped_pred, cropped_ref = _crop_to_union(prediction_mask, reference_mask)
+  pred_surface = _surface_mask(cropped_pred)
+  ref_surface = _surface_mask(cropped_ref)
+  if not bool(pred_surface.any()) or not bool(ref_surface.any()):
+    return None
+  forward = _directed_surface_stats(pred_surface, ref_surface, spacing_tuple)
+  backward = _directed_surface_stats(ref_surface, pred_surface, spacing_tuple)
+  if forward["mean"] is None or backward["mean"] is None:
+    return None
+  return (forward["mean"] + backward["mean"]) / 2.0
+
+
+def hausdorff_95(
+  prediction_mask: np.ndarray,
+  reference_mask: np.ndarray,
+  spacing: tuple[float, ...] | None = None,
+) -> float | None:
+  """95th-percentile symmetric surface Hausdorff distance in mm.
+
+  Mirrors ASD's bidirectional aggregation but takes the 95th percentile of each direction
+  then the max of the two (robust to the single worst boundary point that standard HD would catch).
+  """
+  if not bool(prediction_mask.any()) or not bool(reference_mask.any()):
+    return None
+  spacing_tuple = spacing or (1.0,) * prediction_mask.ndim
+  cropped_pred, cropped_ref = _crop_to_union(prediction_mask, reference_mask)
+  pred_surface = _surface_mask(cropped_pred)
+  ref_surface = _surface_mask(cropped_ref)
+  if not bool(pred_surface.any()) or not bool(ref_surface.any()):
+    return None
+  forward = _directed_surface_stats(pred_surface, ref_surface, spacing_tuple)
+  backward = _directed_surface_stats(ref_surface, pred_surface, spacing_tuple)
+  if forward["hd95"] is None or backward["hd95"] is None:
+    return None
+  return max(forward["hd95"], backward["hd95"])
+
+
+def hausdorff_distance_full(
+  prediction_mask: np.ndarray,
+  reference_mask: np.ndarray,
+  spacing: tuple[float, ...] | None = None,
+) -> float | None:
+  """Symmetric surface Hausdorff distance (max of bidirectional) in mm.
+
+  Reports the single worst boundary point between the two surfaces; N/A when one or both
+  masks are empty. Less robust than HD95 — sensitive to a single outlier pixel.
+  """
+  if not bool(prediction_mask.any()) or not bool(reference_mask.any()):
+    return None
+  spacing_tuple = spacing or (1.0,) * prediction_mask.ndim
+  cropped_pred, cropped_ref = _crop_to_union(prediction_mask, reference_mask)
+  pred_surface = _surface_mask(cropped_pred)
+  ref_surface = _surface_mask(cropped_ref)
+  if not bool(pred_surface.any()) or not bool(ref_surface.any()):
+    return None
+  from scipy import ndimage
+
+  forward_distances = ndimage.distance_transform_edt(~ref_surface, sampling=spacing_tuple)
+  backward_distances = ndimage.distance_transform_edt(~pred_surface, sampling=spacing_tuple)
+  forward_max = float(forward_distances[pred_surface].max())
+  backward_max = float(backward_distances[ref_surface].max())
+  return max(forward_max, backward_max)
+
+
 def compute_label_metrics(
   prediction: Any,
   reference: Any,
   labels: list[dict[str, Any]],
   sample_id: str = "amos_0117",
+  spacing: tuple[float, ...] | None = None,
 ) -> dict[str, Any]:
   import numpy as np
 
@@ -383,6 +567,19 @@ def compute_label_metrics(
       "mean_dice": None,
       "min_dice": None,
       "foreground_dice": None,
+      "mean_iou": None,
+      "min_iou": None,
+      "foreground_iou": None,
+      "mean_pixel_accuracy": None,
+      "min_pixel_accuracy": None,
+      "foreground_pixel_accuracy": None,
+      "mean_asd": None,
+      "max_asd": None,
+      "mean_hd": None,
+      "max_hd": None,
+      "mean_hd95": None,
+      "max_hd95": None,
+      "surface_distance_unit": "mm",
       "message": f"预测结果尺寸 {prediction_array.shape} 与标准答案尺寸 {reference_array.shape} 不一致，无法计算 Dice。",
       "thresholds": {
         "mean_dice": VALIDATION_MEAN_DICE_THRESHOLD,
@@ -391,8 +588,20 @@ def compute_label_metrics(
       "labels": [],
     }
 
+  spacing_tuple: tuple[float, ...] = tuple(
+    float(item) for item in (spacing or (1.0,) * prediction_array.ndim)
+  )
+  total_voxels = int(prediction_array.size)
+  correct_voxels = int((prediction_array == reference_array).sum())
+  overall_pixel_accuracy = correct_voxels / total_voxels if total_voxels else None
+
   label_metrics = []
   dice_values: list[float] = []
+  iou_values: list[float] = []
+  pixel_accuracy_values: list[float] = []
+  asd_values: list[float] = []
+  hd_values: list[float] = []
+  hd95_values: list[float] = []
   for item in labels:
     label_value = int(item["label"])
     prediction_mask = prediction_array == label_value
@@ -400,27 +609,70 @@ def compute_label_metrics(
     prediction_count = int(prediction_mask.sum())
     reference_count = int(reference_mask.sum())
     intersection = int((prediction_mask & reference_mask).sum())
+    union = int((prediction_mask | reference_mask).sum())
+    label_correct = int((prediction_mask == reference_mask).sum())
     dice = dice_from_counts(intersection, prediction_count, reference_count)
+    iou = iou_from_counts(intersection, union)
+    label_pixel_accuracy = (label_correct / total_voxels) if total_voxels else None
+    surface_stats = surface_distances(prediction_mask, reference_mask, spacing_tuple)
+    asd = surface_stats["asd"] if surface_stats else None
+    hd = surface_stats["hd"] if surface_stats else None
+    hd95 = surface_stats["hd95"] if surface_stats else None
     if dice is not None:
       dice_values.append(dice)
+    if iou is not None:
+      iou_values.append(iou)
+    if label_pixel_accuracy is not None:
+      pixel_accuracy_values.append(label_pixel_accuracy)
+    if asd is not None:
+      asd_values.append(asd)
+    if hd is not None:
+      hd_values.append(hd)
+    if hd95 is not None:
+      hd95_values.append(hd95)
     label_metrics.append({
       "label": label_value,
       "name": item.get("nameZh") or item.get("nameEn") or f"Label {label_value}",
       "dice": round_metric(dice),
+      "iou": round_metric(iou),
+      "pixel_accuracy": round_metric(label_pixel_accuracy),
+      "asd": round_metric(asd),
+      "hd": round_metric(hd),
+      "hd95": round_metric(hd95),
       "prediction_voxels": prediction_count,
       "reference_voxels": reference_count,
       "intersection_voxels": intersection,
+      "union_voxels": union,
     })
 
   foreground_prediction = prediction_array > 0
   foreground_reference = reference_array > 0
+  foreground_intersection = int((foreground_prediction & foreground_reference).sum())
+  foreground_union = int((foreground_prediction | foreground_reference).sum())
+  foreground_correct = int((foreground_prediction == foreground_reference).sum())
   foreground_dice = dice_from_counts(
-    int((foreground_prediction & foreground_reference).sum()),
+    foreground_intersection,
     int(foreground_prediction.sum()),
     int(foreground_reference.sum()),
   )
+  foreground_iou = iou_from_counts(foreground_intersection, foreground_union)
+  foreground_pixel_accuracy = (foreground_correct / total_voxels) if total_voxels else None
+  foreground_surface = surface_distances(foreground_prediction, foreground_reference, spacing_tuple)
+  foreground_asd = foreground_surface["asd"] if foreground_surface else None
+  foreground_hd = foreground_surface["hd"] if foreground_surface else None
+  foreground_hd95 = foreground_surface["hd95"] if foreground_surface else None
   mean_dice = sum(dice_values) / len(dice_values) if dice_values else None
   min_dice = min(dice_values) if dice_values else None
+  mean_iou = sum(iou_values) / len(iou_values) if iou_values else None
+  min_iou = min(iou_values) if iou_values else None
+  mean_pixel_accuracy = sum(pixel_accuracy_values) / len(pixel_accuracy_values) if pixel_accuracy_values else None
+  min_pixel_accuracy = min(pixel_accuracy_values) if pixel_accuracy_values else None
+  mean_asd = sum(asd_values) / len(asd_values) if asd_values else None
+  max_asd = max(asd_values) if asd_values else None
+  mean_hd = sum(hd_values) / len(hd_values) if hd_values else None
+  max_hd = max(hd_values) if hd_values else None
+  mean_hd95 = sum(hd95_values) / len(hd95_values) if hd95_values else None
+  max_hd95 = max(hd95_values) if hd95_values else None
   accepted = (
     mean_dice is not None and
     min_dice is not None and
@@ -434,6 +686,24 @@ def compute_label_metrics(
     "mean_dice": round_metric(mean_dice),
     "min_dice": round_metric(min_dice),
     "foreground_dice": round_metric(foreground_dice),
+    "mean_iou": round_metric(mean_iou),
+    "min_iou": round_metric(min_iou),
+    "foreground_iou": round_metric(foreground_iou),
+    "pixel_accuracy": round_metric(overall_pixel_accuracy),
+    "mean_pixel_accuracy": round_metric(mean_pixel_accuracy),
+    "min_pixel_accuracy": round_metric(min_pixel_accuracy),
+    "foreground_pixel_accuracy": round_metric(foreground_pixel_accuracy),
+    "mean_asd": round_metric(mean_asd),
+    "max_asd": round_metric(max_asd),
+    "foreground_asd": round_metric(foreground_asd),
+    "mean_hd": round_metric(mean_hd),
+    "max_hd": round_metric(max_hd),
+    "foreground_hd": round_metric(foreground_hd),
+    "mean_hd95": round_metric(mean_hd95),
+    "max_hd95": round_metric(max_hd95),
+    "foreground_hd95": round_metric(foreground_hd95),
+    "surface_distance_unit": "mm",
+    "spacing": list(spacing_tuple),
     "message": "标准答案验证通过。" if accepted else "标准答案验证未达阈值，建议人工复核。",
     "thresholds": {
       "mean_dice": VALIDATION_MEAN_DICE_THRESHOLD,
@@ -451,6 +721,23 @@ def unavailable_validation(message: str) -> dict[str, Any]:
     "mean_dice": None,
     "min_dice": None,
     "foreground_dice": None,
+    "mean_iou": None,
+    "min_iou": None,
+    "foreground_iou": None,
+    "pixel_accuracy": None,
+    "mean_pixel_accuracy": None,
+    "min_pixel_accuracy": None,
+    "foreground_pixel_accuracy": None,
+    "mean_asd": None,
+    "max_asd": None,
+    "foreground_asd": None,
+    "mean_hd": None,
+    "max_hd": None,
+    "foreground_hd": None,
+    "mean_hd95": None,
+    "max_hd95": None,
+    "foreground_hd95": None,
+    "surface_distance_unit": "mm",
     "message": message,
     "thresholds": {
       "mean_dice": VALIDATION_MEAN_DICE_THRESHOLD,
@@ -1101,9 +1388,12 @@ def validate_against_debug_label(prediction_path: Path) -> dict[str, Any]:
     import numpy as np
   except Exception as exc:
     return unavailable_validation(f"当前 Python 环境缺少 NIfTI 验证依赖：{exc}")
-  prediction = np.asanyarray(nib.load(str(prediction_path)).dataobj)
-  reference = np.asanyarray(nib.load(str(reference_path)).dataobj)
-  return compute_label_metrics(prediction, reference, read_labels())
+  prediction_image = nib.load(str(prediction_path))
+  reference_image = nib.load(str(reference_path))
+  prediction = np.asanyarray(prediction_image.dataobj)
+  reference = np.asanyarray(reference_image.dataobj)
+  spacing = tuple(float(item) for item in prediction_image.header.get_zooms()[: prediction.ndim])
+  return compute_label_metrics(prediction, reference, read_labels(), spacing=spacing)
 
 
 def normalize_label_taxonomy(value: str | None = None) -> str:
@@ -1121,12 +1411,15 @@ def validate_against_custom_label(prediction_path: Path, label_path: Path, label
   except Exception as exc:
     return unavailable_validation(f"当前 Python 环境缺少 NIfTI 验证依赖：{exc}")
   try:
-    prediction = np.asanyarray(nib.load(str(prediction_path)).dataobj)
-    reference = np.asanyarray(nib.load(str(label_path)).dataobj)
+    prediction_image = nib.load(str(prediction_path))
+    reference_image = nib.load(str(label_path))
+    prediction = np.asanyarray(prediction_image.dataobj)
+    reference = np.asanyarray(reference_image.dataobj)
   except Exception as exc:
     return unavailable_validation(f"无法加载预测结果或标签文件：{exc}")
   if prediction.shape != reference.shape:
     return unavailable_validation(f"预测结果尺寸 {prediction.shape} 与标签尺寸 {reference.shape} 不一致，无法计算 Dice。")
+  spacing = tuple(float(item) for item in prediction_image.header.get_zooms()[: prediction.ndim])
   checkpoint_labels = {int(item["label"]) for item in labels}
   reference_labels = set(np.unique(reference).astype(int)) - {0}
   taxonomy_hint = normalize_label_taxonomy(label_taxonomy)
@@ -1154,7 +1447,7 @@ def validate_against_custom_label(prediction_path: Path, label_path: Path, label
       mapping = build_remap_mapping(labels, detected)
       if mapping:
         remapped_reference = apply_remap(reference, mapping)
-        result = compute_label_metrics(prediction, remapped_reference, labels, sample_id=sample_id)
+        result = compute_label_metrics(prediction, remapped_reference, labels, sample_id=sample_id, spacing=spacing)
         result["taxonomy_match"] = True
         result["label_taxonomy"] = taxonomy_hint
         result["remap_applied"] = True
@@ -1172,7 +1465,7 @@ def validate_against_custom_label(prediction_path: Path, label_path: Path, label
       "taxonomy_match": False,
       "label_taxonomy": taxonomy_hint,
     }
-  result = compute_label_metrics(prediction, reference, labels, sample_id=sample_id)
+  result = compute_label_metrics(prediction, reference, labels, sample_id=sample_id, spacing=spacing)
   result["taxonomy_match"] = True
   result["label_taxonomy"] = taxonomy_hint
   result["remap_applied"] = False
