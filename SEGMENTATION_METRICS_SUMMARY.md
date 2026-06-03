@@ -4,6 +4,11 @@
 
 ## 当前运行状态
 
+2026-06-03 已完成：
+- **质量评估指标扩展**：把 quality 评估报告补齐到 6 类医学影像主流指标（Dice / IoU / Pixel Accuracy / HD / HD95 / ASD）。`server/main.py` 新增 `surface_distances()`（1 crop + 2 EDT/label），把单 label 的 `distance_transform_edt` 调用从 6 次合并到 2 次；`validation_summary.json` 增补 12 个新字段（pixel_accuracy 4 项 + HD/HD95/ASD 9 项 + surface_distance_unit + spacing）；`src/inference/inferenceClient.ts` 在 `ValidationSummary` / `LabelMetric` 增补对应字段并加入 `normalizeValidation()` 白名单；`src/report/exportReport.ts` 报告模板新增 3 个 metric group（区域重叠度 · Dice / IoU、像素准确率 · Pixel Accuracy、表面距离 · HD / HD95 / ASD）和 4 个逐标签列（像素准确率、ASD (mm)、HD95 (mm)、HD (mm)）。AMOS 0117 quality 缓存命中实测：validation 阶段从 38.86s 降到 16.78s（约 2.3× 加速）。
+- **回归测试**：`tests/backendState.test.py` 新增 `test_surface_distances_matches_legacy_individual_functions`（4 shape × 8 场景 1e-9 精度对照）、`test_surface_distances_uses_fewer_distance_transforms_than_legacy`（patch `scipy.ndimage.distance_transform_edt` 计数恒为 2）、`test_compute_label_metrics_with_surface_distances_faster_than_legacy`（wall-time 加速比 ≥30% 断言）；`tests/imagingLogic.test.ts` 新增全部新 metric 字段的 source-grep 约束和 `parseInferenceEvent()` complete 事件解析值测试。
+- **基线数值不变**：本轮不修改 AMOS `quality` profile `b3c528cc9e20`（mean Dice 0.924780）、FLARE22 自动 remap `a717dacf42d3`（mean Dice 0.926）、FLARE22 离线 remap `86b0153d0a73`（mean Dice 0.893127）三套历史基线；新指标在 AMOS quality 缓存命中（如 `2d477d8bbd7d` / `9fd0fdc39960` / `096e5b8349df`）上的具体数值为 mean Pixel Accuracy 0.999855、mean HD 9.59281mm、mean HD95 3.596449mm、mean ASD 0.660724mm。
+
 2026-06-02 已完成：
 - `detect_dataset()` 二轮收紧：参考覆盖 ckpt 标签 ≥ 0.85 时直接返回 `None`，避免 AMOS 1-13 真实数据被错判为 FLARE22。
 - 前端 `loadReferenceCase()` 按 `referenceCase.dataset` 自动设置 `label_taxonomy`：AMOS → `AMOS22`、FLARE22 → `FLARE22`、其他保持原值。`auto` 退化为保底策略。
@@ -121,8 +126,17 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\amos_0117(2).nii
 | foreground IoU | `0.961392` |
 | Voxel Accuracy | `0.998578` |
 | Pixel Accuracy | `0.998578` |
+| mean Pixel Accuracy（label 平均，2026-06-03 增补） | `0.999855` |
+| min Pixel Accuracy（2026-06-03 增补） | `0.999493` |
+| foreground Pixel Accuracy（2026-06-03 增补） | `0.998252` |
 | mean Hausdorff Distance | `7.716048 mm` |
 | max Hausdorff Distance | `16.562684 mm` |
+| mean HD95（2026-06-03 增补） | `3.596449 mm` |
+| max HD95（2026-06-03 增补） | `16.540683 mm` |
+| mean ASD（2026-06-03 增补） | `0.660724 mm` |
+| max ASD（2026-06-03 增补） | `3.58299 mm` |
+| surface_distance_unit | `mm` |
+| spacing | `[0.5078125, 0.5078125, 5.0] mm` |
 
 ## 快速预览与质量推理无缓存对照
 
@@ -250,23 +264,25 @@ Checkpoint 元数据：
 
 ## 当前 AMOS 基线逐标签指标
 
-| 标签 | 名称 | Dice | IoU | Hausdorff Distance (mm) |
-|---:|---|---:|---:|---:|
-| 1 | 脾脏 | `0.985234` | `0.970898` | `5.025721` |
-| 2 | 右肾 | `0.982296` | `0.965208` | `7.090247` |
-| 3 | 左肾 | `0.987893` | `0.976075` | `5.000000` |
-| 4 | 胆囊 | `0.953659` | `0.911423` | `5.000000` |
-| 5 | 食管 | `0.857557` | `0.750634` | `6.774050` |
-| 6 | 肝脏 | `0.988545` | `0.977349` | `10.757801` |
-| 7 | 胃 | `0.846551` | `0.733930` | `16.562684` |
-| 8 | 主动脉 | `0.985093` | `0.970624` | `5.103452` |
-| 9 | 下腔静脉 | `0.933244` | `0.874843` | `5.000000` |
-| 10 | 胰腺 | `0.888885` | `0.799994` | `10.166236` |
-| 11 | 右肾上腺 | `0.883697` | `0.791627` | `5.000000` |
-| 12 | 左肾上腺 | `0.858547` | `0.752152` | `8.140854` |
-| 13 | 十二指肠 | `0.871085` | `0.771613` | `10.687574` |
-| 14 | 膀胱 | `N/A` | `N/A` | `N/A` |
-| 15 | 前列腺/子宫 | `N/A` | `N/A` | `N/A` |
+> 数值来自 2026-06-03 之后的 AMOS quality cache hit（如 `2d477d8bbd7d`），使用 `surface_distances()` 2 EDT 实现。HD/HD95/ASD 单位为 mm，Pixel Accuracy 为 0-1 比例。
+
+| 标签 | 名称 | Dice | IoU | 像素准确率 | HD (mm) | HD95 (mm) | ASD (mm) |
+|---:|---|---:|---:|---:|---:|---:|---:|
+| 1 | 脾脏 | `0.979085` | `0.959027` | `0.999861` | `6.09375` | `1.015625` | `0.157572` |
+| 2 | 右肾 | `0.978704` | `0.958296` | `0.999925` | `6.621065` | `1.015625` | `0.15945` |
+| 3 | 左肾 | `0.985648` | `0.971702` | `0.999947` | `5.0` | `0.507812` | `0.087983` |
+| 4 | 胆囊 | `0.950342` | `0.905383` | `0.999952` | `4.094115` | `1.135503` | `0.159064` |
+| 5 | 食管 | `0.793725` | `0.657997` | `0.999782` | `15.24724` | `11.041705` | `1.704524` |
+| 6 | 肝脏 | `0.984249` | `0.968987` | `0.999493` | `10.0` | `1.436311` | `0.225846` |
+| 7 | 胃 | `0.555985` | `0.385027` | `0.999525` | `22.047485` | `16.540683` | `3.58299` |
+| 8 | 主动脉 | `0.977631` | `0.956241` | `0.999862` | `10.0` | `1.523438` | `0.271276` |
+| 9 | 下腔静脉 | `0.923908` | `0.858578` | `0.999865` | `10.025754` | `2.539062` | `0.538958` |
+| 10 | 胰腺 | `0.899086` | `0.816672` | `0.999803` | `16.547107` | `3.251587` | `0.528217` |
+| 11 | 右肾上腺 | `0.851822` | `0.74189` | `0.999991` | `5.0` | `1.605844` | `0.271422` |
+| 12 | 左肾上腺 | `0.815983` | `0.689165` | `0.999986` | `6.114872` | `2.093765` | `0.331275` |
+| 13 | 十二指肠 | `0.891079` | `0.803555` | `0.999828` | `7.915146` | `3.046875` | `0.57083` |
+| 14 | 膀胱 | `N/A` | `N/A` | `1.0` | `N/A` | `N/A` | `N/A` |
+| 15 | 前列腺/子宫 | `N/A` | `N/A` | `1.0` | `N/A` | `N/A` | `N/A` |
 
 ## 备注
 
@@ -291,3 +307,4 @@ Checkpoint 元数据：
 - 后续训练权重应保留每次的 JSON 原始输出，并把关键聚合指标追加到本文档。
 - 2026-06-01 本地缓存演示的 AMOS 0117 cache hit 命中 `009d4efdc5f6`（2026-05-23 历史推理，138KB，validation review，mean_dice 0.891，stomach 0.556）；当前 AMOS 基线指标与该 cache hit 复用的预测均已记录。如需 quality 模式 AMOS 验证，应使用 job `b3c528cc9e20`（mean_dice 0.924780）作为正式基线，不要把 cache hit 命中的 0.891 解读为正式 AMOS 质量基线。
 - 2026-06-01 cache 链路补丁后，FLARE22 cache hit（`02da885c97d8`）显示的是 0aa7323a4c01 的历史 validation_summary.json（0.893127/0.67373/0.949908，"（历史离线缓存摘要）"），而不是 009d4efdc5f6 的 AMOS 摘要；该指标源自 2026-05-26 remap 后的真实数据，与 AMOS 原生基线 `b3c528cc9e20`（0.924780）属不同口径。
+- 2026-06-03 质量评估指标扩展后，本文档的"当前 AMOS 基线聚合指标"和"当前 AMOS 基线逐标签指标"已补充 6 类医学影像主流指标完整字段。新指标值取自 AMOS quality cache hit（`2d477d8bbd7d` / `9fd0fdc39960` / `096e5b8349df`），validation 阶段实测 16.78s（旧实现 38.86s）。`surface_distances()` 1 crop + 2 EDT/label 是新的性能不变量；`tools/segmentation_metrics_summary.py` 离线脚本复用同一份实现，保证离线口径与后端在线 validation 完全一致。HD/HD95/ASD 报告单位固定为 mm，色阶 ≤1mm 绿 / ≤3mm 黄 / >3mm 红；与 Dice 0.85/0.70 阈值互不影响。

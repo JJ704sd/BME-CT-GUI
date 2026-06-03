@@ -2,9 +2,15 @@
 
 本项目是面向腹部 CT 分割验证流程的本地 GUI 原型。前端使用 React + Vite，后端使用 FastAPI 桥接本机 nnUNetv2 环境，目标是完成 CT 浏览、三正交联动、器官 label 说明、真实模型推理回填、结果下载和验收记录。
 
-截至 2026-06-02，项目已经作为独立 GUI 仓库维护；真实 CT、NIfTI、checkpoint 权重和推理输出仍只保留在本机，不提交到 GitHub。当前已完成本地在线推理、标签上传、自动 taxonomy remap、报告导出、服务器 runtime 部署准备、校园网内 Windows 前端直连 Ubuntu 服务器 FastAPI 后端的 5GPU / 5-fold soft ensemble 在线推理回填，以及本地缓存演示 7 步验证（AMOS cache hit → FLARE 真实推理 → FLARE cache hit）。最新服务器运行显示：FLARE22 标签经自动 remap 后 Dice 较高，AMOS 原生标签曾被误判为 FLARE22 后 mean Dice 异常偏低；2026-05-31 已实现显式 `label_taxonomy=auto|AMOS22|FLARE22`，2026-06-02 发现 AMOS 真实标签只有 1-13（缺 14/15）与 FLARE22 在裸 ID 集合上无法仅靠 auto 区分，进一步收紧 `detect_dataset()` 在参考覆盖 ckpt ≥ 0.85 时返回 `None`，并由前端 `loadReferenceCase()` 按 `referenceCase.dataset` 自动预设 `label_taxonomy`（AMOS → AMOS22、FLARE22 → FLARE22），用户仍可在 UI 切换。
+截至 2026-06-03，项目已经作为独立 GUI 仓库维护；真实 CT、NIfTI、checkpoint 权重和推理输出仍只保留在本机，不提交到 GitHub。当前已完成本地在线推理、标签上传、自动 taxonomy remap、报告导出（HTML / JSON / PDF 三种格式，2026-06-03 已补齐到 6 类医学影像主流指标：Dice / IoU / Pixel Accuracy / HD / HD95 / ASD）、服务器 runtime 部署准备、校园网内 Windows 前端直连 Ubuntu 服务器 FastAPI 后端的 5GPU / 5-fold soft ensemble 在线推理回填，以及本地缓存演示 7 步验证（AMOS cache hit → FLARE 真实推理 → FLARE cache hit）。最新服务器运行显示：FLARE22 标签经自动 remap 后 Dice 较高，AMOS 原生标签曾被误判为 FLARE22 后 mean Dice 异常偏低；2026-05-31 已实现显式 `label_taxonomy=auto|AMOS22|FLARE22`，2026-06-02 发现 AMOS 真实标签只有 1-13（缺 14/15）与 FLARE22 在裸 ID 集合上无法仅靠 auto 区分，进一步收紧 `detect_dataset()` 在参考覆盖 ckpt ≥ 0.85 时返回 `None`，并由前端 `loadReferenceCase()` 按 `referenceCase.dataset` 自动预设 `label_taxonomy`（AMOS → AMOS22、FLARE22 → FLARE22），用户仍可在 UI 切换。2026-06-03 进一步把单 label 表面距离计算从 6 次 `distance_transform_edt` 合并到 2 次，validation 阶段约 2.3× 加速。
 
 ## 当前运行状态
+
+2026-06-03 已完成：
+- **质量评估指标扩展**：把 quality 评估报告补齐到 6 类医学影像主流指标（Dice、IoU、Pixel Accuracy、Hausdorff Distance、HD95、ASD）。`src/report/exportReport.ts` 报告模板新增 3 个 metric group：区域重叠度 · Dice / IoU、像素准确率 · Pixel Accuracy、表面距离 · HD / HD95 / ASD（共 19 张卡片，HD/HD95/ASD 卡片用 mm 单位 + 越低越好的色阶：≤1mm 绿、≤3mm 黄、>3mm 红）。逐标签表新增 4 列：像素准确率、ASD (mm)、HD95 (mm)、HD (mm)；额外显示 NIfTI spacing 和 surface_distance_unit 标签。`src/inference/inferenceClient.ts` 的 `ValidationSummary` / `LabelMetric` 增补 12 个新字段：pixel_accuracy / mean_pixel_accuracy / min_pixel_accuracy / foreground_pixel_accuracy、mean_asd / max_asd / foreground_asd、mean_hd / max_hd / foreground_hd、mean_hd95 / max_hd95 / foreground_hd95、surface_distance_unit="mm"、spacing=[sx, sy, sz]。
+- **表面距离计算加速**：`server/main.py` 新增 `surface_distances()`，把单 label 的 `distance_transform_edt` 调用从 6 次合并到 2 次（预测→参考、参考→预测各一次），通过 value 数组派生 `asd` / `hd` / `hd95`。`compute_label_metrics()` 与 foreground metrics 都改用新函数；旧 `average_surface_distance` / `hausdorff_95` / `hausdorff_distance_full` 保留为 legacy 供回归测试对照。AMOS 0117 quality 缓存命中实测：validation 阶段从 `38.86s` 降到 `16.78s`，约 2.3× 加速。
+- **回归测试**：`tests/backendState.test.py` 新增 `test_surface_distances_matches_legacy_individual_functions`（4 shape × 8 场景 1e-9 精度对照）、`test_surface_distances_uses_fewer_distance_transforms_than_legacy`（patch `scipy.ndimage.distance_transform_edt` 计数恒为 2）、`test_compute_label_metrics_with_surface_distances_faster_than_legacy`（wall-time 加速比 ≥30% 断言）；`tests/imagingLogic.test.ts` 新增全部新 metric 字段的 source-grep 约束和 `parseInferenceEvent()` complete 事件解析值测试。
+- **基线数值不变**：本轮不修改 AMOS `quality` profile `b3c528cc9e20`（mean Dice 0.924780）、FLARE22 自动 remap `a717dacf42d3`（mean Dice 0.926）、FLARE22 离线 remap `86b0153d0a73`（mean Dice 0.893127）三套历史基线；新指标在 AMOS quality 缓存命中（如 `2d477d8bbd7d`）上的具体数值为 mean Pixel Accuracy `0.999855`、mean HD `9.59281mm`、mean HD95 `3.596449mm`、mean ASD `0.660724mm`。
 
 2026-06-01 已完成：
 - **本地缓存演示 7 步**：AMOS 0117 cache hit（`aea4e7cdbaf0`，命中 2026-05-23 历史推理 `009d4efdc5f6`）、FLARE22 Tr 0009 真实推理（`0aa7323a4c01`，218s）、FLARE22 cache hit（`02da885c97d8`，0.001s）
@@ -31,6 +37,7 @@
 - server mode gating 继续收口：`runtime_target=server` 只依赖服务器 runtime 配置，不被本地 Windows nnUNet 文件缺失阻断
 - 高分辨率 CT 推理优化评估：预降采样与 3D 模型可行性
 - AMOS 预热预测的 review 状态（stomach 0.556）：复跑 quality 真实推理或新训练权重接入后可换更新预测
+- 质量评估新指标推广：把 `surface_distances` 2 EDT 模式应用到后续 3D 模型评估和跨数据集验证
 
 ## 当前状态
 
@@ -62,7 +69,7 @@
 - 支持通过"标签 CT 导入"按钮或拖拽上传标签 NIfTI 文件，推理完成后自动执行在线 Dice 验证。前端会提交 `label_taxonomy=auto|AMOS22|FLARE22` 和 `dataset_hint`（由参考病例 `dataset` 字段在 `loadReferenceCase()` 阶段自动设置，AMOS22 / FLARE22 / 其他）：`AMOS22` 强制不执行 FLARE remap，`FLARE22` 强制执行 FLARE22 → AMOS22 remap，`auto` + `dataset_hint=FLARE22` 触发参考病例驱动的 remap（解决 FLARE22 真实 1-13 标签与 AMOS 真实 1-13 标签在裸 ID 集合上不可分的问题），`auto` 无 hint 时退化为保守自动检测；validation 结果中的 `remap_applied`、`remap_source`、`label_taxonomy` 和 `dataset_hint` 是解释 Dice 的关键字段。
 - 持久化 job summary、阶段耗时、结果大小、资源快照和 nnUNetv2 日志尾部。
 - 支持同输入、同 checkpoint、同推理配置的历史预测结果缓存回填：`cached-real-nnunetv2`。缓存只复用 NIfTI 预测结果；validation 会按本次请求的标签文件或内置参考标签重新计算，无当前标签时不复用旧 validation。
-- 支持导出分割报告（HTML / JSON / PDF 三种格式），报告包含概览、验证指标、逐标签指标、影像量化分析、器官列表、关键发现、测量点和推理时间线。JSON 报告当前使用 `schema_version: "1.1"` 并包含 `quantification` 字段；PDF 导出使用浏览器原生打印，不引入第三方 PDF 库。
+- 支持导出分割报告（HTML / JSON / PDF 三种格式），报告包含概览、6 类医学影像主流验证指标（Dice / IoU / Pixel Accuracy / HD / HD95 / ASD，按 NIfTI spacing 计算 mm）、逐标签指标、影像量化分析、器官列表、关键发现、测量点和推理时间线。JSON 报告当前使用 `schema_version: "1.1"` 并包含 `quantification` 字段；PDF 导出使用浏览器原生打印，不引入第三方 PDF 库。距离指标（HD / HD95 / ASD）在 HTML 报告内使用 ≤1mm 绿 / ≤3mm 黄 / >3mm 红的色阶显示；与 Dice / IoU 的 0.85/0.70 阈值互不影响。
 
 ## 在线推理速度策略
 

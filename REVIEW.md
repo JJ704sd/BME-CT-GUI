@@ -2726,7 +2726,67 @@ AMOS ckpt 包含 1-15（共 15 个前景标签）。`amos_0117_label.nii` 实际
 - 上传自定义 NIfTI 时 `dataset_hint` 自动清空。
 - 本轮不改变 nnUNetv2 推理、缓存复用、SSE 协议、影像量化或历史基线指标数值。
 
+## 五十六、2026-06-03 质量评估指标扩展 + 表面距离计算加速
+
+### 56.1 现象
+
+2026-05-25 baseline 在 `quality` profile 下只把 Dice / IoU / HD 三类指标显示到 HTML 报告，逐标签表也只显示 Dice / IoU / HD 三列。验收指南要求把质量评估报告补齐到包括 Pixel Accuracy、HD95、ASD 在内的医学影像主流指标。同时，本轮实测发现：缓存命中路径下 validation 阶段耗时 `38.86s`，比 `quality` 推理本身（`1360.398s` 的 1/35）还慢 10 倍以上；逐器官遍历 + 6 EDT/label 是主要瓶颈。
+
+### 56.2 根因
+
+- `server/main.py` 的 `compute_label_metrics()` 在每个 label 上独立调用 `average_surface_distance` / `hausdorff_95` / `hausdorff_distance_full` 三个函数；每个函数都自己跑 `distance_transform_edt` 一到两次（crop + 双向 surface mask），结果单 label EDT 调用计数 ≈ 6。
+- 13 个 label × 6 次 EDT + foreground 1 次 = 768×768×103 volume 上 `validation` 阶段要跑约 80 次 `distance_transform_edt`，CPU 端 numpy loop 累计 38.86s。
+- `src/inference/inferenceClient.ts` 的 `ValidationSummary` 类型与 `normalizeValidation()` 白名单只有 Dice / IoU / HD 三类指标，其他指标字段被无声丢弃。
+- `src/report/exportReport.ts` 的 HTML 报告模板只渲染 Dice / IoU metric group 与逐标签 Dice / IoU / HD 三列。
+
+### 56.3 修复
+
+| 修复点 | 文件 | 内容 |
+|---|---|---|
+| 后端新函数 | `server/main.py` | 新增 `surface_distances(prediction_mask, reference_mask, spacing_tuple)`：1 次 crop + 2 个 surface mask + 2 次 `distance_transform_edt`（预测→参考、参考→预测），再用 value 数组派生 `asd` / `hd` / `hd95` / `forward_*` / `backward_*`。 |
+| 旧函数保留 | `server/main.py` | `average_surface_distance` / `hausdorff_95` / `hausdorff_distance_full` 保留为 legacy 供 `test_surface_distances_matches_legacy_individual_functions` 1e-9 精度对照。 |
+| compute_label_metrics | `server/main.py` | 单个 label 改用 `surface_distances()`；foreground metrics 也走 `surface_distances()`（非全 volume union mask）。 |
+| validation 字段扩展 | `server/main.py` | `validation_summary.json` 增补 12 个字段：pixel_accuracy / mean_pixel_accuracy / min_pixel_accuracy / foreground_pixel_accuracy、mean_asd / max_asd / foreground_asd、mean_hd / max_hd / foreground_hd、mean_hd95 / max_hd95 / foreground_hd95、surface_distance_unit="mm"、spacing=[sx, sy, sz]；per-label 增补 pixel_accuracy / asd / hd / hd95。 |
+| 前端白名单 | `src/inference/inferenceClient.ts` | `ValidationSummary` / `LabelMetric` 增补上述字段；`normalizeValidation()` 加入白名单；`parseInferenceEvent()` 在 complete 事件里透传。 |
+| HTML 报告 metric group | `src/report/exportReport.ts` | 3 个 metric group：区域重叠度 · Dice / IoU、像素准确率 · Pixel Accuracy、表面距离 · HD / HD95 / ASD；共 19 张卡片；HD/HD95/ASD 卡片使用 mm 单位 + ≤1mm 绿 / ≤3mm 黄 / >3mm 红色阶。 |
+| 逐标签表 | `src/report/exportReport.ts` | 新增 4 列：像素准确率、ASD (mm)、HD95 (mm)、HD (mm)；共用 `metricBarHtml(value, kind)` 渲染器，根据 kind 决定色阶和单位。 |
+| 距离色阶 | `src/report/exportReport.ts` | 新增 `distLevel()` / `distBarPercent()` helpers；`metricBarHtml` 扩展 `kind: "dice" \| "iou" \| "pix" \| "dist"`，`metricCard` 扩展 `kind: "vox" \| "dist"`。 |
+| 报告元信息 chips | `src/report/exportReport.ts` | 逐标签表上方显示 `spacing=[sx, sy, sz] mm` 与 `surface_distance_unit=mm` 两个 info tag，便于对照物理单位。 |
+| 回归测试 | `tests/backendState.test.py` | `test_surface_distances_matches_legacy_individual_functions`（4 shape × 8 场景 1e-9 精度对照）；`test_surface_distances_uses_fewer_distance_transforms_than_legacy`（patch `scipy.ndimage.distance_transform_edt` 计数恒为 2）；`test_compute_label_metrics_with_surface_distances_faster_than_legacy`（wall-time 加速比 ≥30% 断言）。 |
+| 前端解析测试 | `tests/imagingLogic.test.ts` | source-grep 约束全部 12 个新字段；`parseInferenceEvent()` complete 事件解析值测试。 |
+| 报告中文 | `src/report/exportReport.ts` | 3 个 metric group 标题保持中文：区域重叠度 · Dice / IoU、像素准确率 · Pixel Accuracy、表面距离 · HD / HD95 / ASD。 |
+
+### 56.4 验收结果
+
+| 检查项 | 结果 |
+|---|---|
+| 1e-9 精度对照 | 4 shape（sphere / shell / cube / sphere+ring）× 8 场景下新 `surface_distances()` 与旧 `average_surface_distance` + `hausdorff_95` + `hausdorff_distance_full` 完全一致（差 ≤ 1e-9） |
+| EDT 调用计数 | patch `scipy.ndimage.distance_transform_edt` 后单 label 调用恒为 2 次（`forward` + `backward`），旧路径 6 次 |
+| 性能实测 | AMOS 0117 quality cache hit（job `2d477d8bbd7d`）：validation 阶段从 `38.86s` 降到 `16.78s`，约 2.3× 加速；EDT 调用计数从 6/label 降到 2/label |
+| wall-time 加速断言 | `test_compute_label_metrics_with_surface_distances_faster_than_legacy` 在 768×768×103 mock volume 上跑 3 轮取中位数，新路径比旧路径快 ≥30% |
+| HTML 报告渲染 | 3 个 metric group 共 19 张卡片正常显示；逐标签表 6 列（dice / iou / pixel_accuracy / asd / hd95 / hd）正确显示；spansing + surface_distance_unit chips 正常显示 |
+| 色阶独立 | HD/HD95/ASD ≤1mm 绿 / ≤3mm 黄 / >3mm 红色阶，与 Dice 0.85/0.70 阈值互不影响 |
+| 字段透传 | `validation_summary.json` 12 个新字段在 SSE complete 事件、job_summary.json、HTML 报告、JSON 报告中均能透传；前端 `inferenceClient.ts` 解析后类型正确 |
+| `npm test` / `python tests/backendState.test.py` / `npm run build` | 全过（`EXIT=0`） |
+
+### 56.5 行为边界
+
+- 本轮不修改 nnUNetv2 模型推理、缓存复用、SSE 协议或影像量化逻辑；只新增表面距离计算函数、扩展 validation 字段、重写 HTML 报告 metric group。
+- 本轮不改变历史 AMOS `quality` profile `b3c528cc9e20`（mean Dice 0.924780）、FLARE22 自动 remap `a717dacf42d3`（mean Dice 0.926）、FLARE22 离线 remap `86b0153d0a73`（mean Dice 0.893127）三套基线数值；新指标在 AMOS quality 缓存命中（如 `2d477d8bbd7d` / `9fd0fdc39960` / `096e5b8349df`）上的具体数值为 mean Dice 0.891327、mean Pixel Accuracy 0.999855、mean HD 9.59281mm、mean HD95 3.596449mm、mean ASD 0.660724mm。
+- HD / HD95 / ASD 报告单位固定为 mm（按 NIfTI spacing 缩放），与 Pixel/Voxel Accuracy 的 0-1 比例独立；色阶阈值 1mm / 3mm 不与 Dice 阈值 0.85 / 0.70 混用。
+- 旧 `average_surface_distance` / `hausdorff_95` / `hausdorff_distance_full` 保留为 legacy 仅供回归测试对照，不应在 `compute_*_metrics` 路径再被调用；新调用方请使用 `surface_distances()`。
+- `tests/backendState.test.py` 的 3 个新测试是本轮行为的硬约束：精度 1e-9、EDT 调用计数恒为 2、wall-time 加速比 ≥30%。后续重构如果破坏其中任一约束，CI 会直接挂掉，避免回退到 6 EDT 模式。
+
+### 56.6 文档同步
+
+9 份根文档（README/CLAUDE/AGENTS/ACCEPTANCE/REVIEW/CODE_MODULE_GUIDE/SEGMENTATION_RECENT_ROUNDS/SEGMENTATION_EXPERIMENT_COMPARISON/SEGMENTATION_METRICS_SUMMARY）+ `.planning/quality-metrics-and-surface-distances/{explanation,findings,progress,task_plan}.md` 4 份新增 planning 文档均已添加 "2026-06-03 质量评估指标扩展 + 表面距离计算加速" 描述，统一口径为：
+
+- 6 类医学影像主流指标：Dice、IoU、Pixel Accuracy、HD、HD95、ASD；逐标签 4 列：像素准确率、ASD (mm)、HD95 (mm)、HD (mm)。
+- 距离单位固定 mm（按 NIfTI spacing 缩放），色阶 ≤1mm 绿 / ≤3mm 黄 / >3mm 红；与 Dice 0.85/0.70 阈值互不影响。
+- `surface_distances()` 1 crop + 2 EDT/label 是单 label 性能不变量；新增 `compute_*_metrics` 调用方应继续复用该实现，避免回退到 6 EDT 模式。
+- 本轮不改变 nnUNetv2 推理、缓存复用、SSE 协议、影像量化或历史基线指标数值；只新增 12 个 validation 字段、3 个 metric group、4 列逐标签表。
+
 ---
 
-*文档版本：2026-06-02*
-*更新依据：当前 `src/main.tsx`、`src/inference/inferenceClient.ts`、`server/main.py`、`server/server_inference.py`、`server/taxonomy.py`、`tools/seed_demo_cache.py`、`tools/rewrite_flare22_historical_summary.py`、`docs/local-cache-demo-runbook.md`、`docs/superpowers/specs/2026-06-01-local-cache-demo-design.md`、`docs/superpowers/plans/2026-06-01-local-cache-demo.md`、`package.json`、`README.md`、`ACCEPTANCE.md`、`SEGMENTATION_METRICS_SUMMARY.md`、`SEGMENTATION_EXPERIMENT_COMPARISON.md`、`SEGMENTATION_RECENT_ROUNDS.md`、`CODE_MODULE_GUIDE.md`、`CLAUDE.md`、`AGENTS.md`、`.planning/lan-direct-and-tunnel/`、`.planning/campus-network-and-public-access/`、`.planning/label-taxonomy-server-validation/`、`.planning/high-resolution-inference-optimization/`、`.planning/2026-06-01-local-cache-demo/` 与 `deployment-packages/`。*
+*文档版本：2026-06-03*
+*更新依据：当前 `src/main.tsx`、`src/inference/inferenceClient.ts`、`src/report/exportReport.ts`、`server/main.py`、`server/server_inference.py`、`server/taxonomy.py`、`tools/seed_demo_cache.py`、`tools/rewrite_flare22_historical_summary.py`、`tools/segmentation_metrics_summary.py`、`docs/local-cache-demo-runbook.md`、`docs/superpowers/specs/2026-06-01-local-cache-demo-design.md`、`docs/superpowers/plans/2026-06-01-local-cache-demo.md`、`package.json`、`README.md`、`ACCEPTANCE.md`、`SEGMENTATION_METRICS_SUMMARY.md`、`SEGMENTATION_EXPERIMENT_COMPARISON.md`、`SEGMENTATION_RECENT_ROUNDS.md`、`CODE_MODULE_GUIDE.md`、`CLAUDE.md`、`AGENTS.md`、`.planning/lan-direct-and-tunnel/`、`.planning/campus-network-and-public-access/`、`.planning/label-taxonomy-server-validation/`、`.planning/high-resolution-inference-optimization/`、`.planning/2026-06-01-local-cache-demo/`、`.planning/quality-metrics-and-surface-distances/` 与 `deployment-packages/`。*

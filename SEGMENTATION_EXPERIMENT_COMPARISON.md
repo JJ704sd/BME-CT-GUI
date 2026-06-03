@@ -32,6 +32,7 @@
 - 2026-06-01 晚间完成 cache 链路补丁：FLARE22 cache hit（`02da885c97d8`）现在能正确显示 2026-05-26 remap 后的指标（mean_dice 0.893127、min_dice 0.67373、fg 0.949908、15 标签），并标注"（历史离线缓存摘要）"；新增 `tools/rewrite_flare22_historical_summary.py` 把该历史摘要写入 0aa7323a4c01 的 output。`server/main.py` 的 `complete_cached_job()` 增加 historical 回退，`find_cached_prediction()` 候选排序改为 `(has_validation_summary, mtime)` 降序。本轮不修改本表中任何基线指标数值，仅修正 cache hit 时的 validation 显示口径。
 - 2026-06-02 完成 `detect_dataset()` 二轮收紧：AMOS 真实 `amos_0117_label.nii/amos_0117(2).nii` 实际 unique IDs 为 `{1..13}`（缺 14/15 bladder/prostate），与 FLARE22 真实 1-13 在裸 ID 集合上不可分。`detect_dataset()` 新增 0.85 coverage 守卫：参考覆盖 ckpt 标签 ≥ 0.85 时直接返回 `None`（`auto` 退化为保底）。前端 `loadReferenceCase()` 按 `referenceCase.dataset` 自动设置 `label_taxonomy`：AMOS 病例 → `AMOS22`、FLARE22 病例 → `FLARE22`、其他保持原值。`tests/backendState.test.py` 新增 AMOS 1-13 + ckpt 1-15 真实 case 测试。本轮不修改本表中任何基线指标数值，仅修正 `auto` 模式在裸 ID 不可分边界上的判定逻辑。
 - 2026-06-02 完成 `dataset_hint` 字段打通 auto 边界：0.85 coverage 守卫下 FLARE22 真实 1-13 也会被返回 `None`，因此新增 `dataset_hint` 表单字段。前端在 `loadReferenceCase()` 成功后把 `referenceCase.dataset` 写入 `referenceCaseDatasetHint` 状态并随 job 提交；后端 `validate_against_custom_label()` 在 `taxonomy=auto + dataset_hint=FLARE22` 时强制 `detected="FLARE22"`，覆盖 0.85 守卫的 None；上传自定义 NIfTI 时前端清空 `referenceCaseDatasetHint` 避免错误继承。本轮不修改本表中任何基线指标数值，仅补充 `auto` 模式下 FLARE22 真实标签的 remap 路径。
+- 2026-06-03 完成质量评估指标扩展 + 表面距离计算加速：`server/main.py` 新增 `surface_distances()`（1 crop + 2 EDT/label），把单 label 表面距离计算从 6 EDT 合并到 2 EDT；`validation_summary.json` 增补 12 个字段（pixel_accuracy 4 项 + HD/HD95/ASD 9 项 + surface_distance_unit + spacing）；`src/inference/inferenceClient.ts` 在 `ValidationSummary` / `LabelMetric` 增补对应字段并加入 `normalizeValidation()` 白名单；`src/report/exportReport.ts` 报告模板新增 3 个 metric group（区域重叠度 · Dice / IoU、像素准确率 · Pixel Accuracy、表面距离 · HD / HD95 / ASD）和 4 个逐标签列（像素准确率、ASD (mm)、HD95 (mm)、HD (mm)）。AMOS 0117 quality 缓存命中实测：validation 阶段从 38.86s 降到 16.78s（约 2.3× 加速）。3 个新增回归测试覆盖精度（1e-9）、EDT 调用计数恒为 2、wall-time 加速比 ≥30%。本轮不修改本表中任何历史实验指标数值（AMOS quality `b3c528cc9e20`、FLARE22 自动 remap `a717dacf42d3`、FLARE22 离线 remap `86b0153d0a73`），新指标在 AMOS quality 缓存命中（`2d477d8bbd7d` / `9fd0fdc39960` / `096e5b8349df`）上的具体数值为 mean Pixel Accuracy 0.999855、mean HD 9.59281mm、mean HD95 3.596449mm、mean ASD 0.660724mm。
 
 ## 实验名称说明
 
@@ -54,6 +55,7 @@
 | 本地缓存演示 AMOS cache hit | AMOS 0117 复跑 cache_key 命中 2026-05-23 历史推理 `009d4efdc5f6` | 演示同输入 cache hit，秒级回填；review 状态保留（stomach 0.556） | job `aea4e7cdbaf0` |
 | 本地缓存演示 FLARE 真实推理 | FLARE22 Tr 0009 首次未缓存 quality 推理 | 真实 nnUNetv2 推理写入 cache_key，218s，结果 120KB | job `0aa7323a4c01` |
 | 本地缓存演示 FLARE cache hit | FLARE22 Tr 0009 复跑命中 0aa7323a4c01 | 验证 cache_key 7 字段隔离正确，0.001s 返回 | job `02da885c97d8` |
+| AMOS quality 缓存命中 + 6 类指标 | 2026-06-03 补齐 validation 6 类指标后的 AMOS quality cache hit | 验证 `surface_distances()` 2 EDT 实现 + 报告模板新 metric group；与 `b3c528cc9e20` 共享同一预测 NIfTI 字节 | job `2d477d8bbd7d`（最新一次验证，validation 阶段实测 16.78s） |
 
 ## 实验总览
 

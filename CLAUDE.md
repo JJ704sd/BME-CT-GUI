@@ -18,6 +18,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **`quality` 是正式报告路径**，`fast` 仅作预览 / 演示候选（本地 AMOS 0117 fast mean Dice=0.777，对 label 14/15 有假阳性）
 - **本地缓存演示前置**：`SEGMENTATION_REFERENCE_CASES_JSON=examples/reference_cases.json`，否则 `/api/samples` 只返回内置 `amos_0117`，FLARE22 Tr 0009 不会出现
 - **AMOS 服务器轮次 0.076 不是模型失败基线**：是 AMOS 原生标签被自动误 remap 到 FLARE22，已在 auto taxonomy 边界加固中收口，待服务器窗口复跑确认 `remap_applied=false` 后才能纳入正式质量基线
+- **质量评估口径以 6 类医学影像指标为准**：`mean_dice` / `min_dice` / `foreground_dice`、`mean_iou` / `min_iou` / `foreground_iou`、`pixel_accuracy` / `mean_pixel_accuracy` / `min_pixel_accuracy` / `foreground_pixel_accuracy`、`mean_hd` / `max_hd` / `foreground_hd`、`mean_hd95` / `max_hd95` / `foreground_hd95`、`mean_asd` / `max_asd` / `foreground_asd`，加 `surface_distance_unit="mm"` 和 `spacing=[sx, sy, sz]`。逐标签还有 `pixel_accuracy` / `asd` / `hd` / `hd95` 4 列。`tools/segmentation_metrics_summary.py` 的离线口径与 `server/main.py` 在线 validation 共用同一份 `surface_distances()` 实现；新增指标时必须同时改 backend（计算 + serialize）、`inferenceClient.ts`（白名单 + 类型）、`exportReport.ts`（HTML 报告模板）三处，不要只改一处
+- **`surface_distances()` 2 EDT 是单 label 性能不变量**：每个 label 在 1 次 crop + 2 次 `distance_transform_edt`（预测→参考、参考→预测）后用 value 数组派生 `asd` / `hd` / `hd95`。新写 `compute_*_metrics` 时不应回退到 6 EDT 模式；旧 `average_surface_distance` / `hausdorff_95` / `hausdorff_distance_full` 仅保留供回归测试对照，不再走主路径。AMOS 0117 quality cache hit validation 实测 38.86s → 16.78s（约 2.3× 加速）
 
 ## 安全 / 隐私边界（必读）
 
@@ -80,6 +82,14 @@ Python venv 在 `D:\BME2026\BME_CT_Seg\nnunet_env`（fastapi / uvicorn / python-
 - `docs/local-cache-demo-runbook.md` — 缓存演示复跑
 - `docs/competition/BME_COMPETITION_GUIDE.md` — 报告写作指南
 - `.planning/<topic>/` — 主题内的 explanation / findings / progress / task_plan
+
+涉及质量评估指标（Dice / IoU / Pixel Accuracy / HD / HD95 / ASD）字段新增或计算路径变更，**还**必须评估是否同步：
+
+- `src/inference/inferenceClient.ts` 的 `ValidationSummary` / `LabelMetric` 白名单与类型定义
+- `src/report/exportReport.ts` 的 HTML 报告 metric group 与逐标签列
+- `tools/segmentation_metrics_summary.py` 的离线指标（必须与后端在线口径一致）
+- `tests/backendState.test.py` 验证新字段在 SSE / job state / cached 链路里被透传
+- `tests/imagingLogic.test.ts` 验证前端能解析新字段
 
 ## 当前重点
 

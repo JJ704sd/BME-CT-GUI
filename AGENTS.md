@@ -2,8 +2,9 @@
 
 ## 当前运行状态
 
-截至 2026-06-02，项目已完成：
+截至 2026-06-03，项目已完成：
 
+- **2026-06-03 质量评估指标扩展 + 表面距离计算加速**：把 quality 评估报告补齐到 Dice、IoU、Pixel Accuracy、Hausdorff Distance（含 HD95、ASD）等 6 类医学影像主流指标。`server/main.py` 新增 `surface_distances()`（1 crop + 2 EDT/label），把单 label 的 `distance_transform_edt` 调用从 6 次合并到 2 次；`src/inference/inferenceClient.ts` 在 `ValidationSummary` / `LabelMetric` 增补 12 个新字段（pixel_accuracy 4 项 + HD/HD95/ASD 9 项 + surface_distance_unit + spacing）；`src/report/exportReport.ts` 报告模板新增 3 个 metric group（区域重叠度 · Dice / IoU、像素准确率 · Pixel Accuracy、表面距离 · HD / HD95 / ASD）和 4 个逐标签列（像素准确率、ASD (mm)、HD95 (mm)、HD (mm)）。AMOS 0117 quality 缓存命中：validation 阶段从 38.86s 降到 16.78s（约 2.3× 加速）。3 个新增回归测试覆盖新函数精度（1e-9）、EDT 调用计数恒为 2、wall-time 加速比 ≥30%。
 - 显式 `label_taxonomy=auto|AMOS22|FLARE22` 功能，修复了 AMOS 标签被误判为 FLARE22 的问题
 - **2026-06-02 detect_dataset 二轮收紧 + 前端按 dataset 预设 taxonomy**：AMOS 真实 label 只含 1-13（缺 14/15 bladder/prostate 体素），与 FLARE22 真实 1-13 在裸 ID 集合上不可分；`detect_dataset()` 在参考覆盖 ckpt 标签 ≥ 0.85 时直接返回 `None`（不再自动 remap），由前端 `loadReferenceCase()` 按 `referenceCase.dataset` 自动设置 `label_taxonomy`（AMOS → AMOS22、FLARE22 → FLARE22），用户仍可在 UI 切换。`auto` 退化为保底。
 - **2026-06-02 dataset_hint 字段打通 auto 边界**：`loadReferenceCase()` 成功载入参考标签后把 `referenceCase.dataset` 写入 `referenceCaseDatasetHint` 状态；创建 job 时通过新增 `dataset_hint` 表单字段提交给后端。后端 `validate_against_custom_label()` 在 `label_taxonomy=auto` 但 `dataset_hint=FLARE22` 时强制 remap（即便 `detect_dataset` 返回 `None`），保证 FLARE22_Tr_0009 这类参考病例在 `auto` 模式下也能正确 remap。
@@ -20,6 +21,7 @@
 - 高分辨率 CT 推理优化评估（预降采样方案）
 - server mode gating 修复（`runtime_target=server` 不应依赖本地 Windows nnUNet 文件）
 - AMOS 预热预测 review 状态（stomach 0.556）的复跑或新训练权重接入
+- 质量评估指标新口径推广：把 surface_distances 2 EDT 模式应用到后续 3D 模型评估和跨数据集验证
 
 ## 项目结构与模块组织
 

@@ -2,9 +2,39 @@
 
 > 本文档按时间滚动覆写，只保留最近三轮成功或具备诊断价值的推理数据。历史完整记录见 `SEGMENTATION_EXPERIMENT_COMPARISON.md`。
 
-最近更新：2026-06-02
+最近更新：2026-06-03
 
-## 第 1 轮（最新）— dataset_hint 字段打通 auto 边界
+## 第 1 轮（最新）— 质量评估指标扩展 + 表面距离计算加速
+
+| 项目 | 值 |
+|---|---|
+| 日期 | 2026-06-03 |
+| 范围 | 把质量评估报告补齐到 Dice、IoU、Pixel Accuracy、Hausdorff Distance（含 HD95、ASD）等医学影像主流指标；同步收紧 6 EDT/label 的性能瓶颈，把每个 label 的 `distance_transform_edt` 调用从 6 次合并到 2 次 |
+| 受影响逻辑 | `server/main.py` 新增 `surface_distances()`（1 crop + 2 EDT/label）并替换 `compute_label_metrics()`；保留 `average_surface_distance` / `hausdorff_95` / `hausdorff_distance_full` 旧函数供回归测试对照；`src/inference/inferenceClient.ts` 在 `ValidationSummary` / `LabelMetric` 增补 12 个新字段（`pixel_accuracy` 4 项 + HD/HD95/ASD 9 项 + `surface_distance_unit` + `spacing`）；`src/report/exportReport.ts` 报告模板新增 3 个 metric group（区域重叠度 · Dice / IoU、像素准确率 · Pixel Accuracy、表面距离 · HD / HD95 / ASD）和 4 个逐标签列 |
+| 回归测试 | `tests/backendState.test.py` 新增 `test_surface_distances_matches_legacy_individual_functions`（4 shape × 8 场景，1e-9 精度）、`test_surface_distances_uses_fewer_distance_transforms_than_legacy`（patch `scipy.ndimage.distance_transform_edt` 计数恒为 2）、`test_compute_label_metrics_with_surface_distances_faster_than_legacy`（壁钟测试，断言新路径比旧路径快 ≥30%）；`tests/imagingLogic.test.ts` 新增对全部新 metric 字段的 source-grep 约束和 `parseInferenceEvent()` complete 事件解析值测试 |
+| 自动验证 | `python tests/backendState.test.py`、`npm test`、`npm run build` 全过（`EXIT=0`） |
+
+**问题描述：**
+
+2026-05-25 验收 baseline 在 quality profile 下计算 Dice、IoU、HD 三类指标已经稳定，但验收指南要求把质量评估报告补齐到包括 Pixel Accuracy、Hausdorff Distance 在内的医学影像主流指标。本轮之前，HTML 报告只有 Dice / IoU 卡片，逐标签表也只有 Dice / IoU / HD 三列；用户上传标签后看到的是不完整质量视图。`tools/segmentation_metrics_summary.py` 在 offline 端其实已经能输出 Pixel Accuracy、HD、HD95、ASD，但前端 `inferenceClient.ts` 的白名单里没有这些字段，整条 validation 通路会无声丢弃。
+
+**修复要点：**
+
+| 修改项 | 说明 |
+|---|---|
+| 后端 `surface_distances()` | 单个 label 的 surface distance 一次性完成：1 次 crop + 2 个 surface mask + 2 次 `distance_transform_edt`（预测→参考、参考→预测），再用 value 数组算 `asd` / `hd` / `hd95` / `forward_*` / `backward_*`，省掉 `average_surface_distance` / `hausdorff_95` / `hausdorff_distance_full` 各跑一次的重复 EDT |
+| 旧函数保留 | `average_surface_distance` / `hausdorff_95` / `hausdorff_distance_full` 保留为 legacy，供 `test_surface_distances_matches_legacy_individual_functions` 做 1e-9 精度对照 |
+| compute_label_metrics | 单个 label 改用 `surface_distances()`；foreground 也走 `surface_distances()`（非全 volume union mask） |
+| 字段扩展 | 12 个新字段（pixel_accuracy / mean_pixel_accuracy / min_pixel_accuracy / foreground_pixel_accuracy、mean_asd / max_asd / foreground_asd、mean_hd / max_hd / foreground_hd、mean_hd95 / max_hd95 / foreground_hd95、surface_distance_unit="mm"、spacing=[sx, sy, sz]）；per-label 增补 `pixel_accuracy` / `asd` / `hd` / `hd95` |
+| 前端白名单 | `normalizeValidation()` 添加上述字段到白名单；`parseInferenceEvent()` 解析时把这些字段透传 |
+| HTML 报告 | 新增"区域重叠度 · Dice / IoU"、"像素准确率 · Pixel Accuracy"、"表面距离 · HD / HD95 / ASD"3 个 metric group（共 19 张卡片，HD/HD95/ASD 卡片用 mm 单位 + 越低越好的色阶 ≤1mm 绿、≤3mm 黄、>3mm 红）；逐标签表加 4 列：像素准确率、ASD (mm)、HD95 (mm)、HD (mm)；逐标签表 chips 显示 `spacing` 和 `surface_distance_unit` |
+| 性能实测 | AMOS 0117 quality 缓存命中：旧路径 `38.86s` → 新路径 `16.78s`，约 2.3× 加速（CPU `distance_transform_edt` 调用次数从每 label 6 次降到 2 次） |
+
+**结论：** 质量评估报告已补齐到 Dice / IoU / Pixel Accuracy / HD / HD95 / ASD 共 6 类医学影像主流指标。HTML 报告、JSON 报告、PDF 报告三层都同步支持新字段；逐标签表现已能直接看出哪个器官的边界差距（HD/HD95/ASD mm）最大。`surface_distances()` 2 EDT 优化让 768×768×103 这类高分辨率 CT 的 validation 不再比推理本身慢一个数量级。本轮不修改 nnUNetv2 推理、缓存复用、SSE 协议或影像量化逻辑；也不改变历史 AMOS `quality` profile（`b3c528cc9e20`，mean Dice 0.924780）、FLARE22 自动 remap（`a717dacf42d3`，mean Dice 0.926）和 FLARE22 离线 remap（`86b0153d0a73`，mean Dice 0.893127）三套基线数值；新指标在 AMOS quality 缓存命中（`2d477d8bbd7d` / `aea4e7cdbaf0` / `9fd0fdc39960` / `096e5b8349df`）上的具体数值为 mean Dice 0.891327、mean Pixel Accuracy 0.999855、mean HD 9.59281mm、mean HD95 3.596449mm、mean ASD 0.660724mm。
+
+---
+
+## 第 2 轮 — dataset_hint 字段打通 auto 边界
 
 | 项目 | 值 |
 |---|---|
@@ -33,7 +63,7 @@
 
 ---
 
-## 第 1 轮 — detect_dataset 二轮收紧 + 前端按 dataset 预设 taxonomy
+## 第 3 轮 — detect_dataset 二轮收紧 + 前端按 dataset 预设 taxonomy
 
 | 项目 | 值 |
 ||---|
@@ -74,7 +104,7 @@
 
 ---
 
-## 第 2 轮 — 本地缓存演示 7 步验证
+## 第 4 轮 — 本地缓存演示 7 步验证
 
 | 项目 | 值 |
 |---|---|
@@ -121,7 +151,7 @@
 
 ---
 
-## 第 2 轮 — label_taxonomy 修复与 AMOS CT 推理完成
+## 第 5 轮 — label_taxonomy 修复与 AMOS CT 推理完成
 
 | 项目 | 值 |
 |---|---|
@@ -155,7 +185,7 @@
 
 ---
 
-## 第 2 轮 — 服务器 AMOS 0117 validation 异常
+## 第 6 轮 — 服务器 AMOS 0117 validation 异常
 
 | 项目 | 值 |
 |---|---|
@@ -186,7 +216,7 @@
 
 ---
 
-## 第 2 轮 — 服务器 FLARE22 + 自动 remap 在线验证
+## 第 7 轮 — 服务器 FLARE22 + 自动 remap 在线验证
 
 | 项目 | 值 |
 |---|---|
@@ -241,19 +271,25 @@
 
 ## 近三轮趋势
 
-| 维度 | 第 1 轮（本地缓存演示 7 步） | 第 2 轮（label_taxonomy 修复 + 本地高分辨率） | 第 3 轮（服务器 FLARE 5-fold） |
+| 维度 | 第 1 轮（质量评估指标扩展 + 表面距离加速） | 第 2 轮（detect_dataset 收紧 + dataset_hint 边界） | 第 3 轮（本地缓存演示 7 步） |
 |---|---|---|---|
-| 运行位置 | 本地 RTX 4060，cache_key 7 字段 | 本地 RTX 4060 / 服务器 5GPU | Ubuntu 服务器 5GPU |
-| 病例 | AMOS 0117 + FLARE22 Tr 0009 | 768×768×103 高分辨率 | 标准 FLARE22 |
-| 耗时 | AMOS cache hit ~3s，FLARE 真实 218s，FLARE cache hit 0.001s | 268s+（fast profile） | 约 228s |
-| 验证状态 | AMOS review（stomach 0.556）、FLARE 真实 0 验证、FLARE cache hit 0.001s | review，mean_dice=0.77724 | review / 可用，mean Dice 约 0.891 |
-| 核心问题 | AMOS 预热预测 review 状态保留，复跑新 AMOS 真实推理可换更新预测 | 高分辨率导致推理慢 | 最低标签仍需人工复核 |
+| 范围 | 6 类医学影像主流指标补齐，2 EDT/label 优化 | detect_dataset 0.85 守卫 + dataset_hint | AMOS cache hit → FLARE 真实 → FLARE cache hit |
+| 改动 | ValidationSummary +12 字段、HTML 报告 3 metric group、4 列逐标签 | detect_dataset 收紧、前端按 dataset 预设 taxonomy、auto 边界补 dataset_hint | seed_demo_cache.py、rewrite_flare22_historical_summary.py、runbook |
+| 耗时影响 | AMOS quality cache hit validation 38.86s → 16.78s（2.3× 加速） | 不影响推理耗时 | AMOS cache hit ~3s、FLARE 真实 218s、FLARE cache hit 0.001s |
+| 验证口径 | 新指标 mean HD 9.59mm、mean HD95 3.60mm、mean ASD 0.66mm（AMOS quality cache hit） | auto 模式退回保底，FLARE22 真实 1-13 仍能 remap | AMOS review（stomach 0.556）、FLARE 真实 0 验证、FLARE cache hit 0.001s |
+| 核心问题 | validation 比推理慢 10× 已收口 | AMOS 1-13 vs FLARE22 1-13 裸 ID 不可分已收口 | cache hit 命中的 validation 必须来自 cache_source 自身 |
 
 ---
 
 ## 待解决问题
 
-### 问题 0：高分辨率 CT 推理速度优化
+### 问题 0：质量评估指标已收口（2026-06-03）
+
+**现状：** 2026-06-03 已把 quality 评估报告补齐到 6 类医学影像主流指标（Dice / IoU / Pixel Accuracy / HD / HD95 / ASD），逐标签表现已能直接显示 HD/HD95/ASD mm 列；`surface_distances()` 把单 label EDT 调用从 6 次合并到 2 次，AMOS 0117 quality cache hit 的 validation 阶段从 38.86s 降到 16.78s（约 2.3× 加速）。
+
+**行动：** 后续在新增 3D 模型或新数据集时，应在 `compute_label_metrics()` 调用入口直接复用 `surface_distances()`；新增 `surface_distances()` 调用方时需要确认仍然只调用 2 次 EDT，不要回退到旧 6 EDT 模式。HD/HD95/ASD 报告卡片使用 ≤1mm 绿 / ≤3mm 黄 / >3mm 红的色阶；与 `quality` profile 的 0.85/0.70 阈值不同，避免把距离指标和 Dice 阈值混用。
+
+### 问题 1：高分辨率 CT 推理速度优化
 
 **现状：** 2026-05-31 的 AMOS CT（768×768×103）推理已完成，fast profile mean_dice=0.77724，低于 quality 基线 0.924791。主要瓶颈是输入分辨率高于模型训练时的标准尺寸，导致计算量增加约 2.25 倍。
 

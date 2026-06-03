@@ -287,8 +287,12 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\checkpoint_best.
 | IoU | `mean=0.865105`, `min=0.733930`, `foreground=0.961392` |
 | Pixel/Voxel Accuracy | `0.998578` |
 | Hausdorff Distance | `mean=7.716048 mm`, `max=16.562684 mm` |
+| HD95 | `mean=3.596449 mm`, `max=16.540683 mm`（2026-06-03 增补） |
+| ASD | `mean=0.660724 mm`, `max=3.58299 mm`（2026-06-03 增补） |
 | 标签数 | checkpoint 定义 `15` 个前景标签；AMOS 0117 本例实际出现 `1..13`，label `14/15` 为 `N/A` |
 | checkpoint_sha256 | `45021cef5f37868f8e76f4c372b5d911eef259db6d38943779ba25318c37e6c7` |
+| spacing | `[0.5078125, 0.5078125, 5.0] mm` |
+| surface_distance_unit | `mm` |
 
 无缓存 persistent worker 对照：
 
@@ -371,6 +375,8 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\checkpoint_best.
 | Pixel/Voxel Accuracy | `0.991879` |
 | mean Hausdorff Distance | `12.595149 mm` |
 | max Hausdorff Distance | `38.043429 mm` |
+| HD95 | 2026-06-03 之后可在 `surface_distances()` 输出中读取 |
+| ASD | 2026-06-03 之后可在 `surface_distances()` 输出中读取 |
 | weakest label | `duodenum`, Dice `0.673730` |
 
 ## 2026-05-26 GUI 交互性能与代码交接
@@ -691,3 +697,37 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\checkpoint_best.
 - `dataset_hint` 不影响 `taxonomy_hint` 显式选择：`label_taxonomy=AMOS22/FLARE22` 优先级仍高于 `dataset_hint`。
 - 上传自定义 NIfTI 时 `referenceCaseDatasetHint` 自动清空，确保不会把上一个参考病例的 dataset 错误继承到当前请求。
 - 本轮不修改 `server/taxonomy.py` 的判定逻辑，只在 `validate_against_custom_label()` 调用点增加 `dataset_hint` 覆盖；`detect_dataset()` 的 0.85 守卫保持不变。
+
+## 2026-06-03 质量评估指标扩展 + 表面距离计算加速验收记录
+
+范围：
+
+- 把 quality 评估报告补齐到 6 类医学影像主流指标（Dice / IoU / Pixel Accuracy / HD / HD95 / ASD），同时把单 label 表面距离计算从 6 次 `distance_transform_edt` 合并到 2 次。
+- 修复 2026-05-25 之前评估报告只显示 Dice / IoU / HD 三类指标，且单次 validation 阶段比推理本身慢一个数量级的问题。
+- 让 HTML / JSON / PDF 三种报告格式、离线 `tools/segmentation_metrics_summary.py` 与后端 `server/main.py` 共享同一份表面距离计算实现。
+
+验收证据：
+
+| 检查项 | 结果 |
+|---|---|
+| 后端新函数 | `server/main.py` 新增 `surface_distances(prediction_mask, reference_mask, spacing)`：1 crop + 2 EDT（预测→参考、参考→预测），返回 `asd` / `hd` / `hd95` 及 `forward_*` / `backward_*` 拆解 |
+| 旧函数保留 | `average_surface_distance` / `hausdorff_95` / `hausdorff_distance_full` 保留为 legacy 供 `test_surface_distances_matches_legacy_individual_functions` 对照 |
+| compute_label_metrics | 单 label 改用 `surface_distances()`；foreground metrics 也走 `surface_distances()`（非全 volume union mask） |
+| 字段扩展 | `validation_summary.json` 增补 12 个字段：pixel_accuracy / mean_pixel_accuracy / min_pixel_accuracy / foreground_pixel_accuracy、mean_asd / max_asd / foreground_asd、mean_hd / max_hd / foreground_hd、mean_hd95 / max_hd95 / foreground_hd95、surface_distance_unit="mm"、spacing=[sx, sy, sz]；per-label 增补 pixel_accuracy / asd / hd / hd95 |
+| 前端白名单 | `src/inference/inferenceClient.ts` 的 `ValidationSummary` / `LabelMetric` 增补上述字段；`normalizeValidation()` 加入白名单；`parseInferenceEvent()` 在 complete 事件里透传 |
+| HTML 报告 | 3 个 metric group（区域重叠度 · Dice / IoU、像素准确率 · Pixel Accuracy、表面距离 · HD / HD95 / ASD，共 19 张卡片），HD/HD95/ASD 卡片使用 mm 单位 + ≤1mm 绿 / ≤3mm 黄 / >3mm 红色阶；逐标签表新增 4 列：像素准确率、ASD (mm)、HD95 (mm)、HD (mm) |
+| 距离色阶 | 独立于 Dice / IoU 阈值；不会因为 distance 数值小而把 Dice 误染绿 |
+| 性能实测 | AMOS 0117 quality cache hit（job `2d477d8bbd7d`）：validation 阶段从 `38.86s` 降到 `16.78s`，约 2.3× 加速；EDT 调用计数从 6/label 降到 2/label |
+| 精度对照 | `test_surface_distances_matches_legacy_individual_functions` 覆盖 4 shape × 8 场景（spherical、shell、cube、sphere+ring 等），新函数与旧函数对照 1e-9 精度 |
+| EDT 计数 | `test_surface_distances_uses_fewer_distance_transforms_than_legacy` patch `scipy.ndimage.distance_transform_edt`，断言新路径恒为 2 次 |
+| wall-time 加速 | `test_compute_label_metrics_with_surface_distances_faster_than_legacy` 断言新路径比旧路径快 ≥30% |
+| 前端解析 | `tests/imagingLogic.test.ts` 新增全部 12 个新字段的 source-grep 约束和 `parseInferenceEvent()` complete 事件解析值测试 |
+| 报告中文 | HTML 报告 metric group 标题保持中文：区域重叠度 · Dice / IoU、像素准确率 · Pixel Accuracy、表面距离 · HD / HD95 / ASD；色阶文字说明保留 mm 单位 |
+| 自动验证 | `python tests/backendState.test.py`、`npm test`、`npm run build` 全过（`EXIT=0`） |
+
+行为边界：
+
+- 本轮不修改 nnUNetv2 模型推理、缓存复用、SSE 协议或影像量化逻辑；只新增表面距离计算函数、扩展 validation 字段、重写 HTML 报告 metric group。
+- 本轮不改变历史 AMOS `quality` profile `b3c528cc9e20`（mean Dice 0.924780）、FLARE22 自动 remap `a717dacf42d3`（mean Dice 0.926）、FLARE22 离线 remap `86b0153d0a73`（mean Dice 0.893127）三套基线数值；新指标在 AMOS quality 缓存命中（如 `2d477d8bbd7d` / `9fd0fdc39960` / `096e5b8349df`）上的具体数值为 mean Dice 0.891327、mean Pixel Accuracy 0.999855、mean HD 9.59281mm、mean HD95 3.596449mm、mean ASD 0.660724mm。
+- HD / HD95 / ASD 报告单位固定为 mm（按 NIfTI spacing 缩放），与 Pixel/Voxel Accuracy 的 0-1 比例独立；色阶阈值 1mm / 3mm 不与 Dice 阈值 0.85 / 0.70 混用。
+- 旧 `average_surface_distance` / `hausdorff_95` / `hausdorff_distance_full` 保留为 legacy 仅供回归测试对照，不应在 `compute_*_metrics` 路径再被调用；新调用方请使用 `surface_distances()`。

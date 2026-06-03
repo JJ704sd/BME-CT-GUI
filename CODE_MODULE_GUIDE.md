@@ -4,6 +4,12 @@
 
 ## 当前运行状态
 
+2026-06-03 已完成：
+- 质量评估指标扩展：quality 评估报告补齐到 6 类医学影像主流指标（Dice / IoU / Pixel Accuracy / HD / HD95 / ASD）。`src/report/exportReport.ts` 新增 3 个 metric group（区域重叠度 · Dice / IoU、像素准确率 · Pixel Accuracy、表面距离 · HD / HD95 / ASD，共 19 张卡片，HD/HD95/ASD 用 mm 单位 + 越低越好的色阶：≤1mm 绿、≤3mm 黄、>3mm 红）；逐标签表新增 4 列：像素准确率、ASD (mm)、HD95 (mm)、HD (mm)；逐标签表 chips 显示 NIfTI spacing 和 surface_distance_unit。
+- 表面距离计算加速：`server/main.py` 新增 `surface_distances()`，把单 label 的 `distance_transform_edt` 调用从 6 次合并到 2 次（预测→参考、参考→预测各一次），再用 value 数组派生 `asd` / `hd` / `hd95`。AMOS 0117 quality cache hit validation 实测 38.86s → 16.78s（约 2.3× 加速）。
+- 回归测试：`tests/backendState.test.py` 新增 3 个测试（1e-9 精度对照、EDT 调用计数恒为 2、wall-time 加速比 ≥30% 断言）；`tests/imagingLogic.test.ts` 新增全部新 metric 字段的 source-grep 约束和 `parseInferenceEvent()` complete 事件解析值测试。
+- 字段扩展：`src/inference/inferenceClient.ts` 的 `ValidationSummary` / `LabelMetric` 增补 12 个新字段（pixel_accuracy 4 项 + HD/HD95/ASD 9 项 + surface_distance_unit + spacing），并加入 `normalizeValidation()` 白名单；`parseInferenceEvent()` 在 complete 事件里透传这些字段。
+
 2026-06-02 已完成：
 - `detect_dataset()` 二轮收紧：参考覆盖 ckpt 标签 ≥ 0.85 时直接返回 `None`，避免 AMOS 1-13 真实数据被错判为 FLARE22。
 - 前端 `loadReferenceCase()` 新增 `mapDatasetToLabelTaxonomy()` 预设：AMOS 病例 → `AMOS22`、FLARE22 病例 → `FLARE22`、其他保持原值；`auto` 退化为保底。
@@ -178,14 +184,16 @@
 - `exportReport(data, format)`：根据格式分发到对应导出函数。
 - `exportHtmlReport(data, printMode)`：生成自包含 HTML 文件（内联 CSS，`@media print` 友好）或打开新窗口触发 `window.print()`。
 - `exportJsonReport(data)`：生成结构化 JSON，加 `schema_version: "1.1"`、`report_type` 和 `quantification` 字段。
-- HTML 报告包含：概览（模型、推理模式、耗时、结果大小）、验证指标（mean/min/foreground Dice、逐标签表）、影像量化分析（体积、最大横断面积、估算长度、最长径、体素数和管腔解释）、器官列表（颜色圆点 + 质控分数 + 解剖位置）、关键发现、测量点、推理时间线。
-- `ReportData` 类型聚合前端已有状态：病例、模型、图像、验证、量化、推理、器官、测量、时间线和 AI 发现。
+- HTML 报告包含：概览（模型、推理模式、耗时、结果大小）、验证指标（3 个 metric group：区域重叠度 · Dice / IoU；像素准确率 · Pixel Accuracy；表面距离 · HD / HD95 / ASD 共 19 张卡片）、逐标签表（含 Dice / IoU / 像素准确率 / ASD (mm) / HD95 (mm) / HD (mm) 6 列 + 体素数）、影像量化分析（体积、最大横断面积、估算长度、最长径、体素数和管腔解释）、器官列表（颜色圆点 + 质控分数 + 解剖位置）、关键发现、测量点、推理时间线。距离指标用 mm 单位、≤1mm 绿 / ≤3mm 黄 / >3mm 红的色阶。
+- `ReportData` 类型聚合前端已有状态：病例、模型、图像、验证、量化、推理、器官、测量、时间线和 AI 发现。`ValidationSummary` 字段包含 Dice / IoU / Pixel Accuracy / HD / HD95 / ASD 共 6 类指标聚合值与 `surface_distance_unit` / `spacing` 元信息。
 
 讲解重点：
 
 - PDF 导出不引入第三方库，复用同一 HTML 模板 + 浏览器原生打印。
 - 报告不嵌入 CT 切片截图，避免文件体积膨胀和跨浏览器渲染问题。
 - `downloadFile()` 使用 `Blob` + `URL.createObjectURL` 实现浏览器端文件下载。
+- 距离指标卡片使用独立的色阶（≤1mm 绿 / ≤3mm 黄 / >3mm 红），与 Dice / IoU 的 0.85 / 0.70 阈值互不影响；card-bar / metric-bar 的 kind 参数支持 `dice` / `iou` / `pix` / `dist` / `vox`。
+- 逐标签表的 6 个 metric 列共用 `metricBarHtml(value, kind)` 渲染器，根据 kind 决定色阶和单位；ASD / HD95 / HD 显示 mm，像素准确率显示 4 位小数。
 
 ## 9. 后端桥接：`server/main.py`
 
@@ -199,7 +207,7 @@
 - 准备 runtime model，把项目 checkpoint 接入 nnUNetv2 modelfolder 推理。
 - 根据 `inference_profile` 生成 effective options，例如 `quality` / `fast`、TTA、tile step、device。
 - 按当前模型 `dataset.json.file_ending` 规范化上传输入；当前权重要求 `.nii.gz`，因此 `.nii` 原图会被 gzip 成 nnUNetv2 可识别的 `_0000.nii.gz`。
-- 对有 compatible label 的病例执行自动 validation；用户上传 `label_file` 时，validation 使用本次请求的标签文件。
+- 对有 compatible label 的病例执行自动 validation；用户上传 `label_file` 时，validation 使用本次请求的标签文件。validation 计算 6 类医学影像主流指标（Dice / IoU / Pixel Accuracy / HD / HD95 / ASD），单 label 表面距离走 `surface_distances()` 合并函数（1 crop + 2 EDT），并把 NIfTI spacing 和 `surface_distance_unit="mm"` 写入 `validation_summary.json`。
 - 对相同输入、相同 checkpoint、相同 options 的任务返回 `cached-real-nnunetv2`，但只复用预测 NIfTI；缓存命中后的 validation 按当前请求重新计算或为空，不继承缓存来源 job 的旧指标。
 - 取消运行中任务时，`request_job_cancel()` 会标记 `cancel_requested` 并终止当前子进程；前端通过”取消推理”调用 `/api/segment/jobs/{job_id}/cancel`。
 - 长时间推理期间会定期发送心跳事件：`push_heartbeat()` 每 10 秒通过 SSE 推送当前进度、已耗时和资源快照，避免前端在推理主阶段（如 `20%`）停留时显示停滞。常驻 worker 路径使用 `_read_worker_event_with_heartbeat()` 通过 `queue.Queue` 超时实现非阻塞心跳。
@@ -254,14 +262,14 @@
 
 相关文件：
 
-- `tools/segmentation_metrics_summary.py`：离线计算 Dice、IoU、Pixel/Voxel Accuracy、Hausdorff Distance，并生成 JSON/Markdown。
+- `tools/segmentation_metrics_summary.py`：离线计算 Dice、IoU、Pixel/Voxel Accuracy、Hausdorff Distance、HD95、ASD 共 6 类医学影像主流指标，并生成 JSON/Markdown。表面距离计算复用 `server/main.py` 的 `surface_distances()` 合并函数（1 crop + 2 EDT/label），保证离线口径与后端在线 validation 完全一致。
 - `tools/perf_no_cache_persistent.py`：执行无缓存推理性能对照，记录 job、资源和输出。
 - `tools/seed_demo_cache.py`：本地缓存演示预热脚本。稳定计算 `input_sha256` 和 `checkpoint_sha256`，调用 `build_cache_key()` 7 字段组合（`input_sha256` / `checkpoint_sha256` / `checkpoint_dataset_name` / `checkpoint_configuration` / `labels_source` / `runtime_target` / `inference_options`），把 `009d4efdc5f6` 的历史预测重新写成 `job_summary.json` 以让 AMOS cache hit 命中；FLARE 端不预热，扫描现有真实推理 job 目录判断 cache 状态。幂等可重跑。
 - `tools/rewrite_flare22_historical_summary.py`：cache 链路补丁工具。当 cache_source 的新预测与历史 remap 指标字节不一致（cache_key 也不一致）时，按离线 remap 后的 metrics 把 `validation_summary.json` 写入 cache_source 的 output，加 `historical: true` 和 `source_job_id` 标记。这样 `complete_cached_job()` 在 cache hit 时能回退到历史 validation 摘要，前端显示"（历史离线缓存摘要）"和真实指标（0.893127/0.67373/0.949908）。
 
 讲解重点：
 
-- 指标脚本可以用于 AMOS 原生 label，也可以用于 FLARE22 remapped reference，但文档必须明确区分解释边界。
+- 指标脚本可以用于 AMOS 原生 label，也可以用于 FLARE22 remapped reference，但文档必须明确区分解释边界。HD/HD95/ASD 报告单位为 mm（按 NIfTI spacing 缩放），Pixel/Voxel Accuracy 报告为 0-1 之间的小数。
 - 对外报告时，应优先引用 `SEGMENTATION_METRICS_SUMMARY.md` 中已经整理过的指标，而不是直接引用临时输出。
 - `tools/seed_demo_cache.py` 不启动 nnUNetv2 子进程，不产生新推理；它只是把现有真实推理结果接入 `find_cached_prediction()` 缓存查找，因此可以安全地在演示前预热。
 - `tools/rewrite_flare22_historical_summary.py` 不重跑推理，不修改预测 NIfTI；它只改写 cache_source 的 `validation_summary.json`，配合 `complete_cached_job()` 的 historical 回退，让 cache hit 显示历史 validation 摘要而不是 null。
