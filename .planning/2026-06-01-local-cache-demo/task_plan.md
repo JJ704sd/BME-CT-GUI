@@ -91,7 +91,7 @@
 **关键步骤：**
 
 1. 测试 `_resolve_project_root()` 在 cwd 不同时的解析行为，确认必须落在 `segmentation-gui-prototype/`。
-2. 测试 `compute_cache_key()` 的 7 字段仍是 `input_sha + model_dataset + profile + label_taxonomy + runtime_target + postprocess + device`。
+2. 测试 `compute_cache_key()` 的 7 字段仍是 `input_sha256 + checkpoint_sha256 + checkpoint_dataset_name + checkpoint_configuration + labels_source + runtime_target + inference_options`（与 `server/main.py:1880 build_prediction_cache_key()` 实际实现保持一致）。
 3. 测试 `examples/reference_cases.json` 解析后能产出 4 个 case；`SEGMENTATION_REFERENCE_CASES_JSON` 缺省时只暴露 `amos_0117`。
 4. 测试 `tools/seed_demo_cache.py` 和 `tools/rewrite_flare22_historical_summary.py` 在重复运行下保持幂等。
 5. 测试 `find_cached_prediction()` 候选排序在多个 cache_source 下优先选有 `validation_summary.json` 的。

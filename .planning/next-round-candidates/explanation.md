@@ -11,6 +11,8 @@
 1. **本地缓存演示 7 步**：AMOS 0117 cache hit（`aea4e7cdbaf0`）、FLARE22 Tr 0009 真实推理（`0aa7323a4c01`，218s）、FLARE22 cache hit（`02da885c97d8`，0.001s）。
 2. **cache 链路补丁**：`_load_cached_validation_summary()` + `complete_cached_job()` 增加 historical 回退；`find_cached_prediction()` 候选排序改为 `(has_validation_summary, mtime)` 降序；`tools/rewrite_flare22_historical_summary.py` 按 2026-05-26 remap 后 metrics 改写 0aa7323a4c01 的 `validation_summary.json`；前端 `getValidationStatusCopy()` 增加 cachedResult 参数；`tests/backendState.test.py` 新增 2 个回归测试。
 3. **env var 强制**：`SEGMENTATION_REFERENCE_CASES_JSON` 必须指向 `examples/reference_cases.json`（或 `nnunetv2_files/reference_cases.local.json`）才能让 `/api/samples` 暴露 4 个 reference case；runbook 已把这一项写在最前面。
+4. **2026-06-02 detect_dataset 二轮收紧 + dataset_hint 字段**：0.85 coverage 守卫让 AMOS 真实 1-13 标签不再被误判为 FLARE22；`Job.dataset_hint` + 前端 `referenceCaseDatasetHint` 状态机让 `taxonomy=auto + dataset_hint=FLARE22` 仍能强制 remap，覆盖 0.85 守卫的 None。
+5. **2026-06-03 质量评估指标扩展 + surface_distances 2 EDT**：`ValidationSummary` 增补 12 字段（Pixel Accuracy 4 项 + HD/HD95/ASD 9 项 + `surface_distance_unit` + `spacing`）；`server/main.py surface_distances()` 把单 label EDT 调用从 6 次合并到 2 次（AMOS 0117 quality cache hit validation 38.86s → 16.78s，约 2.3× 加速）；`src/report/exportReport.ts` 3 个 metric group（19 张卡片）+ 逐标签 4 列新指标。6-03 baseline 数值：mean Pixel Accuracy 0.999855、mean HD 9.59281mm、mean HD95 3.596449mm、mean ASD 0.660724mm。
 
 ### 待完成
 

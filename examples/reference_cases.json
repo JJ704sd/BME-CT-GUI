@@ -1,0 +1,52 @@
+{
+  "samples": [
+    {
+      "id": "amos_0117",
+      "name": "AMOS 0117",
+      "dataset": "AMOS22",
+      "modality": "CT",
+      "role": "built-in-reference",
+      "description": "AMOS 22 训练域内置参考病例，带标准答案，用于演示、回归和 Dice 验证。前端 loadReferenceCase() 会按 dataset=AMOS22 自动设置 label_taxonomy=AMOS22。",
+      "original": "nnunetv2_files/amos_0117(3).nii.gz",
+      "label": "nnunetv2_files/amos_0117(2).nii.gz",
+      "original_filename": "amos_0117_original.nii.gz",
+      "label_filename": "amos_0117_label.nii.gz"
+    },
+    {
+      "id": "flare22_tr_0009",
+      "name": "FLARE22 Tr 0009",
+      "dataset": "FLARE22",
+      "modality": "CT",
+      "role": "external-reference",
+      "description": "FLARE22 外部参考病例（1-13 标签）。前端按 dataset=FLARE22 自动设置 label_taxonomy=FLARE22；提交时 dataset_hint=FLARE22 覆盖 detect_dataset() 的 0.85 守卫 None，使 auto 模式下仍能走 remap。",
+      "original": "nnunetv2_files/FLARE22_Tr_0009_0000.nii.gz",
+      "label": "nnunetv2_files/FLARE22_Tr_0009.nii.gz",
+      "original_filename": "FLARE22_Tr_0009_0000.nii.gz",
+      "label_filename": "FLARE22_Tr_0009.nii.gz"
+    },
+    {
+      "id": "word_case",
+      "name": "WORD Case",
+      "dataset": "WORD",
+      "modality": "CT",
+      "role": "external-reference",
+      "description": "WORD 数据集占位参考病例。需在 nnunetv2_files/external_cases/word_case.nii.gz 放入真实原始 CT、word_case_label.nii.gz 放入标签；未提供文件时由 /api/samples 标 validation_available=false。taxonomy 由用户在 UI 手动选择。",
+      "original": "external_cases/word_case.nii.gz",
+      "label": "external_cases/word_case_label.nii.gz",
+      "original_filename": "word_case.nii.gz",
+      "label_filename": "word_case_label.nii.gz"
+    },
+    {
+      "id": "abdomenct1k_case",
+      "name": "AbdomenCT-1K Case",
+      "dataset": "AbdomenCT-1K",
+      "modality": "CT",
+      "role": "external-reference",
+      "description": "AbdomenCT-1K 数据集占位参考病例。需在 nnunetv2_files/external_cases/abdomenct1k_case.nii.gz 放入真实原始 CT、abdomenct1k_case_label.nii.gz 放入标签；未提供文件时由 /api/samples 标 validation_available=false。taxonomy 由用户在 UI 手动选择。",
+      "original": "external_cases/abdomenct1k_case.nii.gz",
+      "label": "external_cases/abdomenct1k_case_label.nii.gz",
+      "original_filename": "abdomenct1k_case.nii.gz",
+      "label_filename": "abdomenct1k_case_label.nii.gz"
+    }
+  ]
+}

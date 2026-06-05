@@ -2,7 +2,7 @@
 
 ## 发现日期
 
-2026-06-01
+2026-06-03（吸纳 6-02 detect_dataset 收紧 + dataset_hint + 6-03 6 类指标扩展 + surface_distances 2 EDT）
 
 ## 关键发现
 

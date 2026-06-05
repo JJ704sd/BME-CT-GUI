@@ -28,6 +28,27 @@
 
 ### label-taxonomy-server-validation [部分完成]
 
+### 2026-06-02 detect_dataset 二轮收紧 + dataset_hint 字段 [完成]
+
+- [x] `detect_dataset()` 0.85 coverage 守卫（`taxonomy=auto` 时 AMOS 真实 1-13 标签不再被误判为 FLARE22）
+- [x] 前端 `loadReferenceCase()` 按 `referenceCase.dataset` 自动设置 `label_taxonomy`（AMOS → AMOS22、FLARE22 → FLARE22、其他保持原值）
+- [x] `Job.dataset_hint` + 前端 `referenceCaseDatasetHint` 状态机（上传自定义 NIfTI 时自动清空）
+- [x] `tests/backendState.test.py` 新增 AMOS 1-13 / FLARE22 1-13 / Partial {1,3} 真实 case 测试 + `test_validate_against_custom_label_uses_dataset_hint_when_taxonomy_is_auto`
+- [x] `npm test` / `python tests/backendState.test.py` / `npm run build` 全过
+
+### 2026-06-03 质量评估指标扩展 + surface_distances 2 EDT [完成]
+
+- [x] `ValidationSummary` 增补 12 字段（Pixel Accuracy 4 项 + HD/HD95/ASD 9 项 + `surface_distance_unit` + `spacing`）
+- [x] `LabelMetric` 增补 4 列（`pixel_accuracy` / `asd` / `hd` / `hd95`）
+- [x] `server/main.py surface_distances()` 把单 label EDT 调用从 6 次合并到 2 次；旧 `average_surface_distance` / `hausdorff_95` / `hausdorff_distance_full` 保留为 legacy
+- [x] `src/report/exportReport.ts` 新增 3 个 metric group（区域重叠度 · Dice / IoU、像素准确率 · Pixel Accuracy、表面距离 · HD / HD95 / ASD，共 19 张卡片）
+- [x] AMOS 0117 quality cache hit validation 实测 38.86s → 16.78s（约 2.3× 加速）
+- [x] 3 个新增回归测试（1e-9 精度、EDT 计数恒为 2、wall-time 加速比 ≥30%）
+- [x] 6-03 6 类指标基线数值：mean Pixel Accuracy 0.999855、mean HD 9.59281mm、mean HD95 3.596449mm、mean ASD 0.660724mm
+- [x] `npm test` / `python tests/backendState.test.py` / `npm run build` 全过
+
+### label-taxonomy-server-validation [部分完成]
+
 - [x] taxonomy 误判确认
 - [x] 显式 label taxonomy hint 实现
 - [x] 测试与验证（job `d56bcff76a8b`）

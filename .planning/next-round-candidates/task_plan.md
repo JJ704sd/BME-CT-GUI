@@ -11,6 +11,21 @@
 - 9 份核心文档同步
 - `.planning/2026-06-01-local-cache-demo/` 4 份 planning 文档落地
 
+**本轮已完成（2026-06-02）：**
+
+- `detect_dataset()` 0.85 coverage 守卫（`taxonomy=auto` 时 AMOS 真实 1-13 标签不再被误判为 FLARE22）
+- 前端 `loadReferenceCase()` 按 `referenceCase.dataset` 自动设置 `label_taxonomy`
+- `Job.dataset_hint` + 前端 `referenceCaseDatasetHint` 状态机（`taxonomy=auto + dataset_hint=FLARE22` 强制 remap）
+
+**本轮已完成（2026-06-03）：**
+
+- 6 类医学影像指标扩展（Dice / IoU / Pixel Accuracy / HD / HD95 / ASD），`ValidationSummary` 增补 12 字段
+- `server/main.py surface_distances()` 把单 label EDT 调用从 6 次合并到 2 次（AMOS 0117 quality cache hit validation 38.86s → 16.78s，约 2.3× 加速）
+- `src/report/exportReport.ts` 3 个 metric group（19 张卡片）+ 逐标签 4 列新指标
+- 3 个新增回归测试（1e-9 精度、EDT 计数恒为 2、wall-time 加速比 ≥30%）
+- 6-03 baseline 数值：mean Pixel Accuracy 0.999855、mean HD 9.59281mm、mean HD95 3.596449mm、mean ASD 0.660724mm
+- 10 份核心文档同步到 6-03 现状 + 新建 `examples/reference_cases.json`（4 例模板）
+
 ---
 
 ## 推荐下一轮任务
@@ -122,7 +137,7 @@
 **关键步骤：**
 
 1. 测试 `_resolve_project_root()` 在 cwd 不同时的解析行为，确认必须落在 `segmentation-gui-prototype/`。
-2. 测试 `compute_cache_key()` 的 7 字段仍是 `input_sha + model_dataset + profile + label_taxonomy + runtime_target + postprocess + device`。
+2. 测试 `compute_cache_key()` 的 7 字段仍是 `input_sha256 + checkpoint_sha256 + checkpoint_dataset_name + checkpoint_configuration + labels_source + runtime_target + inference_options`（与 `server/main.py:1880 build_prediction_cache_key()` 实际实现保持一致）。
 3. 测试 `examples/reference_cases.json` 解析后能产出 4 个 case；`SEGMENTATION_REFERENCE_CASES_JSON` 缺省时只暴露 `amos_0117`。
 4. 测试 `tools/seed_demo_cache.py` 和 `tools/rewrite_flare22_historical_summary.py` 在重复运行下保持幂等。
 5. 测试 `find_cached_prediction()` 候选排序在多个 cache_source 下优先选有 `validation_summary.json` 的。

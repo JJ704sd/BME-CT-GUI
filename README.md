@@ -357,3 +357,5 @@ python tools/perf_no_cache_persistent.py --inference-profile fast --disable-tta 
 - FLARE22 部分标签自动 remap 需要至少两个明确错位 label；单 label 文件暂不自动推断数据集来源。
 - 浏览器本身不能启动 Python/FastAPI 后端进程；在线推理前需要本地后端已在 `127.0.0.1:8000` 运行。
 - 当前已有 AMOS 0117 原生标签验收和 FLARE22 Tr 0009 非 AMOS 推理补充（含标签上传在线验证和自动 taxonomy remap）；新增病例后仍应分别记录三正交显示、label 点击、推理耗时、资源快照和标准答案状态。
+- AMOS cache demo Phase A 命中 `009d4efdc5f6` 是 2026-05-23 历史 review 状态预测（stomach Dice 0.556、mean_dice 0.891），不能作为新一轮 AMOS 质量基线；`SEGMENTATION_REFERENCE_CASES_JSON` 必须指向 `examples/reference_cases.json`（4 例模板），否则 `/api/samples` 退回只含 `amos_0117` 的 1 例状态。
+- FLARE22 cache hit `02da885c97d8` 的 validation 摘要来自历史离线 remap（`86b0153d0a73` mean_dice=0.893127 / min_dice=0.67373 / fg=0.949908），不是本次请求重新推理；新计算仍未复跑时用 historical 回退。

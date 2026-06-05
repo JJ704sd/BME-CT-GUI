@@ -11,7 +11,7 @@
 
 ```bash
 cd D:\BME2026\BME_CT_Seg\segmentation-gui-prototype
-SEGMENTATION_REFERENCE_CASES_JSON="D:/BME2026/BME_CT_Seg/segmentation-gui-prototype/nnunetv2_files/reference_cases.local.json" \
+SEGMENTATION_REFERENCE_CASES_JSON="D:/BME2026/BME_CT_Seg/segmentation-gui-prototype/examples/reference_cases.json" \
   "D:/BME2026/BME_CT_Seg/nnunet_env/Scripts/python.exe" -m uvicorn server.main:app --host 127.0.0.1 --port 8000
 ```
 
@@ -42,7 +42,7 @@ curl http://127.0.0.1:8000/api/samples
 | AMOS 标签 | `D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\amos_0117(2).nii.gz` |
 | FLARE 原图 | `D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\FLARE22_Tr_0009_0000.nii.gz` |
 | AMOS checkpoint | `D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\checkpoint_best.pth` (1.1GB) |
-| 4 例 live reference config | `D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\reference_cases.local.json` |
+| 4 例 reference config（提交进 git） | `D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\examples\reference_cases.json` |
 | runtime model | `D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\server\work\runtime_model\nnUNetTrainer__nnUNetPlans__2d\` |
 | 预热 AMOS 缓存（手动 seed） | `D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\server\work\009d4efdc5f6\` |
 | 本次 FLARE 真实推理结果 | `D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\server\work\0aa7323a4c01\` |
@@ -94,7 +94,7 @@ cat "D:/BME2026/BME_CT_Seg/segmentation-gui-prototype/server/work/<job_id>/outpu
 - **uvicorn 用 `-m` 启动时不自动把 cwd 加进 sys.path**，必须从子目录启动或在 `server/` 父目录（=project root）启动；本次 spec 写错了"必须从父目录"，已实测修正。
 - **预热缓存必须有 `job_summary.json`**。`server/work/009d4efdc5f6/output/` 原本只有 `dataset.json` / `plans.json` / `predict_from_raw_data_args.json` / `validation_summary.json` / `009d4efdc5f6.nii.gz`，**没有** `job_summary.json` —— `find_cached_prediction()` 扫不到。手工 `tools/seed_amos_cache.py` 写入了 `job_summary.json` 后缓存才被识别。
 - **真实推理进度在 SSE 上长期停在 20%**，但 `phase_timings.nnunet_process` 会持续增长；218s 后才一次性到 100%。这是 nnUNetv2 单调进度表达，不是 hang。期间可用 `nvidia-smi` 确认 GPU 是否在用。
-- **`/api/samples` 默认走回退配置**（`default_reference_case_specs()`），只暴露 1 例 AMOS。要看全部 4 例必须设置 `SEGMENTATION_REFERENCE_CASES_JSON` 指向 `nnunetv2_files/reference_cases.local.json`。
+- **`/api/samples` 默认走回退配置**（`default_reference_case_specs()`），只暴露 1 例 AMOS。要看全部 4 例必须设置 `SEGMENTATION_REFERENCE_CASES_JSON` 指向 `examples/reference_cases.json`（4 例模板：AMOS 0117 / FLARE22 Tr 0009 / WORD 占位 / AbdomenCT-1K 占位）。
 - **取消真实推理 job** 走 `POST /api/segment/jobs/{id}/cancel`，但取消信号需要 nnUNetv2 子进程轮询才会落状态；如果 GPU 已经在跑，下一个 cancel 信号要等下一次心跳。直接重启后端最快。
 - **FLARE 推理 218 秒**比 5–20 分钟估计快很多，因为 FLARE22 Tr 0009 体积（512×512×87）较小且 2D 模型 patch 轻。
 - **AMOS 预热预测的 quality 表现**（stomach 0.556、mean_dice 0.891）明显低于 README/AGENTS.md 写的"0.925"。原因可能是 5 月 23 日的预测用的是 fast/早期权重；本次未重训，复现的指标就是这个版本。**复跑 AMOS 真实推理会得到更新更准的预测**。

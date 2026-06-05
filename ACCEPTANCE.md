@@ -4,6 +4,13 @@
 
 ## 当前运行状态
 
+2026-06-03 已完成：
+- 质量评估指标扩展：把 quality 评估报告补齐到 6 类医学影像主流指标（Dice / IoU / Pixel Accuracy / HD / HD95 / ASD），3 个 metric group（区域重叠度 · Dice / IoU、像素准确率 · Pixel Accuracy、表面距离 · HD / HD95 / ASD，共 19 张卡片，HD/HD95/ASD 卡片用 mm 单位 + 越低越好的色阶 ≤1mm 绿、≤3mm 黄、>3mm 红）。逐标签表新增 4 列（像素准确率、ASD (mm)、HD95 (mm)、HD (mm)），额外显示 NIfTI spacing 和 `surface_distance_unit` 标签。`src/inference/inferenceClient.ts` 的 `ValidationSummary` / `LabelMetric` 增补 12 个新字段并加入 `normalizeValidation()` 白名单。
+- 表面距离计算加速：`server/main.py` 新增 `surface_distances()`（1 crop + 2 EDT/label），把单 label 的 `distance_transform_edt` 调用从 6 次合并到 2 次；AMOS 0117 quality 缓存命中实测 validation 阶段从 38.86s 降到 16.78s（约 2.3× 加速）。
+- 回归测试：`tests/backendState.test.py` 新增 3 条（1e-9 精度对照、EDT 计数恒为 2、wall-time 加速比 ≥30%）；`tests/imagingLogic.test.ts` 新增 12 个新 metric 字段的 source-grep 约束。
+- dataset_hint 字段验收：`Job.dataset_hint` 在 `taxonomy=auto + dataset_hint=FLARE22` 时强制 remap，覆盖 0.85 守卫的 None；上传自定义 NIfTI 时前端 `referenceCaseDatasetHint` 自动清空。
+- cache 链路补丁验收：`_load_cached_validation_summary()` + `complete_cached_job()` historical 回退让 FLARE22 cache hit `02da885c97d8` 正确显示 `0.893127/0.67373/0.949908` 并标注"（历史离线缓存摘要）"；`find_cached_prediction()` 候选排序改为 `(has_validation_summary, mtime)` 降序。
+
 2026-06-01 已完成：
 - 本地缓存演示 7 步：AMOS 0117 cache hit（job `aea4e7cdbaf0`，命中 2026-05-23 历史推理 `009d4efdc5f6`）、FLARE22 Tr 0009 真实推理（job `0aa7323a4c01`，218s）、FLARE22 cache hit（job `02da885c97d8`，0.001s）
 - `tools/seed_demo_cache.py`：幂等可重跑的预热脚本，7 字段 cache_key 计算后写 `job_summary.json`
@@ -617,7 +624,7 @@ D:\BME2026\BME_CT_Seg\segmentation-gui-prototype\nnunetv2_files\checkpoint_best.
 
 - 本轮 cache demo 是工程链路演示，不替代 AMOS / FLARE22 正式质量基线：AMOS cache hit 命中的 `009d4efdc5f6` 来自 2026-05-23 历史，标签状态仍为 review（stomach 0.556），不能直接拿来当正式 AMOS 基线；本地 quality AMOS 真实推理 `b3c528cc9e20`（mean_dice 0.924780）和 fast preview `ad3d14eba3de`（mean_dice 0.77724）仍是不同口径。
 - FLARE22 真实推理 `0aa7323a4c01` 是单机 RTX 4060 Laptop 本地 fold0 路径，远低于 2026-05-28 `a717dacf42d3` 在线 mean_dice 0.926 的服务器配置，结果仅作 cache demo Phase B 链路证据，不写入跨数据集质量基线。
-- Cache key 仍按 `input_sha + model_dataset + profile + label_taxonomy + runtime_target + postprocess + device` 7 字段唯一索引；任意字段变化都视为不同 cache，不存在隐式 fallback。
+- Cache key 仍按 `input_sha256 + checkpoint_sha256 + checkpoint_dataset_name + checkpoint_configuration + labels_source + runtime_target + inference_options` 7 字段唯一索引（与 `server/main.py:1880 build_prediction_cache_key()` 实际实现保持一致）；任意字段变化都视为不同 cache，不存在隐式 fallback。`label_taxonomy` / `dataset_hint` 不在 cache_key 中——它们只影响 validation 阶段的标签解释。
 - 预热脚本 `tools/seed_demo_cache.py` 不复用旧 validation，命中后若当前请求带 `label_file` 仍重新 validation；演示中 AMOS cache hit 没有上传标签，所以走的是历史 validation 摘要，前端会标注 review 状态。
 
 ## 2026-06-01 cache 链路补丁验收记录

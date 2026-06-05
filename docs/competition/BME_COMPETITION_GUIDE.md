@@ -3,7 +3,7 @@
 > 适用项目：`segmentation-gui-prototype`（腹部 CT 多器官自动分割 + 浏览器端交互验证系统）
 > 适用赛道：「呼吸-消化系统疾病」赛道 — 智能影像分析与评价（影像分析算法类）
 > 报告硬约束：前言 + 问题引入 ≤ 2 页，方案设计 + 结果展示 + 讨论 ≤ 8 页，整体 ≤ 12 页
-> 最近更新：2026-06-02（同步本地缓存演示 7 步 + 2026-06-01 cache 链路补丁 + auto taxonomy 边界加固）
+> 最近更新：2026-06-03（同步 6 类医学影像指标扩展 + `surface_distances()` 2 EDT 优化 + cache 链路补丁 + auto taxonomy 边界加固 + dataset_hint 字段 + 6-03 baseline 数值）
 
 ---
 
@@ -14,7 +14,7 @@
 **契合命题**：覆盖任务 1（影像智能分割）+ 任务 2（影像量化分析），建议以"腹部多器官自动分割 + 训练过程 + 部署验证"作为整体方案申报。
 
 **工程亮点**（可放进前言"本文工作"或方案结尾的部署小节）：
-- **预测结果缓存（7 字段 cache_key）**：相同 `input_sha + model_dataset + profile + label_taxonomy + runtime_target + postprocess + device` 直接命中 `server/work/<job_id>/prediction.nii.gz`，**避免重复推理**，对评审现场"反复演示同一例"场景尤其友好。
+- **预测结果缓存（7 字段 cache_key）**：相同 `input_sha256 + checkpoint_sha256 + checkpoint_dataset_name + checkpoint_configuration + labels_source + runtime_target + inference_options` 直接命中 `server/work/<job_id>/prediction.nii.gz`，**避免重复推理**，对评审现场"反复演示同一例"场景尤其友好。**`label_taxonomy` / `dataset_hint` 不在 cache_key 中**——它们只影响 validation 阶段的标签解释，不影响 NIfTI 预测结果；同一 CT 切换 taxonomy 仍会命中同一 cache slot，只是重算 validation。
 - **cache hit 显示历史 validation 摘要**（2026-06-01 cache 链路补丁）：FLARE22 Tr 0009 cache hit 命中 `02da885c97d8` 时，前端正确显示 `mean_dice=0.893127 / min_dice=0.67373 / fg=0.949908` 并标注"（历史离线缓存摘要）"，避免张冠李戴。
 - **`/api/samples` 参考病例列表**：通过 `SEGMENTATION_REFERENCE_CASES_JSON` env var 注入，演示现场只需一次 setenv 即可暴露 4 个 case（AMOS 0117、FLARE22 Tr 0009 等）。
 
@@ -103,7 +103,7 @@
 - **方法**：在 `server/taxonomy.py` 维护 FLARE22 标签表、器官别名映射（`postcava → ivc`、`gall_bladder → gallbladder` 等）；后端根据 label ID 集合自动检测数据集来源，按器官名把参考标签重映射到 checkpoint 标签空间。
 - **显式 hint**：前端提供 `label_taxonomy = auto | AMOS22 | FLARE22` 选项；`auto` 模式保守，**仅在多个明确错位 ID 时才触发 remap**，避免 AMOS 原生标签被误判（2026-06-02 进一步加固 coverage 守卫 + `dataset_hint` 字段，应对 AMOS / FLARE 真实 unique IDs 不可分场景）。
 - **结果**：FLARE22 Tr 0009 在线验证 `mean_dice` 从 `0.073` 提升到 `0.926`，`foreground_dice = 0.95`。
-- **cache 链路配套**（2026-06-01 补丁）：FLARE22 cache hit 在前端直接显示历史离线指标，避免重新推理再次触发"语义错位"误判；cache_key 7 字段（`input_sha + model_dataset + profile + label_taxonomy + runtime_target + postprocess + device`）保证 `label_taxonomy` 不同的请求不会共用 cache。
+- **cache 链路配套**（2026-06-01 补丁）：FLARE22 cache hit 在前端直接显示历史离线指标，避免重新推理再次触发"语义错位"误判；cache_key 7 字段（`input_sha256 + checkpoint_sha256 + checkpoint_dataset_name + checkpoint_configuration + labels_source + runtime_target + inference_options`）保证预测缓存与 validation 缓存独立。
 
 **配图建议**：
 - **图 6 Taxonomy remap 流程**：左 FLARE22 label ID 表 → 中"按器官名重排"算法 → 右 AMOS22 label ID 表 + 重映射后 Dice 提升数据。
@@ -138,15 +138,15 @@
 
 #### 3.1 训练过程与逐器官指标（约 0.7 页 + 1–2 张表/图）
 
-**写作要点**：训练侧给出 4 个核心指标（**mean Dice、foreground Dice、min Dice、Hausdorff**），用表格呈现。
+**写作要点**：训练侧给出 6 类医学影像主流指标（**mean Dice、foreground Dice、min Dice、Pixel Accuracy、HD、HD95、ASD**），用表格呈现（2026-06-03 起）。
 
-| 病例 / 配置 | mean Dice | foreground Dice | min Dice | mean HD (mm) | 备注 |
-|---|---:|---:|---:|---:|---|
-| **新权重首跑**（AMOS 0117, fold0, quality） | **0.9248** | **0.9803** | 0.8466 | 7.72 | 原生 AMOS 验证 |
-| **正式质量**（AMOS 0117, quality + TTA） | 0.9248 | 0.9803 | 0.8466 | 7.72 | 推荐基线 |
-| **快速预览**（fast / TTA off） | 0.7772 | 0.9729 | 0.0000* | 10.28 | *label 14/15 假阳性 |
-| **跨数据集 FLARE22**（remap 后） | 0.926 | 0.950 | 0.674 | 12.60 | FLARE22 标签按器官名 remap |
-| **服务器 5-fold / FLARE22** | 0.891 | 0.951 | 0.657 | — | 校园网 smoke，约 3 分 48 秒 |
+| 病例 / 配置 | mean Dice | fg Dice | min Dice | Pixel Acc | mean HD (mm) | mean HD95 (mm) | mean ASD (mm) | 备注 |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| **新权重首跑**（AMOS 0117, fold0, quality） | **0.9248** | **0.9803** | 0.8466 | 0.9999 | 7.72 | 3.60 | 0.66 | 原生 AMOS 验证 |
+| **正式质量**（AMOS 0117, quality + TTA） | 0.9248 | 0.9803 | 0.8466 | 0.9999 | 7.72 | 3.60 | 0.66 | 推荐基线 |
+| **快速预览**（fast / TTA off） | 0.7772 | 0.9729 | 0.0000* | — | 10.28 | — | — | *label 14/15 假阳性 |
+| **跨数据集 FLARE22**（remap 后） | 0.926 | 0.950 | 0.674 | — | 12.60 | — | — | FLARE22 标签按器官名 remap |
+| **服务器 5-fold / FLARE22** | 0.891 | 0.951 | 0.657 | — | — | — | — | 校园网 smoke，约 3 分 48 秒 |
 
 **配图建议**：
 - **表 1 推理指标表**（上表）。

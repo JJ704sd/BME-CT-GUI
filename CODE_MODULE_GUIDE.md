@@ -157,6 +157,7 @@
 - `runtime_target` 会进入 job state、SSE complete event 和缓存 key，避免本地 fold0、服务器 5-fold ensemble、fast/quality 混用缓存。
 - `label_taxonomy=auto|AMOS22|FLARE22` 已实现并纳入缓存 key；`detect_dataset()` 在参考覆盖 ckpt 标签 ≥ 0.85 时返回 `None`；前端 `loadReferenceCase()` 按 `referenceCase.dataset` 自动设置 `label_taxonomy`，并通过 `dataset_hint` 字段把 dataset 上下文传给后端，覆盖 `auto` 边界下 0.85 守卫的 None。上传自定义 NIfTI 时 `dataset_hint` 自动清空避免错误继承。
 - 失败事件中的 `log_tail` 会被前端保留到结构化 timeline，便于从底部状态追溯后端错误摘要。
+- `ValidationSummary` 字段白名单（`normalizeValidation()` 透传，2026-06-03 补齐到 6 类指标）：Dice 类（`mean_dice` / `min_dice` / `foreground_dice`）、IoU 类（`mean_iou` / `min_iou` / `foreground_iou`）、Pixel Accuracy 类（`pixel_accuracy` / `mean_pixel_accuracy` / `min_pixel_accuracy` / `foreground_pixel_accuracy`）、HD 类（`mean_hd` / `max_hd` / `foreground_hd`）、HD95 类（`mean_hd95` / `max_hd95` / `foreground_hd95`）、ASD 类（`mean_asd` / `max_asd` / `foreground_asd`）+ 元信息 `surface_distance_unit="mm"` / `spacing=[sx, sy, sz]`。逐标签 `LabelMetric` 增补 `pixel_accuracy` / `asd` / `hd` / `hd95` 4 列。新增指标必须同时改后端（计算 + serialize）、本文件（白名单 + 类型）、`exportReport.ts`（HTML 模板）三处。
 
 ## 7. 器官与病例数据
 

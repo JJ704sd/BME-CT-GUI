@@ -113,11 +113,11 @@
 
 | 目标 | 当前状态 | 结论 |
 |---|---|---|
-| 真实 nnUNetv2 在线推理 | 本地 AMOS/FLARE 与服务器 5-fold smoke 已跑通；高分辨率 CT fast 推理完成 | 基本完成，仍需更多病例和服务器显式 taxonomy 复跑 |
-| 结果自动回填并替换手工导入 | 前端能接收后端结果，后端输出路径已改为真实 nnUNetv2 结果 | 基本完成 |
-| 置信度阈值 | 仅保留 UI 控件，尚未与概率输出建立真实语义 | 未完成 |
-| label 表稳定来源 | 后端从真实 `dataset.json` 读取，前端优先使用 `/api/models` 并保留 13 类 fallback | 基本完成 |
-| 三正交桌面布局 | 已有 CSS 测试和 Playwright 盒模型回归检查 | 基本完成 |
+| 真实 nnUNetv2 在线推理 | 本地 AMOS 0117 / FLARE22 Tr 0009 与服务器 5-fold smoke 已跑通；显式 `label_taxonomy=auto\|AMOS22\|FLARE22` 与 `dataset_hint` 字段已接入；高分辨率 CT fast 推理完成 | 已完成（2026-06-03 收口） |
+| 结果自动回填并替换手工导入 | 前端能接收后端结果，后端输出路径已改为真实 nnUNetv2 结果；6 类指标 + spacing 回填到 GUI | 已完成（2026-06-03） |
+| 置信度阈值 | 仅保留 UI 控件，尚未与概率输出建立真实语义 | 未完成（倾向从 UI 移除假控件） |
+| label 表稳定来源 | 后端从真实 `dataset.json` 读取，前端优先使用 `/api/models` 并保留 fallback；`loadReferenceCase()` 按 `referenceCase.dataset` 自动预设 `label_taxonomy` | 已完成（2026-06-02） |
+| 三正交桌面布局 | 已有 CSS 测试和 Playwright 盒模型回归检查 | 已完成 |
 | 三正交移动端布局 | 已有单列、高度约束和 Playwright 盒模型回归检查，仍需真机再验 | 部分完成 |
 | 真实 3D 体渲染 | 目前仍是轻量预览，不是医学级 3D 工作台 | 未完成 |
 
