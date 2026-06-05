@@ -1,8 +1,8 @@
 # 下一轮候选任务规划
 
-**范围：** 基于 2026-06-01 项目现状，规划下一轮可执行任务。
+**范围：** 基于 2026-06-05 项目现状，规划下一轮可执行任务。
 
-**当前状态：** 本地缓存演示 7 步 + cache 链路补丁已落地。FLARE22 cache hit 现在能正确显示历史 validation 摘要（0.893/0.674/0.950），参考病例列表必须设置 `SEGMENTATION_REFERENCE_CASES_JSON` 才返回 4 个 case。三大目标（CT 浏览、三正交联动、在线 nnUNetv2 推理、SSE 进度、取消、预测缓存、标签上传、自动 taxonomy remap、报告导出、cache 链路补丁）均已收口。当前阻塞点转为 `runtime_target=server` 创建任务不应依赖本地 nnUNet 文件、服务器 AMOS validation 需用显式 taxonomy 复跑、高分辨率 CT 推理需优化、AMOS 预热预测需复跑、跨数据集 cache 链路需产品化。
+**当前状态：** 本地缓存演示 7 步 + cache 链路补丁 + detect_dataset 二轮收紧 + dataset_hint 字段 + 6 类医学影像指标扩展 + surface_distances 2 EDT + HTML 报告第一轮美化（视觉层 + 信息层）+ HTML 报告临床报告风格重构（封面 + 摘要 + TOC + 8 段章节 + 公式 tip + 严重度分布图 + caption/footnote + 打印页眉页码）均已收口。9 份核心文档全部同步到 6-05 状态，4 份 planning 文档落地。当前阻塞点转为 `runtime_target=server` 创建任务不应依赖本地 nnUNet 文件、服务器 AMOS validation 需用显式 taxonomy 复跑、高分辨率 CT 推理需优化、AMOS 预热预测需复跑、跨数据集 cache 链路需产品化、演示启动脚本需自动化、runbook 校验需自动化。
 
 **本轮已完成（2026-06-01）：**
 
@@ -25,6 +25,25 @@
 - 3 个新增回归测试（1e-9 精度、EDT 计数恒为 2、wall-time 加速比 ≥30%）
 - 6-03 baseline 数值：mean Pixel Accuracy 0.999855、mean HD 9.59281mm、mean HD95 3.596449mm、mean ASD 0.660724mm
 - 10 份核心文档同步到 6-03 现状 + 新建 `examples/reference_cases.json`（4 例模板）
+
+**本轮已完成（2026-06-04）：**
+
+- HTML 报告第一轮美化（视觉层）：色阶图例、Header 渐变、3 个 metric group 加组标题图标、aiFindings 严重度排序 + `.severity-{high,medium,low}` 高亮、器官列表用 `<details><summary>` 折叠、逐标签表列固定 + 列点击排序、@media print A4 页眉页码
+- HTML 报告第一轮美化（信息层）：remap_applied 顶部警告条、taxonomy / dataset_hint 展示位、spacing 可视化、historical 警告条
+- `src/main.tsx:handleExport` 透传 5 个 validation 字段
+- `tests/imagingLogic.test.ts` 新增 source-grep 断言保护 4 个新 class
+- 9 份核心文档同步到 6-04
+
+**本轮已完成（2026-06-05）：**
+
+- HTML 报告临床报告风格重构：`.cover` 封面页、`.exec-summary` 执行摘要、`.toc` 目录（§1-§8 锚点导航）、`.formula-tip` 公式小贴士（Dice / IoU、Pixel Accuracy、HD95 三张）、`.dist-chart` 严重度分布图、`.table-caption` 表格标题、`.footnotes` 脚注
+- 章节编号 `.section-num`（"§ N"） + `.section-en`（英文小标题）
+- 字体 Source Han Serif / Songti SC + JetBrains Mono
+- @media print 改为 A4 + 顶部 caseId + 底部 page X of Y
+- 3 个新工具函数 `distributionChartHtml()` / `severityBuckets()` / `formulaTips()`
+- `npm test` / `npm run build` 全过
+- 9 份核心文档同步到 6-05
+- 4 份 planning 文档落地（`explanation.md` / `findings.md` / `progress.md` / `task_plan.md`）
 
 ---
 
@@ -49,26 +68,7 @@
 
 ---
 
-### 2. 跨数据集 cache 链路产品化
-
-**优先级：** 中
-
-**前置文档：** `.planning/2026-06-01-local-cache-demo/findings.md` 发现 2
-
-**目标：** 把"按历史指标改写 cache_source 摘要"做成可复用机制，让其他数据集/其他 cache_source 也能享受 cache hit 时显示历史 validation 摘要的链路。
-
-**关键步骤：**
-
-1. 重构 `tools/rewrite_flare22_historical_summary.py` 为通用 `tools/rewrite_cached_validation_summary.py`，支持任意 source 路径、任意 target job 目录、任意指标 JSON。
-2. 在 `server/main.py` 的 `complete_cached_job()` 中增强 historical 回退：除 `validation_summary.json` 外，尝试读 `job_summary.json` 中的历史指标。
-3. 补充 `tests/backendState.test.py` 覆盖"cache_source 含历史指标但无 validation_summary.json"场景。
-4. 更新 `docs/local-cache-demo-runbook.md` 增补"通用改写历史摘要"段落。
-
-**风险：** 必须保留"`historical: true`"和"`source_job_id`"标记，避免误把当前请求的标签结果写成历史。
-
----
-
-### 3. server mode gating 修复
+### 2. server mode gating 修复
 
 **优先级：** 高
 
@@ -87,7 +87,7 @@
 
 ---
 
-### 4. 服务器 validation 复跑
+### 3. 服务器 validation 复跑
 
 **优先级：** 高
 
@@ -106,7 +106,7 @@
 
 ---
 
-### 5. 高分辨率推理优化
+### 4. 高分辨率推理优化
 
 **优先级：** 中高
 
@@ -126,11 +126,50 @@
 
 ---
 
-### 6. runbook 自动校验
+### 5. 跨数据集 cache 链路产品化
 
 **优先级：** 中
 
-**前置文档：** `.planning/2026-06-01-local-cache-demo/findings.md` 待验证假设
+**前置文档：** `.planning/next-round-candidates/findings.md` 发现 2
+
+**目标：** 把"按历史指标改写 cache_source 摘要"做成可复用机制，让其他数据集/其他 cache_source 也能享受 cache hit 时显示历史 validation 摘要的链路。
+
+**关键步骤：**
+
+1. 重构 `tools/rewrite_flare22_historical_summary.py` 为通用 `tools/rewrite_cached_validation_summary.py`，支持任意 source 路径、任意 target job 目录、任意指标 JSON。
+2. 在 `server/main.py` 的 `complete_cached_job()` 中增强 historical 回退：除 `validation_summary.json` 外，尝试读 `job_summary.json` 中的历史指标。
+3. 补充 `tests/backendState.test.py` 覆盖"cache_source 含历史指标但无 validation_summary.json"场景。
+4. 更新 `docs/local-cache-demo-runbook.md` 增补"通用改写历史摘要"段落。
+
+**风险：** 必须保留"`historical: true`"和"`source_job_id`"标记，避免误把当前请求的标签结果写成历史。
+
+---
+
+### 6. 演示启动脚本化
+
+**优先级：** 中
+
+**前置文档：** `.planning/next-round-candidates/findings.md` 发现 3 + 发现 5
+
+**目标：** 写 `tools/start_local_demo.py`，自动 setenv + spawn backend/frontend，避免演示现场漏设 `SEGMENTATION_REFERENCE_CASES_JSON`、`SEGMENTATION_PERSISTENT_WORKER`、`SEGMENTATION_DEVICE` 等环境变量。
+
+**关键步骤：**
+
+1. `tools/start_local_demo.py` 接收 `--reference-cases-json` 参数（默认 `examples/reference_cases.json`）。
+2. 自动 setenv：`SEGMENTATION_REFERENCE_CASES_JSON` / `SEGMENTATION_PERSISTENT_WORKER=1`（可选）/ `SEGMENTATION_DEVICE=cuda`（可选）。
+3. 子进程 spawn：`python -m uvicorn server.main:app --host 127.0.0.1 --port 8000` 和 `npm run dev -- --port 5173`。
+4. 输出 `curl http://127.0.0.1:8000/api/samples` 提示用户验证 4 个 case。
+5. 补 `tests/startLocalDemo.test.py` dry-run 验证 env var 正确传递。
+
+**风险：** 脚本不能取代手动 runbook 作为兜底；保留 runbook 作为停止脚本后的 fallback。
+
+---
+
+### 7. runbook 自动校验
+
+**优先级：** 中
+
+**前置文档：** `.planning/next-round-candidates/findings.md` 待验证假设 6
 
 **目标：** 写 `tests/cacheDemoRunbook.test.py`，自动确认 runbook 中提到的 4 个已知约束仍在代码里成立。
 
@@ -146,7 +185,7 @@
 
 ---
 
-### 7. 跨数据集标签评估增强
+### 8. 跨数据集标签评估增强
 
 **优先级：** 中
 
@@ -163,7 +202,7 @@
 
 ---
 
-### 8. 文档与验收口径再同步
+### 9. 文档与验收口径再同步
 
 **优先级：** 中
 
@@ -173,12 +212,13 @@
 
 1. 在后续代码或配置变化后，及时同步 9 份核心文档的中文主体说明。
 2. 对 `SEGMENTATION_METRICS_SUMMARY.md`、`SEGMENTATION_EXPERIMENT_COMPARISON.md` 和 `SEGMENTATION_RECENT_ROUNDS.md` 继续坚持"新工程链路不混入旧指标"的口径。
+3. 后续若新增 validation 字段或新视觉元素，必须同时改 `inferenceClient.ts normalizeValidation` 白名单 + `exportReport.ts` 模板 + `tests/imagingLogic.test.ts` source-grep 断言三处。
 
 **风险：** 这类工作本身不难，但容易在没有同步代码现状时写入过时结论。
 
 ---
 
-### 9. 多模型支持准备
+### 10. 多模型支持准备
 
 **优先级：** 低（等待新 checkpoint）
 
@@ -201,11 +241,12 @@
 3. **AMOS/FLARE 服务器显式 taxonomy 复跑**（确认服务器质量基线，独立 planning）。
 4. **高分辨率推理优化**（预降采样，独立 planning）。
 5. **跨数据集 cache 链路产品化**（让 cache 链路补丁成为通用机制）。
-6. **runbook 自动校验**（演示前 polish）。
-7. **跨数据集标签评估增强**（持续）。
-8. **文档与验收口径再同步**（持续）。
-9. **多模型支持准备**（等待新模型或新 checkpoint 后再启动）。
+6. **演示启动脚本化**（演示当天减少手输命令）。
+7. **runbook 自动校验**（防止下次复现同样的困惑）。
+8. **跨数据集标签评估增强**（持续）。
+9. **文档与验收口径再同步**（持续）。
+10. **多模型支持准备**（等待新模型或新 checkpoint 后再启动）。
 
 ---
 
-*更新日期：2026-06-01*
+*更新日期：2026-06-05*

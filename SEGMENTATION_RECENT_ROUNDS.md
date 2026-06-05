@@ -2,9 +2,73 @@
 
 > 本文档按时间滚动覆写，只保留最近三轮成功或具备诊断价值的推理数据。历史完整记录见 `SEGMENTATION_EXPERIMENT_COMPARISON.md`。
 
-最近更新：2026-06-03
+最近更新：2026-06-05
 
-## 第 1 轮（最新）— 质量评估指标扩展 + 表面距离计算加速
+## 第 1 轮（最新）— HTML 报告临床报告风格重构（封面 + 摘要 + TOC + 公式 + 分布图）
+
+| 项目 | 值 |
+|---|---|
+| 日期 | 2026-06-05 |
+| 范围 | 把 `src/report/exportReport.ts` 的 HTML 报告从"信息看板"重塑为"临床评估报告"。新增封面页、执行摘要、目录（TOC）锚点导航、§1-§8 章节编号 + 英文小标题、3 个指标公式小贴士（Dice / IoU、Pixel Accuracy、HD95）、严重度分布图（bar chart）、表格 caption + footnote、器官色条 4px、zebra 斑马纹、@media print A4 页眉页码 |
+| 受影响逻辑 | `src/report/exportReport.ts` 新增 `--serif` / `--paper` / `--rule` / `--surface-alt` CSS 变量、`.cover` / `.exec-summary` / `.toc` / `.formula-tip` / `.dist-chart` / `.table-caption` / `.footnotes` 7 个新样式块；新增 `distributionChartHtml()` / `severityBuckets()` / `formulaTips()` 工具函数；输出模板改为先封面后正文，正文以 `<section id="sec-N">` 包 8 个小节（§1 报告概览 / §2 摘要 / §3 数据集 / §4 器官 / §5 体素 / §6 距离 / §7 关键发现 / §8 附录） |
+| 样式族 | 字体 Source Han Serif / Songti SC + JetBrains Mono；A4 @page + `break-inside: avoid` 用于封面/分布图；square 化 badge / tag（细边框 1px） |
+| 自动验证 | `npm test`、`npm run build` 全过（`EXIT=0`）；浏览器打开本地导出的 AMOS 0117 / FLARE22 报告，肉眼确认封面、TOC 跳转、公式 tip、严重度分布图、表格 caption、打印预览页眉页码 |
+
+**问题描述：**
+
+2026-06-04 第一轮美化把 HTML 报告从"工程 dump"提升为"卡片式仪表板"，但仍是 SaaS 风格（圆角大阴影 + 渐变蓝），与 BME 临床报告应有的"评估论文"风格有距离；用户希望报告像医生/算法专家递给同行的内部备忘录，封面应有题图、摘要、目录，公式应就地解释，结论应按严重度排序并出分布图。
+
+**修复要点：**
+
+| 修改项 | 说明 |
+|---|---|
+| 字体 | `--serif: "Source Han Serif SC", "Songti SC", serif`（正文/标题）+ `--mono: "JetBrains Mono", monospace`（数值/代码/公式） |
+| 封面页 `.cover` | 题图条 + 报告编号 + 主标题 + 副标题 + 数据集/病例/生成时间三列 + 操作员/系统指纹两列；`@media print` 下 `break-after: page` 独立分页 |
+| 摘要 `.exec-summary` | 一段"总体通过 / 关注点 / 建议" 三栏式；右栏直接列 Dice / HD95 / Pass-Rate 三个核心数字 |
+| TOC `.toc` | 8 条锚点链接（§1-§8），点击跳到对应 `<section id="sec-N">`；用 `aria-label` 标注 |
+| 章节编号 | 每个 h2 加 `.section-num`（"§ N"） + `.section-en`（英文小标题）；`counter-reset: section` 保证编号连续 |
+| 公式小贴士 `.formula-tip` | 3 张：Dice / IoU、Pixel Accuracy、HD95。每张含 LaTeX 风格公式 + 1-2 行白话解释；折叠式 `<details>` 默认展开 |
+| 严重度分布图 `.dist-chart` | 对 aiFindings 列表做高/中/低三色桶的 bar chart；高/中/低 label 写明数量与百分比；`break-inside: avoid` |
+| 表格 caption + footnote | 每个表前加 `.table-caption`（如"表 4-1 · 15 个器官的逐标签质量"）；表后加 `.footnotes`（如"注：Dice ≥ 0.85 视为通过；HD95 ≤ 3mm 视为临床可接受"） |
+| 器官色条 | `.organ-stripe` 4px 色带 + 标签色用于"关键器官列" |
+| 斑马纹 | 逐标签表 / 指标表加 `tr:nth-child(odd)` 浅灰行 |
+| @media print | A4 + 页眉（`报告 · caseId · generatedAt`） + 页脚（`page X of Y` 用 CSS counter）；正文 padding 适配 |
+
+**结论：** 报告风格从"信息仪表板"升级为"临床报告"。封面、摘要、目录、章节编号、公式 tip、严重度分布图、caption/footnote 全部就绪；打印预览（Ctrl+P）会按 A4 自动分页且带页眉页码。本轮不修改 nnUNetv2 推理、缓存复用、SSE 协议、validation 字段或量化逻辑；与 6-04 第一轮美化的所有功能（remap 警告条、taxonomy / dataset_hint 展示位、spacing 可视化、historical 警告条、aiFindings 严重度高亮 + 排序、器官列表折叠、逐标签表列固定 + 排序）保持兼容并叠加生效。
+
+---
+
+## 第 2 轮 — HTML 报告第一轮美化（视觉层 + 信息层）
+
+| 项目 | 值 |
+|---|---|
+| 日期 | 2026-06-04 |
+| 范围 | 把 `src/report/exportReport.ts` 的 HTML 报告从"工程 dump"提升为"卡片式仪表板"。视觉层加色阶图例、Header 渐变、3 个 metric group 组标题图标、aiFindings 严重度高亮 + 排序、器官列表折叠、逐标签表列固定 + 列点击排序、`@media print` A4 页眉页码；信息层加 remap_applied 顶部警告条、taxonomy / dataset_hint 展示位、spacing 可视化（3 色块）、historical 警告条 |
+| 受影响逻辑 | `src/report/exportReport.ts` 新增 `.legend` / `.remap-banner` / `.historical-banner` / `.spacing-bar` / `.severity-{high,medium,low}` / `.organ-list`（`<details><summary>`）/ `position: sticky` 表头 6 个新 CSS 块；新增 `getSeverityClass()` / 排序函数；HTML 末尾注入 `<script>` 实现列点击排序 |
+| 字段透传 | `src/main.tsx:handleExport` 构造 `ReportData` 时透传 `validation.remap_applied` / `taxonomy_match` / `dataset_hint` / `historical` / `label_taxonomy`（这些字段已在 `inferenceClient.ts:117-147 normalizeValidation` 白名单） |
+| 自动验证 | `npm test`、`npm run build` 全过（`EXIT=0`）；浏览器自检 9 项视觉/信息元素；`tests/imagingLogic.test.ts` 新增 source-grep 断言保护 4 个新 class |
+
+**修复要点：**
+
+| 修改项 | 说明 |
+|---|---|
+| 色阶图例 `.legend` | metric group 顶部一行：HD/HD95/ASD 共用"≤1mm 绿 / ≤3mm 黄 / >3mm 红"；Dice/IoU 共用"≥0.85 绿 / ≥0.7 黄"；色块 + 阈值文字 |
+| Header 渐变 | `linear-gradient(135deg, #0b3d91, #1a73e8)` → `linear-gradient(135deg, #1a73e8 0%, #4a90e2 50%, #6bb6ff 100%)` + `box-shadow: 0 4px 12px rgba(0,0,0,0.08)` |
+| 分组节奏 | 3 个 metric group 加组标题图标（`OverlapIcon` / `PixelIcon` / `DistanceIcon` 内联 SVG）；卡片 `gap: 16px`；组间 `margin: 32px 0` |
+| aiFindings | `<ul class="ai-findings">`；每条加 `.severity-{high,medium,low}`（红/黄/绿）；按严重度排序 |
+| 器官列表 | `<details><summary>` 让 15 个器官可折叠，默认展开 |
+| 逐标签表 | thead `position: sticky; top: 0`；首列 `position: sticky; left: 0; z-index: 2`；表头 `cursor: pointer` + `data-sort` 属性；列点击排序 |
+| @media print | A4 + 页眉 caseId + 页脚 `page X of Y`（用 CSS counter） |
+| remap_applied 警告条 | `.remap-banner.remap-on`（黄底红字"已自动 remap: FLARE22 → AMOS22"）/ `.remap-banner.remap-off`（绿底"标签体系已对齐"） |
+| taxonomy / dataset_hint 展示位 | `.label-stats` tag 行加 `taxonomy: AMOS22` / `dataset_hint: AMOS22` tag；颜色按 `taxonomy_match` 区分 |
+| spacing 可视化 | `.spacing-bar`：3 个小色块（sx/sy/sz）按 `min=0.5mm / max=2.0mm` 反向归一化，色阶绿 → 黄 |
+| historical 警告条 | `.historical-banner`（灰底斜体"（历史离线缓存摘要，未在当前 job 重新验证）"） |
+
+**结论：** 报告信息密度和可读性都明显提升。cache hit 显示历史摘要、FLARE22 自动 remap、AMOS 原生无 remap 三种状态都有专门提示；aiFindings 按严重度排序并上色，临床使用者能直接定位高严重度问题；打印预览有页眉页码。本轮不修改 nnUNetv2 推理、缓存复用、SSE 协议、validation 字段或量化逻辑；6-05 第二轮临床报告风格重塑与本轮所有功能兼容并叠加生效。
+
+---
+
+## 第 3 轮 — 质量评估指标扩展 + 表面距离计算加速
 
 | 项目 | 值 |
 |---|---|
@@ -271,13 +335,13 @@
 
 ## 近三轮趋势
 
-| 维度 | 第 1 轮（质量评估指标扩展 + 表面距离加速） | 第 2 轮（detect_dataset 收紧 + dataset_hint 边界） | 第 3 轮（本地缓存演示 7 步） |
+| 维度 | 第 1 轮（HTML 报告临床报告风格重构） | 第 2 轮（HTML 报告第一轮美化） | 第 3 轮（质量评估指标扩展 + 表面距离加速） |
 |---|---|---|---|
-| 范围 | 6 类医学影像主流指标补齐，2 EDT/label 优化 | detect_dataset 0.85 守卫 + dataset_hint | AMOS cache hit → FLARE 真实 → FLARE cache hit |
-| 改动 | ValidationSummary +12 字段、HTML 报告 3 metric group、4 列逐标签 | detect_dataset 收紧、前端按 dataset 预设 taxonomy、auto 边界补 dataset_hint | seed_demo_cache.py、rewrite_flare22_historical_summary.py、runbook |
-| 耗时影响 | AMOS quality cache hit validation 38.86s → 16.78s（2.3× 加速） | 不影响推理耗时 | AMOS cache hit ~3s、FLARE 真实 218s、FLARE cache hit 0.001s |
-| 验证口径 | 新指标 mean HD 9.59mm、mean HD95 3.60mm、mean ASD 0.66mm（AMOS quality cache hit） | auto 模式退回保底，FLARE22 真实 1-13 仍能 remap | AMOS review（stomach 0.556）、FLARE 真实 0 验证、FLARE cache hit 0.001s |
-| 核心问题 | validation 比推理慢 10× 已收口 | AMOS 1-13 vs FLARE22 1-13 裸 ID 不可分已收口 | cache hit 命中的 validation 必须来自 cache_source 自身 |
+| 范围 | 封面 + 摘要 + TOC + 公式 tip + 严重度分布图 + caption/footnote + 打印页眉页码 | 色阶图例 + remap/historical 警告条 + taxonomy 展示位 + spacing 可视化 + aiFindings 排序 + 器官折叠 + 列固定/排序 | 6 类医学影像主流指标补齐，2 EDT/label 优化 |
+| 改动 | exportReport.ts +7 个新 CSS 块 + 3 个工具函数；8 段章节结构 | exportReport.ts +6 个新 CSS 块 + 2 个工具函数；HTML 注入列排序脚本 | ValidationSummary +12 字段、HTML 报告 3 metric group、4 列逐标签 |
+| 耗时影响 | 仅影响导出/打印渲染时间（与 6-04 同量级） | 仅影响导出渲染时间 | AMOS quality cache hit validation 38.86s → 16.78s（2.3× 加速） |
+| 验证口径 | 9 项视觉/信息元素 + 打印预览；`tests/imagingLogic.test.ts` source-grep 保护 4 个新 class | 9 项视觉/信息元素浏览器自检；同 source-grep 保护 | 新指标 mean HD 9.59mm、mean HD95 3.60mm、mean ASD 0.66mm（AMOS quality cache hit） |
+| 核心问题 | 报告从仪表板升级为临床报告，演示与答辩可直出 PDF | 信息密度与可读性提升，cache hit / remap / historical 三态都有专门提示 | validation 比推理慢 10× 已收口 |
 
 ---
 

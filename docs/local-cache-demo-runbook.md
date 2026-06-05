@@ -1,9 +1,11 @@
 # 本地缓存演示 Runbook
 
-> 日期：2026-06-01
+> 日期：2026-06-05（含 6-04 / 6-05 HTML 报告美化补丁说明）
 > 适用项目：`D:\BME2026\BME_CT_Seg\segmentation-gui-prototype`
 > 配套 spec：`docs/superpowers/specs/2026-06-01-local-cache-demo-design.md`
 > 配套 plan：`docs/superpowers/plans/2026-06-01-local-cache-demo.md`
+
+> 2026-06-04 / 2026-06-05 完成的 HTML 报告美化（视觉层 + 信息层 → 临床报告风格）不改变 runbook 的 7 步 cache demo 流程，但导出 HTML 报告时新增以下信息元素可见：色阶图例、remap_applied 顶部警告条、taxonomy / dataset_hint 展示位、spacing 可视化、historical 警告条、aiFindings 严重度排序、器官列表折叠、逐标签表列固定 + 排序、封面 + 摘要 + TOC + 8 段章节编号 + 公式 tip + 严重度分布图 + caption/footnote、A4 打印页眉页码。详见 `src/report/exportReport.ts`。
 
 ## 启动命令
 
@@ -52,9 +54,9 @@ curl http://127.0.0.1:8000/api/samples
 
 | 用途 | job_id | 模式 | cache_key | 耗时 | 备注 |
 |---|---|---|---|---|---|
-| AMOS cache hit | `aea4e7cdbaf0` | `cached-real-nnunetv2` | `4e0eb3cd...` | ~3s | 命中手工 seed 的 `009d4efdc5f6`；validation mean_dice 0.891（review 状态，stomach 0.556 偏低） |
+| AMOS cache hit | `aea4e7cdbaf0` | `cached-real-nnunetv2` | `4e0eb3cd...` | ~3s | 命中手工 seed 的 `009d4efdc5f6`；validation mean_dice 0.891（review 状态，stomach 0.556 偏低）。HTML 报告导出后会有 `.historical-banner` 灰底斜体条提示这是历史离线缓存摘要 |
 | FLARE 真实推理 | `0aa7323a4c01` | `real-nnunetv2` | `0f9c6d68...` | 218s | RTX 4060，quality + TTA，3d_fullres，结果 120KB |
-| FLARE cache hit | `02da885c97d8` | `cached-real-nnunetv2` | `0f9c6d68...` | 0.001s | 命中 `0aa7323a4c01` |
+| FLARE cache hit | `02da885c97d8` | `cached-real-nnunetv2` | `0f9c6d68...` | 0.001s | 命中 `0aa7323a4c01`；显示 0.893127/0.67373/0.949908（historical 摘要） |
 
 填表方法：
 

@@ -4,6 +4,17 @@
 
 ## 当前运行状态
 
+2026-06-05 已完成：
+- HTML 报告临床报告风格重构（第二轮美化）验收：`src/report/exportReport.ts` 从"卡片式仪表板"重塑为"临床评估报告"。新增 7 个 CSS 块：`.cover` 封面页（题图条 + 报告编号 + 主副标题 + 数据集/病例/生成时间三列）、`.exec-summary` 执行摘要（通过 / 关注点 / 建议三栏）、`.toc` 目录（§1-§8 锚点导航）、`.formula-tip` 公式小贴士（Dice / IoU、Pixel Accuracy、HD95 三张）、`.dist-chart` 严重度分布图（高/中/低 bar chart）、`.table-caption` 表格标题、`.footnotes` 脚注；新增 3 个工具函数 `distributionChartHtml()` / `severityBuckets()` / `formulaTips()`；正文模板按 §1 报告概览 / §2 摘要 / §3 数据集 / §4 器官 / §5 体素 / §6 距离 / §7 关键发现 / §8 附录 8 段章节编号排版；字体改为 Source Han Serif / Songti SC + JetBrains Mono；@media print 改为 A4 + 顶部 caseId + 底部 page X of Y。`npm test` 与 `npm run build` 全过。
+- 打印页眉页码验收：CSS counter 在每页加 `报告 · caseId · generatedAt` 顶部条 + `page X of Y` 底部条；正文 padding 适配 A4；`.cover` / `.dist-chart` `break-inside: avoid` 避免打印分页错位。浏览器打印预览（Ctrl+P）肉眼确认页眉页码、章节编号、严重度分布图、公式 tip、caption/footnote 全部就位。
+- 不变量回归保护：本轮不动 nnUNetv2 推理、缓存复用、SSE 协议、validation 字段或影像量化逻辑；与 2026-06-04 第一轮美化的所有功能兼容并叠加。
+
+2026-06-04 已完成：
+- HTML 报告第一轮美化（视觉层 + 信息层）验收：`src/report/exportReport.ts` 从"工程 dump"提升为"卡片式仪表板"。视觉层：色阶图例（HD/HD95/ASD 共用 ≤1mm 绿 / ≤3mm 黄 / >3mm 红，Dice/IoU 共用 ≥0.85 绿 / ≥0.7 黄）、Header 渐变、3 个 metric group 加组标题图标（`OverlapIcon` / `PixelIcon` / `DistanceIcon` 内联 SVG）、aiFindings 按严重度排序 + `.severity-{high,medium,low}` 高亮、器官列表用 `<details><summary>` 折叠、逐标签表列固定（thead sticky + 首列 sticky-left）+ 列点击排序、@media print A4 页眉页码。信息层：remap_applied 顶部警告条（`.remap-banner.remap-on` 黄底红字"已自动 remap: FLARE22 → AMOS22" / `.remap-banner.remap-off` 绿底"标签体系已对齐"）、taxonomy / dataset_hint 展示位、spacing 可视化（`.spacing-bar` 3 色块按 min=0.5mm / max=2.0mm 反向归一化）、historical 警告条（`.historical-banner` 灰底斜体"（历史离线缓存摘要，未在当前 job 重新验证）"）。
+- 字段透传验收：`src/main.tsx:handleExport` 构造 `ReportData` 时透传 `validation.remap_applied` / `taxonomy_match` / `dataset_hint` / `historical` / `label_taxonomy`（已在 `src/inference/inferenceClient.ts:117-147 normalizeValidation` 白名单）。
+- 回归保护验收：`tests/imagingLogic.test.ts` 新增 source-grep 断言保护 4 个新 class（`.legend` / `.remap-banner` / `.historical-banner` / `.spacing-bar`），防止后续重构删掉。
+- 浏览器自检：导出 AMOS 0117 / FLARE22 / cache hit 三类 HTML 报告，肉眼确认 9 项视觉/信息元素就位。
+
 2026-06-03 已完成：
 - 质量评估指标扩展：把 quality 评估报告补齐到 6 类医学影像主流指标（Dice / IoU / Pixel Accuracy / HD / HD95 / ASD），3 个 metric group（区域重叠度 · Dice / IoU、像素准确率 · Pixel Accuracy、表面距离 · HD / HD95 / ASD，共 19 张卡片，HD/HD95/ASD 卡片用 mm 单位 + 越低越好的色阶 ≤1mm 绿、≤3mm 黄、>3mm 红）。逐标签表新增 4 列（像素准确率、ASD (mm)、HD95 (mm)、HD (mm)），额外显示 NIfTI spacing 和 `surface_distance_unit` 标签。`src/inference/inferenceClient.ts` 的 `ValidationSummary` / `LabelMetric` 增补 12 个新字段并加入 `normalizeValidation()` 白名单。
 - 表面距离计算加速：`server/main.py` 新增 `surface_distances()`（1 crop + 2 EDT/label），把单 label 的 `distance_transform_edt` 调用从 6 次合并到 2 次；AMOS 0117 quality 缓存命中实测 validation 阶段从 38.86s 降到 16.78s（约 2.3× 加速）。
@@ -35,6 +46,9 @@
 - server mode gating 修复
 - AMOS 预热预测 review 状态（stomach 0.556）的复跑或新训练权重接入
 - 服务器 AMOS/FLARE 显式 taxonomy 复跑验证 `remap_applied` 状态
+- 跨数据集 cache 链路产品化：把 `tools/rewrite_flare22_historical_summary.py` 重构为通用 `tools/rewrite_cached_validation_summary.py`
+- runbook 自动校验：写 `tests/cacheDemoRunbook.test.py` 自动确认 runbook 中 4 个已知约束
+- 演示启动脚本化：写 `tools/start_local_demo.py` 自动 setenv + spawn backend/frontend
 
 ## 目标 1：CT 可浏览、三正交可联动
 

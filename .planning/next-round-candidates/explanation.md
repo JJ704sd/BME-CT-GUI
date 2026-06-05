@@ -2,7 +2,7 @@
 
 ## 为什么需要这个说明
 
-2026-06-01 项目已连续完成两项里程碑：本地缓存演示 7 步（AMOS cache hit → FLARE 真实推理 → FLARE cache hit），以及晚间的 cache 链路补丁（FLARE22 cache hit 现在能正确显示 0.893/0.674/0.950 + "（历史离线缓存摘要）"）。本文档解释下一轮任务的背景和优先级依据。
+2026-06-05 项目已连续完成六项里程碑：本地缓存演示 7 步（AMOS cache hit → FLARE 真实推理 → FLARE cache hit）、晚间的 cache 链路补丁、detect_dataset 二轮收紧 + dataset_hint 字段、质量评估指标扩展 + surface_distances 2 EDT、HTML 报告第一轮美化（视觉层 + 信息层）、HTML 报告临床报告风格重构（第二轮美化）。本文档解释下一轮任务的背景和优先级依据。
 
 ## 当前项目状态
 
@@ -13,6 +13,8 @@
 3. **env var 强制**：`SEGMENTATION_REFERENCE_CASES_JSON` 必须指向 `examples/reference_cases.json`（或 `nnunetv2_files/reference_cases.local.json`）才能让 `/api/samples` 暴露 4 个 reference case；runbook 已把这一项写在最前面。
 4. **2026-06-02 detect_dataset 二轮收紧 + dataset_hint 字段**：0.85 coverage 守卫让 AMOS 真实 1-13 标签不再被误判为 FLARE22；`Job.dataset_hint` + 前端 `referenceCaseDatasetHint` 状态机让 `taxonomy=auto + dataset_hint=FLARE22` 仍能强制 remap，覆盖 0.85 守卫的 None。
 5. **2026-06-03 质量评估指标扩展 + surface_distances 2 EDT**：`ValidationSummary` 增补 12 字段（Pixel Accuracy 4 项 + HD/HD95/ASD 9 项 + `surface_distance_unit` + `spacing`）；`server/main.py surface_distances()` 把单 label EDT 调用从 6 次合并到 2 次（AMOS 0117 quality cache hit validation 38.86s → 16.78s，约 2.3× 加速）；`src/report/exportReport.ts` 3 个 metric group（19 张卡片）+ 逐标签 4 列新指标。6-03 baseline 数值：mean Pixel Accuracy 0.999855、mean HD 9.59281mm、mean HD95 3.596449mm、mean ASD 0.660724mm。
+6. **2026-06-04 HTML 报告第一轮美化（视觉层 + 信息层）**：`src/report/exportReport.ts` 从"工程 dump"提升为"卡片式仪表板"。视觉层：色阶图例、Header 渐变、3 个 metric group 加组标题图标、aiFindings 严重度排序 + `.severity-{high,medium,low}` 高亮、器官列表用 `<details><summary>` 折叠、逐标签表列固定 + 列点击排序、@media print A4 页眉页码。信息层：remap_applied 顶部警告条、taxonomy / dataset_hint 展示位、spacing 可视化、historical 警告条。`src/main.tsx:handleExport` 透传 5 个 validation 字段；`tests/imagingLogic.test.ts` 新增 source-grep 断言保护 4 个新 class。
+7. **2026-06-05 HTML 报告临床报告风格重构（第二轮美化）**：`src/report/exportReport.ts` 从"卡片式仪表板"重塑为"临床评估报告"。新增 7 个 CSS 块：`.cover` 封面页、`.exec-summary` 执行摘要、`.toc` 目录、`.formula-tip` 公式小贴士、`.dist-chart` 严重度分布图、`.table-caption` 表格标题、`.footnotes` 脚注；新增 3 个工具函数 `distributionChartHtml()` / `severityBuckets()` / `formulaTips()`；正文模板按 §1 报告概览 / §2 摘要 / §3 数据集 / §4 器官 / §5 体素 / §6 距离 / §7 关键发现 / §8 附录 8 段章节编号排版；字体改为 Source Han Serif / Songti SC + JetBrains Mono；@media print 改为 A4 + 顶部 caseId + 底部 page X of Y。本轮不动 6 类指标、`surface_distances()` 2 EDT 或 `ValidationSummary` / `LabelMetric` 白名单；与 6-04 第一轮美化兼容并叠加。
 
 ### 待完成
 
@@ -21,6 +23,8 @@
 3. **高分辨率推理优化**：768×768 输入面积是标准 512×512 的 2.25 倍，推理时间显著延长。
 4. **跨数据集 cache 链路产品化**：当前 cache 链路补丁只针对 FLARE22 Tr 0009 + 0aa7323a4c01 这一对 cache_source；其他 cache_source 命中时若没有 `validation_summary.json`，仍然会显示"无历史验证摘要"。
 5. **AMOS 预热预测复跑**：cache demo Phase A 命中的 `009d4efdc5f6` 仍是 2026-05-23 历史 review 状态（stomach 0.556）。
+6. **演示启动脚本化**：把 7 步 demo 和 env var setenv 包成 `tools/start_local_demo.py`，避免演示现场漏设。
+7. **runbook 自动校验**：写 `tests/cacheDemoRunbook.test.py` 自动确认 runbook 中 4 个已知约束仍在代码里成立。
 
 ## 优先级依据
 
@@ -54,6 +58,18 @@
 
 **影响范围**：`tools/`、`server/main.py` 的 `complete_cached_job()` 回退路径、未来新增数据集的接入流程。
 
+### 中优先级：演示启动脚本化
+
+**原因**：演示现场容易漏设 `SEGMENTATION_REFERENCE_CASES_JSON`、`SEGMENTATION_PERSISTENT_WORKER`、`SEGMENTATION_DEVICE` 等环境变量。`tools/start_local_demo.py` 自动 setenv + spawn backend/frontend，能避免现场翻车。
+
+**影响范围**：`tools/start_local_demo.py`、`tests/startLocalDemo.test.py` dry-run。
+
+### 中优先级：runbook 自动校验
+
+**原因**：cache demo 7 步里有 4 个容易现场忽略的约束（cwd 必须落在 `segmentation-gui-prototype/`、cache_key 7 字段、`SEGMENTATION_REFERENCE_CASES_JSON` 4 例模板、find_cached_prediction 排序）。`tests/cacheDemoRunbook.test.py` 把这些约束变成自动化回归测试，防止后续重构破坏 runbook 假设。
+
+**影响范围**：`tests/cacheDemoRunbook.test.py`。
+
 ### 中优先级：跨数据集标签评估增强
 
 **原因**：自动 remap 已可用，但对未知数据集和异常指标的解释能力仍需增强。
@@ -74,9 +90,11 @@
 3. **服务器 validation 复跑**：确认 AMOS 服务器质量基线。
 4. **高分辨率推理优化**：实现预降采样，缩短推理时间。
 5. **跨数据集 cache 链路产品化**：把 cache 链路补丁做成通用机制。
-6. **跨数据集标签评估增强**：补单 label hint、remap 覆盖率提示。
-7. **文档与验收口径再同步**：确保文档持续跟随代码变化。
+6. **演示启动脚本化**：演示现场不再漏设 env var。
+7. **runbook 自动校验**：防止下次复现同样的困惑。
+8. **跨数据集标签评估增强**：补单 label hint、remap 覆盖率提示。
+9. **文档与验收口径再同步**：确保文档持续跟随代码变化。
 
 ---
 
-*更新日期：2026-06-01*
+*更新日期：2026-06-05*

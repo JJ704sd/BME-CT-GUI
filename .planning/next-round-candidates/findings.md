@@ -2,7 +2,7 @@
 
 ## 发现日期
 
-2026-06-03（吸纳 6-02 detect_dataset 收紧 + dataset_hint + 6-03 6 类指标扩展 + surface_distances 2 EDT）
+2026-06-05（吸纳 6-02 detect_dataset 收紧 + dataset_hint + 6-03 6 类指标扩展 + surface_distances 2 EDT + 6-04 HTML 报告第一轮美化 + 6-05 HTML 报告临床报告风格重构）
 
 ## 关键发现
 
@@ -70,12 +70,22 @@
 
 **意义**：`quality` 应继续作为正式报告基线，`fast` 仅作为预览模式。
 
+### 发现 8：HTML 报告视觉与信息两轮美化已收口
+
+**证据**：2026-06-04 / 2026-06-05 连续两轮对 `src/report/exportReport.ts` 做美化。6-04 把"工程 dump"提升为"卡片式仪表板"：色阶图例、Header 渐变、3 个 metric group 加组标题图标、aiFindings 严重度排序 + `.severity-{high,medium,low}` 高亮、器官列表用 `<details><summary>` 折叠、逐标签表列固定 + 列点击排序、@media print A4 页眉页码；信息层加 remap_applied 顶部警告条、taxonomy / dataset_hint 展示位、spacing 可视化、historical 警告条。6-05 把"卡片式仪表板"重塑为"临床评估报告"：`.cover` 封面页（题图条 + 报告编号 + 主副标题 + 数据集/病例/生成时间三列）、`.exec-summary` 执行摘要、`.toc` 目录（§1-§8 锚点导航）、`.formula-tip` 公式小贴士（Dice / IoU、Pixel Accuracy、HD95 三张）、`.dist-chart` 严重度分布图、`.table-caption` 表格标题、`.footnotes` 脚注；正文模板按 §1 报告概览 / §2 摘要 / §3 数据集 / §4 器官 / §5 体素 / §6 距离 / §7 关键发现 / §8 附录 8 段章节编号排版；字体改为 Source Han Serif / Songti SC + JetBrains Mono；@media print 改为 A4 + 顶部 caseId + 底部 page X of Y。
+
+**意义**：HTML 报告输出从"工程 dump"经"卡片式仪表板"升级为"临床评估报告"；打印预览（Ctrl+P）会按 A4 自动分页且带页眉页码，可直接出 PDF 给临床同行。`npm test` 与 `npm run build` 全过；`tests/imagingLogic.test.ts` 新增 source-grep 断言保护 4 个新 class（`.legend` / `.remap-banner` / `.historical-banner` / `.spacing-bar`）。
+
+**后续**：本轮不修改 6 类指标、`surface_distances()` 2 EDT 或 `ValidationSummary` / `LabelMetric` 白名单；后续若新增 validation 字段（`remap_applied` / `taxonomy_match` / `dataset_hint` / `historical` / `label_taxonomy` / `quantification`）或新视觉元素，必须同时改 `inferenceClient.ts normalizeValidation` 白名单 + `exportReport.ts` 模板 + `tests/imagingLogic.test.ts` source-grep 断言三处。
+
 ## 待验证假设
 
 1. **预降采样不影响 Dice**：768→512 降采样后，mean Dice 是否仍在 0.85 以上？
 2. **server gating 修复后服务器模式可用**：修复后 `/api/segment/jobs` 是否不再因本地文件缺失而 503？
 3. **显式 AMOS22 复跑可解决误判**：服务器 AMOS 轮次用 `label_taxonomy=AMOS22` 后，`remap_applied` 是否为 false？
 4. **跨数据集 cache 链路可产品化**：其他 cache_source 命中时能否复用 historical 回退机制？
+5. **演示启动脚本能否避免现场漏设 env var**：`tools/start_local_demo.py` 是否能在不写任何 env var 的情况下正确 spawn 后端 + 前端并暴露 4 个 reference case？
+6. **runbook 4 个已知约束仍成立**：`tests/cacheDemoRunbook.test.py` 自动校验 cache_key 7 字段、`SEGMENTATION_REFERENCE_CASES_JSON` 4 例模板、`find_cached_prediction` 排序、`tools/seed_demo_cache.py` 幂等性，是否都能通过？
 
 ## 数据来源
 
@@ -87,7 +97,9 @@
 - `SEGMENTATION_RECENT_ROUNDS.md`
 - `tools/seed_demo_cache.py` / `tools/rewrite_flare22_historical_summary.py`
 - `docs/local-cache-demo-runbook.md`
+- `src/report/exportReport.ts` 6-04 / 6-05 改动
+- `tests/imagingLogic.test.ts` 4 个新 class 的 source-grep 断言
 
 ---
 
-*更新日期：2026-06-01*
+*更新日期：2026-06-05*

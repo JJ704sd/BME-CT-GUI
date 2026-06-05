@@ -3,7 +3,7 @@
 > 适用项目：`segmentation-gui-prototype`（腹部 CT 多器官自动分割 + 浏览器端交互验证系统）
 > 适用赛道：「呼吸-消化系统疾病」赛道 — 智能影像分析与评价（影像分析算法类）
 > 报告硬约束：前言 + 问题引入 ≤ 2 页，方案设计 + 结果展示 + 讨论 ≤ 8 页，整体 ≤ 12 页
-> 最近更新：2026-06-03（同步 6 类医学影像指标扩展 + `surface_distances()` 2 EDT 优化 + cache 链路补丁 + auto taxonomy 边界加固 + dataset_hint 字段 + 6-03 baseline 数值）
+> 最近更新：2026-06-05（同步 6-04 HTML 报告第一轮美化（视觉层 + 信息层）+ 6-05 HTML 报告临床报告风格重构（封面 + 摘要 + TOC + 8 段章节 + 公式 tip + 严重度分布图 + caption/footnote + A4 打印页眉页码））
 
 ---
 
@@ -16,6 +16,7 @@
 **工程亮点**（可放进前言"本文工作"或方案结尾的部署小节）：
 - **预测结果缓存（7 字段 cache_key）**：相同 `input_sha256 + checkpoint_sha256 + checkpoint_dataset_name + checkpoint_configuration + labels_source + runtime_target + inference_options` 直接命中 `server/work/<job_id>/prediction.nii.gz`，**避免重复推理**，对评审现场"反复演示同一例"场景尤其友好。**`label_taxonomy` / `dataset_hint` 不在 cache_key 中**——它们只影响 validation 阶段的标签解释，不影响 NIfTI 预测结果；同一 CT 切换 taxonomy 仍会命中同一 cache slot，只是重算 validation。
 - **cache hit 显示历史 validation 摘要**（2026-06-01 cache 链路补丁）：FLARE22 Tr 0009 cache hit 命中 `02da885c97d8` 时，前端正确显示 `mean_dice=0.893127 / min_dice=0.67373 / fg=0.949908` 并标注"（历史离线缓存摘要）"，避免张冠李戴。
+- **HTML 报告临床报告风格重构**（2026-06-04 / 2026-06-05）：导出报告从"工程 dump"经"卡片式仪表板"升级为"临床评估报告"：封面（题图条 + 报告编号 + 主副标题 + 数据集/病例/生成时间三列）、执行摘要（通过 / 关注点 / 建议三栏）、目录（§1-§8 锚点导航）、8 段章节编号（报告概览 / 摘要 / 数据集 / 器官 / 体素 / 距离 / 关键发现 / 附录）、公式小贴士（Dice / IoU、Pixel Accuracy、HD95 三张）、严重度分布图（高/中/低 bar chart）、表格 caption + footnote、A4 打印页眉页码；视觉层有色阶图例、remap/historical 警告条、taxonomy 展示位、spacing 可视化、aiFindings 严重度排序、器官列表折叠、列固定/排序。字体 Source Han Serif / Songti SC + JetBrains Mono，答辩与评审现场可直接出 PDF。
 - **`/api/samples` 参考病例列表**：通过 `SEGMENTATION_REFERENCE_CASES_JSON` env var 注入，演示现场只需一次 setenv 即可暴露 4 个 case（AMOS 0117、FLARE22 Tr 0009 等）。
 
 ---

@@ -20,6 +20,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **AMOS 服务器轮次 0.076 不是模型失败基线**：是 AMOS 原生标签被自动误 remap 到 FLARE22，已在 auto taxonomy 边界加固中收口，待服务器窗口复跑确认 `remap_applied=false` 后才能纳入正式质量基线
 - **质量评估口径以 6 类医学影像指标为准**：`mean_dice` / `min_dice` / `foreground_dice`、`mean_iou` / `min_iou` / `foreground_iou`、`pixel_accuracy` / `mean_pixel_accuracy` / `min_pixel_accuracy` / `foreground_pixel_accuracy`、`mean_hd` / `max_hd` / `foreground_hd`、`mean_hd95` / `max_hd95` / `foreground_hd95`、`mean_asd` / `max_asd` / `foreground_asd`，加 `surface_distance_unit="mm"` 和 `spacing=[sx, sy, sz]`。逐标签还有 `pixel_accuracy` / `asd` / `hd` / `hd95` 4 列。`tools/segmentation_metrics_summary.py` 的离线口径与 `server/main.py` 在线 validation 共用同一份 `surface_distances()` 实现；新增指标时必须同时改 backend（计算 + serialize）、`inferenceClient.ts`（白名单 + 类型）、`exportReport.ts`（HTML 报告模板）三处，不要只改一处
 - **`surface_distances()` 2 EDT 是单 label 性能不变量**：每个 label 在 1 次 crop + 2 次 `distance_transform_edt`（预测→参考、参考→预测）后用 value 数组派生 `asd` / `hd` / `hd95`。新写 `compute_*_metrics` 时不应回退到 6 EDT 模式；旧 `average_surface_distance` / `hausdorff_95` / `hausdorff_distance_full` 仅保留供回归测试对照，不再走主路径。AMOS 0117 quality cache hit validation 实测 38.86s → 16.78s（约 2.3× 加速）
+- **HTML 报告输出路径是临床报告而非仪表板**：`src/report/exportReport.ts` 在 2026-06-04 第一轮美化和 2026-06-05 临床报告风格重构之后，输出结构由"卡片堆叠"升级为"封面 + 摘要 + TOC + 8 段章节 + 公式 tip + 严重度分布图 + caption/footnote + A4 打印页眉页码"。新增视觉/CSS 块（`.cover` / `.exec-summary` / `.toc` / `.formula-tip` / `.dist-chart` / `.table-caption` / `.footnotes` / `.legend` / `.remap-banner` / `.historical-banner` / `.spacing-bar`）必须有对应 `tests/imagingLogic.test.ts` source-grep 断言保护。改 exportReport.ts 时**不要**回退到 6-04 之前那种"工程 dump"风格。后续若新增 validation 字段（`remap_applied` / `taxonomy_match` / `dataset_hint` / `historical` / `label_taxonomy` / `quantification`），必须同时改 `inferenceClient.ts normalizeValidation` 白名单 + `exportReport.ts` 模板 + `tests/imagingLogic.test.ts` source-grep 三处
 - **AGENTS.md 是只读 agent 指令文件**：自动权限会拒绝直接覆盖；如需统一中文主体、修订编码风格或调整 PR 规范，必须**先取得用户单独授权**。CLAUDE.md 与 AGENTS.md 的分工：CLAUDE.md 放本仓库特定的非显然事实，AGENTS.md 放跨项目共享的工作流规范
 
 ## 安全 / 隐私边界（必读）
@@ -59,7 +60,7 @@ Python venv 在 `D:\BME2026\BME_CT_Seg\nnunet_env`（fastapi / uvicorn / python-
 - `imaging/sliceRenderer.ts` — NIfTI 切片 → data URL 渲染
 - `imaging/quantification.ts` — 纯前端 CPU 量化（体积、截面积、包围盒等）
 - `inference/inferenceClient.ts` — 与 FastAPI 通信：创建 job、SSE、下载 NIfTI、规范化 `/api/models` label 表、白名单 + 透传 6 类验证指标
-- `report/exportReport.ts` — HTML / JSON（`schema_version 1.1`，含 `quantification`）/ PDF；3 个 metric group（Dice/IoU、Pixel Accuracy、HD/HD95/ASD）+ 4 列逐标签
+- `report/exportReport.ts` — HTML / JSON（`schema_version 1.1`，含 `quantification`）/ PDF；3 个 metric group（Dice/IoU、Pixel Accuracy、HD/HD95/ASD）+ 4 列逐标签；6-05 临床报告风格（封面 + 摘要 + TOC + 8 段章节 + 公式 tip + 严重度分布图 + caption/footnote）；6-04 视觉/信息层（色阶图例、remap/historical 警告条、taxonomy 展示位、spacing 可视化、aiFindings 严重度排序、器官列表折叠、列固定/排序）
 - `data/organDetails.ts` — 15 器官 label / 颜色 / 中英文说明
 - `viewerLogic.ts` / `organLayerLogic.ts` / `referenceCases.ts` — 主界面可拆出的纯 UI 逻辑
 

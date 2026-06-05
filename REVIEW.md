@@ -6,16 +6,42 @@
 
 ---
 
-## 〇、2026-05-31 最新状态更新
+## 〇、2026-06-05 最新状态更新
 
-### label_taxonomy 修复
+### 2026-06-05 HTML 报告临床报告风格重构（第二轮美化）
+
+- `src/report/exportReport.ts` 从"卡片式仪表板"重塑为"临床评估报告"。
+- 新增 7 个 CSS 块：`.cover` 封面页（题图条 + 报告编号 + 主副标题 + 数据集/病例/生成时间三列）、`.exec-summary` 执行摘要（通过 / 关注点 / 建议三栏）、`.toc` 目录（§1-§8 锚点导航）、`.formula-tip` 公式小贴士（Dice / IoU、Pixel Accuracy、HD95 三张）、`.dist-chart` 严重度分布图（高/中/低 bar chart）、`.table-caption` 表格标题、`.footnotes` 脚注。
+- 新增 3 个工具函数 `distributionChartHtml()` / `severityBuckets()` / `formulaTips()`。
+- 正文模板按 §1 报告概览 / §2 摘要 / §3 数据集 / §4 器官 / §5 体素 / §6 距离 / §7 关键发现 / §8 附录 8 段章节编号排版。
+- 字体改为 Source Han Serif / Songti SC（serif 主体）+ JetBrains Mono（数值/代码/公式）。
+- @media print 改为 A4 + 顶部 caseId + 底部 page X of Y；`.cover` / `.dist-chart` `break-inside: avoid`。
+- 本轮不动 nnUNetv2 推理、缓存复用、SSE 协议、validation 字段或影像量化逻辑；与 2026-06-04 第一轮美化兼容并叠加。
+- `npm test` 与 `npm run build` 全过；浏览器自检 9 项视觉/信息元素 + 打印预览。
+
+### 2026-06-04 HTML 报告第一轮美化（视觉层 + 信息层）
+
+- `src/report/exportReport.ts` 从"工程 dump"提升为"卡片式仪表板"。
+- 视觉层：色阶图例（HD/HD95/ASD 共用 ≤1mm 绿 / ≤3mm 黄 / >3mm 红，Dice/IoU 共用 ≥0.85 绿 / ≥0.7 黄）、Header 渐变、3 个 metric group 加组标题图标（`OverlapIcon` / `PixelIcon` / `DistanceIcon` 内联 SVG）、aiFindings 按严重度排序 + `.severity-{high,medium,low}` 高亮、器官列表用 `<details><summary>` 折叠、逐标签表列固定（thead sticky + 首列 sticky-left）+ 列点击排序、@media print A4 页眉页码。
+- 信息层：remap_applied 顶部警告条（`.remap-banner.remap-on` 黄底红字 / `.remap-banner.remap-off` 绿底）、taxonomy / dataset_hint 展示位、spacing 可视化（`.spacing-bar` 3 色块按 min=0.5mm / max=2.0mm 反向归一化）、historical 警告条（`.historical-banner` 灰底斜体）。
+- `src/main.tsx:handleExport` 透传 `validation.remap_applied` / `taxonomy_match` / `dataset_hint` / `historical` / `label_taxonomy`（已在 `src/inference/inferenceClient.ts:117-147 normalizeValidation` 白名单）。
+- `tests/imagingLogic.test.ts` 新增 source-grep 断言保护 4 个新 class（`.legend` / `.remap-banner` / `.historical-banner` / `.spacing-bar`）。
+- 浏览器自检 9 项视觉/信息元素。
+
+### 2026-06-03 质量评估指标扩展 + 表面距离计算加速
+
+- 把 quality 评估报告补齐到 6 类医学影像主流指标（Dice / IoU / Pixel Accuracy / HD / HD95 / ASD）。
+- `server/main.py` 新增 `surface_distances()`（1 crop + 2 EDT/label），把单 label 的 `distance_transform_edt` 调用从 6 次合并到 2 次。
+- `src/inference/inferenceClient.ts` 在 `ValidationSummary` / `LabelMetric` 增补 12 个新字段并加入 `normalizeValidation()` 白名单。
+- `src/report/exportReport.ts` 报告模板新增 3 个 metric group（区域重叠度 · Dice / IoU、像素准确率 · Pixel Accuracy、表面距离 · HD / HD95 / ASD）和 4 个逐标签列（像素准确率、ASD (mm)、HD95 (mm)、HD (mm)）。
+- AMOS 0117 quality 缓存命中：validation 阶段从 38.86s 降到 16.78s（约 2.3× 加速）。
+- 3 个新增回归测试覆盖新函数精度（1e-9）、EDT 调用计数恒为 2、wall-time 加速比 ≥30%。
+
+### 2026-05-31 label_taxonomy 修复与 AMOS CT 推理
 
 - 显式 `label_taxonomy=auto|AMOS22|FLARE22` 已实现，修复了 AMOS 标签被误判为 FLARE22 的问题。
 - `server/taxonomy.py` 的 `detect_dataset()` 现在更保守：标签 ID 是 checkpoint 子集时不触发 remap。
 - 新部署包 `server-runtime-package-20260531.zip` 已创建，配套 `server-runtime-quickstart-20260531.md`。
-
-### AMOS CT 高分辨率推理
-
 - AMOS CT（768×768×103）本地在线推理完成，fast profile，mean_dice=0.77724。
 - 输入分辨率高于标准 AMOS（768×768 vs 512×512），面积增加 2.25 倍，推理时间显著延长。
 - 后续优化方向：预降采样、3D 模型评估。
@@ -115,6 +141,7 @@
 |---|---|---|
 | 真实 nnUNetv2 在线推理 | 本地 AMOS 0117 / FLARE22 Tr 0009 与服务器 5-fold smoke 已跑通；显式 `label_taxonomy=auto\|AMOS22\|FLARE22` 与 `dataset_hint` 字段已接入；高分辨率 CT fast 推理完成 | 已完成（2026-06-03 收口） |
 | 结果自动回填并替换手工导入 | 前端能接收后端结果，后端输出路径已改为真实 nnUNetv2 结果；6 类指标 + spacing 回填到 GUI | 已完成（2026-06-03） |
+| HTML 报告输出 | `src/report/exportReport.ts` 输出已升级为"临床报告"风格：封面 + 摘要 + TOC + 8 段章节编号 + 公式 tip + 严重度分布图 + caption/footnote + A4 打印页眉页码（6-05 临床报告风格重构）；色阶图例 + remap/historical 警告条 + taxonomy 展示位 + spacing 可视化 + aiFindings 严重度排序 + 器官列表折叠 + 列固定/排序（6-04 第一轮美化） | 已完成（2026-06-05 收口） |
 | 置信度阈值 | 仅保留 UI 控件，尚未与概率输出建立真实语义 | 未完成（倾向从 UI 移除假控件） |
 | label 表稳定来源 | 后端从真实 `dataset.json` 读取，前端优先使用 `/api/models` 并保留 fallback；`loadReferenceCase()` 按 `referenceCase.dataset` 自动预设 `label_taxonomy` | 已完成（2026-06-02） |
 | 三正交桌面布局 | 已有 CSS 测试和 Playwright 盒模型回归检查 | 已完成 |

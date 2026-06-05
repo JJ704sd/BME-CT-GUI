@@ -4,6 +4,17 @@
 
 ## 当前运行状态
 
+2026-06-05 已完成：
+- HTML 报告临床报告风格重构（第二轮美化）：`src/report/exportReport.ts` 从"卡片式仪表板"重塑为"临床评估报告"。新增 7 个 CSS 块：`.cover` 封面页（题图条 + 报告编号 + 主副标题 + 数据集/病例/生成时间三列）、`.exec-summary` 执行摘要（通过 / 关注点 / 建议三栏）、`.toc` 目录（§1-§8 锚点导航）、`.formula-tip` 公式小贴士（Dice / IoU、Pixel Accuracy、HD95 三张）、`.dist-chart` 严重度分布图（高/中/低 bar chart）、`.table-caption` 表格标题、`.footnotes` 脚注；新增 3 个工具函数 `distributionChartHtml()` / `severityBuckets()` / `formulaTips()`；正文模板按 §1 报告概览 / §2 摘要 / §3 数据集 / §4 器官 / §5 体素 / §6 距离 / §7 关键发现 / §8 附录 8 段章节编号排版；字体改为 Source Han Serif / Songti SC + JetBrains Mono；@media print 改为 A4 + 顶部 caseId + 底部 page X of Y。本轮不动 6 类指标、`surface_distances()` 2 EDT、`ValidationSummary` / `LabelMetric` 白名单或影像量化逻辑；与 2026-06-04 第一轮美化兼容并叠加。
+- 打印页眉页码：CSS counter 在每页加 `报告 · caseId · generatedAt` 顶部条 + `page X of Y` 底部条；正文 padding 适配 A4；`.cover` / `.dist-chart` `break-inside: avoid` 避免打印分页错位。
+- 报告打印分页：A4 @page 规则下正文 32px padding，`.cover` 整页独立分页（`break-after: page`），`.dist-chart` 与 `.formula-tip` 不可内部分页（`break-inside: avoid`）。
+
+2026-06-04 已完成：
+- HTML 报告第一轮美化（视觉层 + 信息层）：`src/report/exportReport.ts` 从"工程 dump"提升为"卡片式仪表板"。视觉层：色阶图例（HD/HD95/ASD 共用 ≤1mm 绿 / ≤3mm 黄 / >3mm 红，Dice/IoU 共用 ≥0.85 绿 / ≥0.7 黄）、Header 渐变、3 个 metric group 加组标题图标（`OverlapIcon` / `PixelIcon` / `DistanceIcon` 内联 SVG）、aiFindings 严重度排序 + `.severity-{high,medium,low}` 高亮、器官列表用 `<details><summary>` 折叠、逐标签表列固定（thead `position: sticky; top: 0` + 首列 `position: sticky; left: 0; z-index: 2`）+ 列点击排序、@media print A4 页眉页码。信息层：remap_applied 顶部警告条（`.remap-banner.remap-on` 黄底红字 / `.remap-banner.remap-off` 绿底）、taxonomy / dataset_hint 展示位、spacing 可视化（`.spacing-bar` 3 色块按 min=0.5mm / max=2.0mm 反向归一化）、historical 警告条（`.historical-banner` 灰底斜体）。
+- 字段透传：`src/main.tsx:handleExport` 构造 `ReportData` 时透传 `validation.remap_applied` / `taxonomy_match` / `dataset_hint` / `historical` / `label_taxonomy`（已在 `src/inference/inferenceClient.ts:117-147 normalizeValidation` 白名单）。
+- 回归保护：`tests/imagingLogic.test.ts` 新增 source-grep 断言保护 4 个新 class（`.legend` / `.remap-banner` / `.historical-banner` / `.spacing-bar`）。
+- 浏览器自检：导出 AMOS 0117 / FLARE22 / cache hit 三类 HTML 报告，肉眼确认 9 项视觉/信息元素就位。
+
 2026-06-03 已完成：
 - 质量评估指标扩展：quality 评估报告补齐到 6 类医学影像主流指标（Dice / IoU / Pixel Accuracy / HD / HD95 / ASD）。`src/report/exportReport.ts` 新增 3 个 metric group（区域重叠度 · Dice / IoU、像素准确率 · Pixel Accuracy、表面距离 · HD / HD95 / ASD，共 19 张卡片，HD/HD95/ASD 用 mm 单位 + 越低越好的色阶：≤1mm 绿、≤3mm 黄、>3mm 红）；逐标签表新增 4 列：像素准确率、ASD (mm)、HD95 (mm)、HD (mm)；逐标签表 chips 显示 NIfTI spacing 和 surface_distance_unit。
 - 表面距离计算加速：`server/main.py` 新增 `surface_distances()`，把单 label 的 `distance_transform_edt` 调用从 6 次合并到 2 次（预测→参考、参考→预测各一次），再用 value 数组派生 `asd` / `hd` / `hd95`。AMOS 0117 quality cache hit validation 实测 38.86s → 16.78s（约 2.3× 加速）。
@@ -32,7 +43,7 @@
 2. 到 `src/components/OrthogonalViewer.tsx` 讲三正交视图如何联动，以及本轮 `requestAnimationFrame` 合并渲染如何缓解快速鼠标移动卡帧。
 3. 到 `src/imaging/voxelMapping.ts` 和 `src/imaging/sliceRenderer.ts` 讲体素坐标、切片坐标、方向映射和 canvas 切片渲染缓存。
 4. 到 `src/inference/inferenceClient.ts` 讲前端如何创建 job、监听 SSE、下载结果。
-5. 到 `src/report/exportReport.ts` 讲报告导出：HTML/JSON/PDF 三种格式、自包含 HTML 模板和数据收集。
+5. 到 `src/report/exportReport.ts` 讲报告导出：HTML/JSON/PDF 三种格式、自包含 HTML 模板和数据收集。2026-06-04 / 2026-06-05 两轮美化后 HTML 报告输出是"临床报告"风格：封面（`.cover`）+ 摘要（`.exec-summary`）+ TOC（`.toc`）+ 8 段章节（`§1-§8`）+ 公式小贴士（`.formula-tip`）+ 严重度分布图（`.dist-chart`）+ caption/footnote（`.table-caption` / `.footnotes`）+ A4 打印页眉页码；视觉层（`src/report/exportReport.ts` 顶部 CSS 块）有色阶图例、remap/historical 警告条、taxonomy 展示位、spacing 可视化、aiFindings 严重度排序、器官列表折叠、列固定/排序。讲解时配合浏览器打开 `amos_0117` 真实 case 导出的 HTML 报告作为演示。
 6. 到 `server/main.py`、`server/server_inference.py` 和 `server/persistent_nnunet_worker.py` 讲 FastAPI 后端如何桥接 nnUNetv2、管理任务、缓存、validation，以及如何按 `runtime_target` 选择本地保底路径或服务器 5-fold soft ensemble 路径。`label_taxonomy` 参数已纳入缓存 key。
 7. 到 `deployment-packages/server-runtime-quickstart-20260531.md` 讲服务器 runtime 包的解压、环境变量、CORS、校园网 API 直连 smoke test、显式 `label_taxonomy` 参数和验证清单。
 8. 到 `server/taxonomy.py` 讲跨数据集标签 taxonomy 检测与自动重映射：FLARE22 标签定义、器官名别名映射、`detect_dataset()` 自动识别数据集来源（2026-06-02 收紧：参考覆盖 ckpt 标签 ≥ 0.85 时返回 `None`；`auto` 退化为保底）、`build_remap_mapping()` 按器官名建立 ID 映射、`apply_remap()` 用查找表重排参考标签数组。支持显式 `label_taxonomy=auto|AMOS22|FLARE22` 参数；前端 `loadReferenceCase()` 按 `referenceCase.dataset` 自动预设 taxonomy。

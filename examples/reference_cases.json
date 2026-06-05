@@ -7,8 +7,8 @@
       "modality": "CT",
       "role": "built-in-reference",
       "description": "AMOS 22 训练域内置参考病例，带标准答案，用于演示、回归和 Dice 验证。前端 loadReferenceCase() 会按 dataset=AMOS22 自动设置 label_taxonomy=AMOS22。",
-      "original": "nnunetv2_files/amos_0117(3).nii.gz",
-      "label": "nnunetv2_files/amos_0117(2).nii.gz",
+      "original": "../nnunetv2_files/amos_0117(3).nii.gz",
+      "label": "../nnunetv2_files/amos_0117(2).nii.gz",
       "original_filename": "amos_0117_original.nii.gz",
       "label_filename": "amos_0117_label.nii.gz"
     },
@@ -19,8 +19,8 @@
       "modality": "CT",
       "role": "external-reference",
       "description": "FLARE22 外部参考病例（1-13 标签）。前端按 dataset=FLARE22 自动设置 label_taxonomy=FLARE22；提交时 dataset_hint=FLARE22 覆盖 detect_dataset() 的 0.85 守卫 None，使 auto 模式下仍能走 remap。",
-      "original": "nnunetv2_files/FLARE22_Tr_0009_0000.nii.gz",
-      "label": "nnunetv2_files/FLARE22_Tr_0009.nii.gz",
+      "original": "../nnunetv2_files/FLARE22_Tr_0009_0000.nii.gz",
+      "label": "../nnunetv2_files/FLARE22_Tr_0009.nii.gz",
       "original_filename": "FLARE22_Tr_0009_0000.nii.gz",
       "label_filename": "FLARE22_Tr_0009.nii.gz"
     },
