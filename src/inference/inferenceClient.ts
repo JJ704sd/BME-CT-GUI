@@ -30,6 +30,7 @@ export type ValidationSummary = {
   label_taxonomy?: LabelTaxonomy;
   remap_applied?: boolean;
   remap_source?: string;
+  dataset_hint?: string;
   historical?: boolean;
   source_job_id?: string;
   thresholds?: {
@@ -151,6 +152,7 @@ function normalizeValidation(payload: unknown): ValidationSummary | undefined {
   if (labelTaxonomy) summary.label_taxonomy = labelTaxonomy;
   if (typeof raw.remap_applied === "boolean") summary.remap_applied = raw.remap_applied;
   if (typeof raw.remap_source === "string") summary.remap_source = raw.remap_source;
+  if (typeof raw.dataset_hint === "string") summary.dataset_hint = raw.dataset_hint;
   if (raw.historical === true) summary.historical = true;
   if (typeof raw.source_job_id === "string") summary.source_job_id = raw.source_job_id;
   if (raw.message !== undefined) summary.message = String(raw.message);

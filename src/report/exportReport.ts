@@ -66,6 +66,34 @@ function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+function spacingClass(mm: number): string {
+  if (mm <= 0.7) return "s0-7";
+  if (mm <= 1.0) return "s1-0";
+  if (mm <= 1.2) return "s1-2";
+  if (mm <= 1.5) return "s1-5";
+  return "s2-0";
+}
+
+function spacingCellsHtml(spacing: number[]): string {
+  return spacing
+    .slice(0, 3)
+    .map((n, i) => `<span class="spacing-cell ${spacingClass(Number(n))}" title="${Number(n).toFixed(3)} mm"></span><span class="spacing-axis">${["x", "y", "z"][i] ?? ""}</span>`)
+    .join("");
+}
+
+type FindingSeverity = "high" | "medium" | "low";
+
+function classifyFindingSeverity(text: string): FindingSeverity {
+  const t = text.toLowerCase();
+  if (/(错误|失败|异常|warning|error|failed|异常|不可用|缺失|崩溃|超时|越界|fail)/.test(t)) return "high";
+  if (/(偏高|偏低|不稳定|待复核|review|warning|警告|下降|回落|偏差|不确定|可能)/.test(t)) return "medium";
+  return "low";
+}
+
+function findingSeverityLabel(sev: FindingSeverity): string {
+  return { high: "high", medium: "medium", low: "low" }[sev];
+}
+
 function formatMetric(value: number | null | undefined, digits = 4): string {
   if (value == null || !Number.isFinite(Number(value))) return "N/A";
   return Number(value).toFixed(digits);
@@ -145,7 +173,7 @@ function buildHtmlContent(data: ReportData): string {
 
   const perLabelRows = v?.labels?.length
     ? v.labels.map((l) => `<tr>
-        <td class="num">${l.label}</td>
+        <td class="num sticky-col">${l.label}</td>
         <td>${escapeHtml(l.name ?? `Label ${l.label}`)}</td>
         <td>${metricBarHtml(l.dice, "dice")}</td>
         <td>${metricBarHtml(l.iou, "iou")}</td>
@@ -171,6 +199,22 @@ function buildHtmlContent(data: ReportData): string {
       <td class="anatomical">${detail ? escapeHtml(detail.anatomicalLocation) : "—"}</td>
     </tr>`;
   }).join("\n");
+
+  const organListBlock = `
+<details class="organ-list-details" open>
+  <summary>器官列表（${data.organs.length} 个 · 点击折叠）</summary>
+  <table>
+    <thead>
+      <tr>
+        <th>器官</th>
+        <th>质控分数</th>
+        <th>状态</th>
+        <th>解剖位置</th>
+      </tr>
+    </thead>
+    <tbody>${organRows}</tbody>
+  </table>
+</details>`;
 
   const quantificationRows = data.quantification.organs.length
     ? data.quantification.organs.slice(0, 12).map((organ) => `<tr>
@@ -207,8 +251,15 @@ function buildHtmlContent(data: ReportData): string {
     : '<tr><td colspan="4" class="muted">无推理记录</td></tr>';
 
   const findingsHtml = data.aiFindings.length
-    ? data.aiFindings.map((f) => `<li>${escapeHtml(f)}</li>`).join("\n")
-    : "<li class=\"muted\">暂无发现</li>";
+    ? data.aiFindings
+        .map((f) => ({ text: f, sev: classifyFindingSeverity(f) }))
+        .sort((a, b) => {
+          const order: Record<FindingSeverity, number> = { high: 0, medium: 1, low: 2 };
+          return order[a.sev] - order[b.sev];
+        })
+        .map((f) => `<li class="ai-finding severity-${f.sev}"><span class="sev-tag">${findingSeverityLabel(f.sev)}</span>${escapeHtml(f.text)}</li>`)
+        .join("\n")
+    : '<li class="ai-finding severity-low"><span class="sev-tag">low</span>暂无发现</li>';
 
   const hasValidation = v != null;
 
@@ -228,6 +279,7 @@ function buildHtmlContent(data: ReportData): string {
     --line: #e5e9f0;
     --line-soft: #eef1f6;
     --accent: #4263eb;
+    --accent-soft: #6b8aff;
     --good: #2b8a3e;
     --good-bg: #e6f4ea;
     --warn: #d97706;
@@ -236,6 +288,7 @@ function buildHtmlContent(data: ReportData): string {
     --bad-bg: #fde8e8;
     --info-bg: #e7f0ff;
     --shadow: 0 1px 2px rgba(20, 25, 50, 0.04), 0 2px 8px rgba(20, 25, 50, 0.04);
+    --shadow-header: 0 4px 12px rgba(20, 25, 50, 0.12);
     --radius: 10px;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -255,9 +308,10 @@ function buildHtmlContent(data: ReportData): string {
     overflow: hidden;
   }
   .header {
-    background: linear-gradient(135deg, #1a2b5c 0%, #2a4a8c 50%, #4263eb 100%);
+    background: linear-gradient(135deg, #1a73e8 0%, #4a90e2 50%, #6bb6ff 100%);
     color: #fff;
     padding: 28px 36px 24px;
+    box-shadow: var(--shadow-header);
   }
   .header-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
   .header h1 { font-size: 24px; font-weight: 600; letter-spacing: 0.5px; }
@@ -371,6 +425,98 @@ function buildHtmlContent(data: ReportData): string {
   ul { padding-left: 22px; margin-bottom: 16px; }
   li { margin-bottom: 6px; font-size: 14px; }
 
+  /* ===== 色阶图例 ===== */
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 18px;
+    margin: 8px 0 18px;
+    padding: 12px 16px;
+    background: #f8fafc;
+    border: 1px solid var(--line-soft);
+    border-radius: var(--radius);
+    font-size: 12px;
+    color: var(--ink-soft);
+  }
+  .legend-group { display: flex; align-items: center; gap: 6px; }
+  .legend-group .label-strong { color: var(--ink); font-weight: 600; margin-right: 4px; }
+  .legend-chip { display: inline-flex; align-items: center; gap: 4px; }
+  .legend-chip .swatch {
+    display: inline-block; width: 14px; height: 14px; border-radius: 3px;
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06);
+  }
+  .swatch-good { background: linear-gradient(90deg, #2b8a3e, #51cf66); }
+  .swatch-warn { background: linear-gradient(90deg, #d97706, #f59f00); }
+  .swatch-bad  { background: linear-gradient(90deg, #c92a2a, #ff6b6b); }
+
+  /* ===== remap / historical 顶部警告条 ===== */
+  .remap-banner {
+    display: flex; align-items: center; gap: 10px;
+    margin: -28px -36px 0; padding: 12px 36px;
+    font-size: 13px; font-weight: 500;
+    border-bottom: 1px solid transparent;
+  }
+  .remap-banner.on  { background: #fff8e1; color: #8a5a00; border-bottom-color: #f5d8a0; }
+  .remap-banner.off { background: var(--good-bg); color: var(--good); border-bottom-color: #b8e0c2; }
+  .remap-banner .ico { font-size: 16px; line-height: 1; }
+  .historical-banner {
+    margin: 0; padding: 10px 14px;
+    background: #f3f4f6; color: var(--ink-soft);
+    border: 1px solid var(--line); border-left: 3px solid var(--muted);
+    border-radius: 6px; font-size: 12px; font-style: italic;
+  }
+
+  /* ===== spacing 可视化 ===== */
+  .spacing-bar { display: inline-flex; gap: 3px; vertical-align: middle; margin-left: 6px; }
+  .spacing-cell { display: inline-block; width: 14px; height: 14px; border-radius: 2px; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.06); }
+  .spacing-cell.s0-7 { background: #b6e3a1; }
+  .spacing-cell.s1-0 { background: #cbe98c; }
+  .spacing-cell.s1-2 { background: #f5e07a; }
+  .spacing-cell.s1-5 { background: #f5b06a; }
+  .spacing-cell.s2-0 { background: #f5876a; }
+  .spacing-axis { font-size: 10px; color: var(--muted); margin-left: 1px; }
+
+  /* ===== aiFindings 严重度 ===== */
+  .ai-findings { list-style: none; padding: 0; margin: 0; }
+  .ai-finding {
+    padding: 10px 14px; margin-bottom: 8px;
+    border-left: 3px solid var(--muted);
+    background: #f8fafc; border-radius: 0 6px 6px 0;
+    font-size: 13px; color: var(--ink);
+  }
+  .ai-finding.severity-high   { border-left-color: var(--bad);  background: #fdf0f0; }
+  .ai-finding.severity-medium { border-left-color: var(--warn); background: #fff8ed; }
+  .ai-finding.severity-low    { border-left-color: var(--good); background: #f1f9f3; }
+  .ai-finding .sev-tag {
+    display: inline-block; padding: 1px 8px; border-radius: 999px;
+    font-size: 11px; font-weight: 600; margin-right: 8px;
+    background: rgba(255,255,255,0.6); color: var(--ink-soft);
+  }
+  .ai-finding.severity-high   .sev-tag { color: var(--bad); }
+  .ai-finding.severity-medium .sev-tag { color: var(--warn); }
+  .ai-finding.severity-low    .sev-tag { color: var(--good); }
+
+  /* ===== 器官列表折叠 ===== */
+  .organ-list-details { margin: 0; }
+  .organ-list-details > summary {
+    cursor: pointer; padding: 8px 12px;
+    background: #f8fafc; border: 1px solid var(--line);
+    border-radius: var(--radius); font-size: 13px; font-weight: 500;
+    color: var(--ink-soft);
+  }
+  .organ-list-details > summary::-webkit-details-marker { color: var(--accent); }
+  .organ-list-details[open] > summary { border-radius: var(--radius) var(--radius) 0 0; border-bottom-color: transparent; }
+  .organ-list-details table { margin: 0; border-top: none; border-radius: 0 0 var(--radius) var(--radius); }
+  .organ-list-details > table tbody tr { break-inside: avoid; }
+
+  /* ===== 逐标签表 sticky + sortable ===== */
+  .label-table thead th { position: sticky; top: 0; z-index: 2; cursor: pointer; user-select: none; }
+  .label-table thead th .sort-ind { display: inline-block; margin-left: 4px; opacity: 0.4; font-size: 10px; }
+  .label-table thead th.sort-asc  .sort-ind,
+  .label-table thead th.sort-desc .sort-ind { opacity: 1; color: var(--accent); }
+  .label-table thead th.num.sticky-col { position: sticky; left: 0; z-index: 3; }
+  .label-table tbody td.sticky-col { position: sticky; left: 0; background: var(--surface); z-index: 1; box-shadow: 1px 0 0 var(--line); }
+  .label-table thead th.sticky-col { background: #f8fafc; z-index: 3; }
+  .label-wrap { max-width: 100%; overflow-x: auto; }
+
   .footer {
     margin-top: 32px;
     padding: 18px 36px;
@@ -383,17 +529,33 @@ function buildHtmlContent(data: ReportData): string {
   .footer .hint { font-style: italic; }
 
   @media print {
+    @page { size: A4; margin: 18mm 14mm 22mm; }
     body { background: #fff; padding: 0; }
     .page { box-shadow: none; border-radius: 0; max-width: none; }
     h2 { break-after: avoid; }
     table, .metric-card, .overview-card { break-inside: avoid; }
     thead { display: table-header-group; }
-    .header { background: #1a2b5c !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    .card-bar, .metric-bar, .badge, .tag, .score-pill { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .header { background: #1a73e8 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .remap-banner, .card-bar, .metric-bar, .badge, .tag, .score-pill, .swatch, .spacing-cell, .ai-finding { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .print-header, .print-footer { display: block !important; }
+  }
+  .print-header, .print-footer { display: none; }
+  .print-header {
+    position: fixed; top: 0; left: 0; right: 0;
+    padding: 6px 14mm; font-size: 11px; color: var(--muted);
+    border-bottom: 1px solid var(--line); background: #fff;
+    display: flex; justify-content: space-between;
+  }
+  .print-footer {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    padding: 6px 14mm; font-size: 11px; color: var(--muted);
+    border-top: 1px solid var(--line); background: #fff;
+    display: flex; justify-content: space-between;
   }
 </style>
 </head>
 <body>
+<div class="print-header"><span>CT 分割报告 · ${escapeHtml(data.caseId)}</span><span>${escapeHtml(data.generatedAt)}</span></div>
 <div class="page">
 
 <div class="header">
@@ -413,6 +575,8 @@ function buildHtmlContent(data: ReportData): string {
     ${hasValidation ? `<div>${statusBadgeHtml(v.status)}</div>` : ""}
   </div>
 </div>
+
+${hasValidation && v.remap_applied ? `<div class="remap-banner on"><span class="ico">⚠</span><span>已自动重映射标签 ID · ${escapeHtml(v.remap_source ?? "已知数据集")} → 当前模型 · ${escapeHtml(v.label_taxonomy ?? "auto")} taxonomy</span></div>` : (hasValidation ? `<div class="remap-banner off"><span class="ico">✓</span><span>标签体系已对齐 · ${escapeHtml(v.label_taxonomy ?? "auto")} taxonomy${v.dataset_hint ? ` · dataset_hint=${escapeHtml(v.dataset_hint)}` : ""}</span></div>` : "")}
 
 <div class="content">
 
@@ -466,32 +630,56 @@ ${hasValidation ? `
 </div>
 <div class="label-stats">
   ${v.remap_applied ? `<span class="tag tag-progress">标签重映射 · ${escapeHtml(v.remap_source ?? "已知数据集")} → 当前模型</span>` : ""}
-  ${v.historical ? `<span class="tag tag-info">历史离线缓存摘要</span>` : ""}
+  ${v.label_taxonomy ? `<span class="tag ${v.taxonomy_match ? "tag-passed" : "tag-review"}">taxonomy · ${escapeHtml(v.label_taxonomy)}${v.taxonomy_match ? "" : " (不匹配)"}</span>` : ""}
+  ${v.dataset_hint ? `<span class="tag tag-info">dataset_hint · ${escapeHtml(v.dataset_hint)}</span>` : ""}
   ${v.accepted === true ? `<span class="tag tag-passed">通过验证阈值</span>` : ""}
   ${v.accepted === false ? `<span class="tag tag-review">未达阈值</span>` : ""}
   ${v.thresholds?.mean_dice != null ? `<span class="tag tag-info">mean_dice 阈值 ${Number(v.thresholds.mean_dice).toFixed(2)}</span>` : ""}
-  ${v.spacing && v.spacing.length ? `<span class="tag tag-info">体素间距 (${escapeHtml(v.spacing.map((n) => Number(n).toFixed(2)).join(" × "))} mm)</span>` : ""}
+  ${v.spacing && v.spacing.length ? `<span class="tag tag-info">体素间距 (${escapeHtml(v.spacing.map((n) => Number(n).toFixed(2)).join(" × "))} mm) <span class="spacing-bar" title="spacing 可视化（绿→红）">${spacingCellsHtml(v.spacing)}</span></span>` : ""}
+</div>
+${v.historical ? `<div class="historical-banner" style="margin: 8px 0 18px;">（历史离线缓存摘要） — 当前 validation 未在本次 job 重新计算；如需重算请提交新 job 或上传新标签${v.source_job_id ? `（来源 job: ${escapeHtml(v.source_job_id)}）` : ""}</div>` : ""}
+<div class="legend" aria-label="色阶图例">
+  <div class="legend-group">
+    <span class="label-strong">Dice / IoU / 像素准确率：</span>
+    <span class="legend-chip"><span class="swatch swatch-good"></span> ≥ 0.85</span>
+    <span class="legend-chip"><span class="swatch swatch-warn"></span> 0.70 – 0.85</span>
+    <span class="legend-chip"><span class="swatch swatch-bad"></span> &lt; 0.70</span>
+  </div>
+  <div class="legend-group">
+    <span class="label-strong">HD / HD95 / ASD (mm)：</span>
+    <span class="legend-chip"><span class="swatch swatch-good"></span> ≤ 1</span>
+    <span class="legend-chip"><span class="swatch swatch-warn"></span> 1 – 3</span>
+    <span class="legend-chip"><span class="swatch swatch-bad"></span> &gt; 3</span>
+  </div>
+  <div class="legend-group">
+    <span class="label-strong">关键发现严重度：</span>
+    <span class="legend-chip"><span class="swatch swatch-bad"></span> high</span>
+    <span class="legend-chip"><span class="swatch swatch-warn"></span> medium</span>
+    <span class="legend-chip"><span class="swatch swatch-good"></span> low</span>
+  </div>
 </div>
 ${v.message ? `<p style="margin-top:10px;color:var(--ink-soft);font-size:13px;">${escapeHtml(v.message)}</p>` : ""}
 
-<h3>逐标签指标 <span style="font-weight:400;color:var(--muted);font-size:12px;">（Dice ≥ 0.85 通过 · IoU 同口径 · 距离越低越好）</span></h3>
-<table>
+<h3>逐标签指标 <span style="font-weight:400;color:var(--muted);font-size:12px;">（Dice ≥ 0.85 通过 · IoU 同口径 · 距离越低越好 · 点击列头排序）</span></h3>
+<div class="label-wrap">
+<table class="label-table">
   <thead>
     <tr>
-      <th class="num" style="width:60px">Label</th>
-      <th>器官</th>
-      <th>Dice</th>
-      <th>IoU</th>
-      <th>像素准确率</th>
-      <th>ASD (mm)</th>
-      <th>HD95 (mm)</th>
-      <th>HD (mm)</th>
-      <th class="num">预测体素</th>
-      <th class="num">参考体素</th>
+      <th class="num sticky-col" data-sort="label" style="width:60px">Label<span class="sort-ind">↕</span></th>
+      <th data-sort="name">器官<span class="sort-ind">↕</span></th>
+      <th data-sort="dice">Dice<span class="sort-ind">↕</span></th>
+      <th data-sort="iou">IoU<span class="sort-ind">↕</span></th>
+      <th data-sort="pixel_accuracy">像素准确率<span class="sort-ind">↕</span></th>
+      <th data-sort="asd">ASD (mm)<span class="sort-ind">↕</span></th>
+      <th data-sort="hd95">HD95 (mm)<span class="sort-ind">↕</span></th>
+      <th data-sort="hd">HD (mm)<span class="sort-ind">↕</span></th>
+      <th class="num" data-sort="prediction_voxels">预测体素<span class="sort-ind">↕</span></th>
+      <th class="num" data-sort="reference_voxels">参考体素<span class="sort-ind">↕</span></th>
     </tr>
   </thead>
   <tbody>${perLabelRows}</tbody>
 </table>
+</div>
 <div class="label-stats" style="margin-top:-8px;margin-bottom:20px;">
   <span class="tag tag-passed">通过 ${passedCount}</span>
   <span class="tag tag-review">待复核 ${reviewCount}</span>
@@ -500,17 +688,7 @@ ${v.message ? `<p style="margin-top:10px;color:var(--ink-soft);font-size:13px;">
 ` : '<p style="color:var(--muted);font-size:13px;padding:14px;background:#f8fafc;border-radius:8px;border:1px dashed var(--line);">尚未执行验证（需导入标签 CT 或载入参考病例）</p>'}
 
 <h2>器官列表</h2>
-<table>
-  <thead>
-    <tr>
-      <th>器官</th>
-      <th>质控分数</th>
-      <th>状态</th>
-      <th>解剖位置</th>
-    </tr>
-  </thead>
-  <tbody>${organRows}</tbody>
-</table>
+${organListBlock}
 
 <h2>影像量化分析</h2>
 <p style="color:var(--ink-soft);font-size:12px;margin-bottom:10px;">${escapeHtml(data.quantification.note)} 体积、截面积和长度由自动分割 mask 与 NIfTI spacing 估算；壁厚、精确管腔面积、中心线长度属于后续扩展。</p>
@@ -567,6 +745,44 @@ ${v.message ? `<p style="margin-top:10px;color:var(--ink-soft);font-size:13px;">
 </div>
 
 </div>
+<div class="print-footer"><span>segmentation-gui-prototype · 2026-06-03 · schema_version 1.1</span><span class="page-num"></span></div>
+<script>
+(function () {
+  // 逐标签表 sticky thead / 列排序
+  var table = document.querySelector('.label-table');
+  if (table) {
+    var headers = table.querySelectorAll('thead th');
+    headers.forEach(function (th, idx) {
+      th.addEventListener('click', function () {
+        var dir = th.classList.contains('sort-asc') ? 'desc' : 'asc';
+        headers.forEach(function (other) { other.classList.remove('sort-asc'); other.classList.remove('sort-desc'); other.querySelector('.sort-ind').textContent = '↕'; });
+        th.classList.add('sort-' + dir);
+        th.querySelector('.sort-ind').textContent = dir === 'asc' ? '↑' : '↓';
+        var rows = Array.prototype.slice.call(table.querySelectorAll('tbody tr'));
+        rows.sort(function (a, b) {
+          var av = a.children[idx].textContent.trim();
+          var bv = b.children[idx].textContent.trim();
+          var an = parseFloat(av.replace(/,/g, ''));
+          var bn = parseFloat(bv.replace(/,/g, ''));
+          if (!isNaN(an) && !isNaN(bn)) {
+            return dir === 'asc' ? an - bn : bn - an;
+          }
+          return dir === 'asc' ? av.localeCompare(bv, 'zh-CN') : bv.localeCompare(av, 'zh-CN');
+        });
+        var tbody = table.querySelector('tbody');
+        rows.forEach(function (r) { tbody.appendChild(r); });
+      });
+    });
+  }
+  // 打印页码
+  var numEl = document.querySelector('.print-footer .page-num');
+  if (numEl) {
+    var style = '@page { @bottom-right { content: counter(page) " / " counter(pages); } }';
+    var s = document.createElement('style'); s.textContent = style; document.head.appendChild(s);
+    numEl.textContent = '';
+  }
+})();
+</script>
 </body>
 </html>`;
 }
