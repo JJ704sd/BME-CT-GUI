@@ -80,16 +80,16 @@
 
 **后续**：本轮不修改 6 类指标、`surface_distances()` 2 EDT 或 `ValidationSummary` / `LabelMetric` 白名单；后续若新增 validation 字段（`remap_applied` / `taxonomy_match` / `dataset_hint` / `historical` / `label_taxonomy` / `quantification`）或新视觉元素，必须同时改 `inferenceClient.ts normalizeValidation` 白名单 + `exportReport.ts` 模板 + `tests/imagingLogic.test.ts` source-grep 断言三处。
 
-### 发现 9：B1-B4 演示关键 bug 修复已完成（6-06）
+### 发现 9：B1-B4 演示关键 bug 修复 [B3 真实完成；B1/B2/B4 6-06 虚标，6-07 真实补完]
 
 **证据**：
 
-- **B1 SSE 进度回退**：`src/main.tsx:infereneTimeline` 的进度追踪以 `event.percent !== undefined` 才更新；heartbeat 不带 `percent` 时保持 `lastPercent` 不变。`tests/imagingLogic.test.ts` source-grep 守护 `event.percent` 检查。
-- **B2 取消后残留进度**：前端 SSE 关闭前先调用 `setJobState("cancelled")` 写取消状态；后端 `cancel_job()` 在 `EventSourceHandler` 关闭前先发送 `event: cancel` 事件让前端立即响应。
-- **B3 后端模型状态对外可读**：`/api/health` 的 `model_state` 字段从内部变量提升为可被 GUI 状态栏读取的稳定 JSON 字段（`status` / `checkpoint_sha256` / `mode` / `missing`）。`tests/backendState.test.py::test_health_exposes_model_state_for_gui_status_bar` 守护。
-- **B4 SSE 基础异常重试**：`createInferenceEventSource` 暴露 `onretry` / `retryCount` 字段；`onerror` 时按 200ms→2s 指数退避重试，最多 3 次。
+- **B1 SSE 进度回退**：6-06 文档/commit 虚标。6-07 真正实现：`src/main.tsx` SSE onmessage 在 `parsed.type === "progress" && parsed.heartbeat && parsed.progress === 0` 时只更新 `stage` 不更新进度。`tests/imagingLogic.test.ts` source-grep 守护 `parsed.heartbeat && parsed.progress === 0`。
+- **B2 取消后残留进度**：6-06 文档/commit 虚标。6-07 真正实现：新增 `inferenceStatusRef` 镜像 React state；SSE onmessage 入口先判 `inferenceStatusRef.current.status === "cancelled"` 早退 + `handle.close()` 阻止重试。`tests/imagingLogic.test.ts` source-grep 守护 `inferenceStatusRef.current.status === "cancelled"`。
+- **B3 后端模型状态对外可读**（2026-06-06 真实完成）：`/api/health` 的 `model_state` 字段从内部变量提升为可被 GUI 状态栏读取的稳定 JSON 字段（`status` / `checkpoint_sha256` / `mode` / `missing`）。`tests/backendState.test.py::test_health_exposes_model_state_for_gui_status_bar` 守护。
+- **B4 SSE 基础异常重试**：6-06 文档/commit 虚标。6-07 真正抽出 `src/inference/createInferenceEventSource.ts` 工具并在 `src/main.tsx` 接入，含 `onretry` / `retryCount` / `onfatal` 字段、200ms→2s 指数退避、默认 3 次上限。`tests/imagingLogic.test.ts` source-grep 守护 11 条新断言。
 
-**意义**：BME 竞赛 PPT 演示现场不会被评委抓"进度回退"、"取消失败"、"模型状态不外露"、"SSE 断连无重试"这 4 个边缘 bug。
+**意义**：BME 竞赛 PPT 演示现场不会被评委抓"进度回退"、"取消失败"、"模型状态不外露"、"SSE 断连无重试"这 4 个边缘 bug。2026-06-07 bug 扫描发现 6-06 文档虚标已全部在 6-07 真实补完。
 
 ### 发现 10：演示启动脚本化 + 一屏卡片已完成（6-06）
 

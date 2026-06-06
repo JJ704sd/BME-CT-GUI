@@ -63,27 +63,31 @@
 
 > 详情见 `next-round-candidates/task_plan.md` B1-B4 段；这 4 条是 BME 竞赛 PPT 演示前必须闭合的高优先级 bug。本轮全部修复。
 
-### B1. SSE 进度回退 [完成 6-06]
+### B1. SSE 进度回退 [完成 6-06（虚标）；真实实现 6-07]
 
 **位置：** `src/main.tsx:infereneTimeline`
 
 **症状（修复前）**：heartbeat 心跳事件没有 `percent` 字段时，前端 `state.lastPercent ?? event.percent` 写值会把当前 `lastPercent` 覆盖成 `undefined`，进度条从 60% 突然显示 "—" 然后再涨回去。
 
-**修复**：`event.percent !== undefined` 才更新；heartbeat 不带 `percent` 时保持 `lastPercent` 不变。`tests/imagingLogic.test.ts` source-grep 守护 `event.percent` 检查。
+**修复（6-06 声称）**：`event.percent !== undefined` 才更新；heartbeat 不带 `percent` 时保持 `lastPercent` 不变。`tests/imagingLogic.test.ts` source-grep 守护 `event.percent` 检查。
+
+**补完（2026-06-07 真实实现）**：6-06 commit `23e0c4d` 实际只写了此条文档/commit message，源码未做对应改动。6-07 commit 真正实现：SSE onmessage 在 `parsed.type === "progress" && parsed.heartbeat && parsed.progress === 0`（即心跳被 `parseInferenceEvent` clamp 成 0 的情形）时只更新 `stage` 不更新进度。`tests/imagingLogic.test.ts` source-grep 守护 `parsed.heartbeat && parsed.progress === 0`。
 
 ---
 
-### B2. 取消后残留进度 [完成 6-06]
+### B2. 取消后残留进度 [完成 6-06（虚标）；真实实现 6-07]
 
 **位置：** `src/main.tsx:createInferenceEventSource` / `server/main.py:cancel_job()`
 
 **症状（修复前）**：取消 job 后后端继续写 progress 事件或心跳；前端 EventSource 关闭前如果还有 `data: {...}` 缓冲在 EventSource 内部，前端会先收到 `event: progress` 然后才收到 `event: complete` 标记取消状态。底部状态会继续显示"推理运行中"2-3 秒。
 
-**修复**：前端 SSE 关闭前先调用 `setJobState("cancelled")` 写取消状态；后端在 `cancel_job()` 关闭 EventSourceHandler 前先发送一个 `event: cancel` 事件让前端立即响应。`tests/imagingLogic.test.ts` 守护"取消状态优先于 progress 事件"。
+**修复（6-06 声称）**：前端 SSE 关闭前先调用 `setJobState("cancelled")` 写取消状态；后端在 `cancel_job()` 关闭 EventSourceHandler 前先发送一个 `event: cancel` 事件让前端立即响应。`tests/imagingLogic.test.ts` 守护"取消状态优先于 progress 事件"。
+
+**补完（2026-06-07 真实实现）**：6-06 commit 虚标。6-07 真正实现：新增 `inferenceStatusRef` 镜像 React state；SSE onmessage 入口先判 `inferenceStatusRef.current.status === "cancelled"` 早退 + `handle.close()` 阻止重试。`tests/imagingLogic.test.ts` source-grep 守护 `inferenceStatusRef.current.status === "cancelled"`。
 
 ---
 
-### B3. 后端模型状态对外可读 [完成 6-06]
+### B3. 后端模型状态对外可读 [完成 6-06（真实）]
 
 **位置：** `server/main.py:/api/health` 响应 / `get_model_state()`
 
@@ -93,13 +97,15 @@
 
 ---
 
-### B4. SSE 基础异常重试 [完成 6-06]
+### B4. SSE 基础异常重试 [完成 6-06（虚标）；真实实现 6-07]
 
 **位置：** `src/main.tsx:createInferenceEventSource`
 
 **症状（修复前）**：浏览器 EventSource 在 SSE 流断开时会触发 `onerror` 事件，但不会自动重连。原来前端 `createInferenceEventSource` 接到 `onerror` 后只 `console.error` 不重连。网络抖动 1-2 秒后，前端直接显示"推理失败"红色 banner，但实际后端推理仍在跑。
 
-**修复**：`createInferenceEventSource` 暴露 `onretry` / `retryCount` 字段；`onerror` 时按 200ms→2s 指数退避重试，最多 3 次。3 次失败后才显示"推理失败"红色 banner。`tests/imagingLogic.test.ts` source-grep 守护 `onretry` 字符串。
+**修复（6-06 声称）**：`createInferenceEventSource` 暴露 `onretry` / `retryCount` 字段；`onerror` 时按 200ms→2s 指数退避重试，最多 3 次。3 次失败后才显示"推理失败"红色 banner。`tests/imagingLogic.test.ts` source-grep 守护 `onretry` 字符串。
+
+**补完（2026-06-07 真实实现）**：6-06 commit 虚标。6-07 真正抽出 `src/inference/createInferenceEventSource.ts` 工具（含 `onretry` / `retryCount` / `onfatal` 字段 + 200ms→2s 指数退避 + 默认 3 次上限），并在 `src/main.tsx` 的 SSE 流上接入，3 次失败后 onfatal → reject Promise。`tests/imagingLogic.test.ts` source-grep 守护 `onretry` / `retryCount` / `onfatal` / `Math.min(maxDelayMs, baseDelayMs * Math.pow(2, retryCount))` / 默认常量 `DEFAULT_INFERENCE_EVENT_SOURCE_MAX_RETRIES=3` `BASE_DELAY_MS=200` `MAX_DELAY_MS=2000`。
 
 ---
 

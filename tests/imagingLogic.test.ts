@@ -15,12 +15,14 @@ import {
 } from "../src/imaging/voxelMapping.ts";
 import { buildLabelLookup, defaultOrganLabels, getOrganDetail } from "../src/data/organDetails.ts";
 import { createInferenceJob, getInferenceResultMeta, getInferenceStatusCopy, getPhaseTimingSummary, getResourceSnapshotCopy, normalizeModelLabels, parseInferenceEvent } from "../src/inference/inferenceClient.ts";
+import { createInferenceEventSource, DEFAULT_INFERENCE_EVENT_SOURCE_BASE_DELAY_MS, DEFAULT_INFERENCE_EVENT_SOURCE_MAX_DELAY_MS, DEFAULT_INFERENCE_EVENT_SOURCE_MAX_RETRIES } from "../src/inference/createInferenceEventSource.ts";
 import { buildOrganLayersFromLabels } from "../src/organLayerLogic.ts";
 import { DEFAULT_REFERENCE_CASES, getReferenceCaseOriginalUrl, normalizeReferenceCases } from "../src/referenceCases.ts";
 import { getVoxelCoordDragCommit, getVoxelCoordForSelectedSliceSync, shouldUpdateVoxelCoord } from "../src/viewerLogic.ts";
 
 const mainSource = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
 const inferenceClientSource = readFileSync(new URL("../src/inference/inferenceClient.ts", import.meta.url), "utf8");
+const inferenceEventSourceSource = readFileSync(new URL("../src/inference/createInferenceEventSource.ts", import.meta.url), "utf8");
 const orthogonalViewerSource = readFileSync(new URL("../src/components/OrthogonalViewer.tsx", import.meta.url), "utf8");
 const stylesSource = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
 const exportReportSource = readFileSync(new URL("../src/report/exportReport.ts", import.meta.url), "utf8");
@@ -42,6 +44,18 @@ assert.equal(mainSource.includes("inference-progress-track"), true, "bottom cons
 assert.equal(mainSource.includes("parsed.log_tail"), true, "failed SSE events should preserve backend log_tail for review");
 assert.equal(mainSource.includes("parsed.heartbeat"), true, "SSE handler should distinguish heartbeat events from normal progress");
 assert.equal(mainSource.includes("setInferenceStartedAt"), true, "heartbeat events should sync frontend elapsed timer with backend reality");
+assert.equal(mainSource.includes("createInferenceEventSource"), true, "SSE handler should route through createInferenceEventSource factory with retry support (B4)");
+assert.equal(mainSource.includes("inferenceStatusRef"), true, "SSE onmessage should consult a ref-mirrored status so cancel state takes priority (B2)");
+assert.equal(mainSource.includes('inferenceStatusRef.current.status === "cancelled"'), true, "cancel state must short-circuit incoming SSE progress events (B2)");
+assert.equal(mainSource.includes("parsed.heartbeat && parsed.progress === 0"), true, "heartbeat with no progress must not drop the progress rail to 0% (B1)");
+assert.equal(inferenceEventSourceSource.includes("onretry"), true, "createInferenceEventSource must expose onretry hook for retry visibility (B4)");
+assert.equal(inferenceEventSourceSource.includes("retryCount"), true, "createInferenceEventSource must expose retryCount for visibility (B4)");
+assert.equal(inferenceEventSourceSource.includes("onfatal"), true, "createInferenceEventSource must call onfatal after retries are exhausted (B4)");
+assert.equal(inferenceEventSourceSource.includes("Math.min(maxDelayMs, baseDelayMs * Math.pow(2, retryCount))"), true, "createInferenceEventSource must use exponential backoff (B4)");
+assert.equal(inferenceEventSourceSource.includes("maxRetries ?? DEFAULT_INFERENCE_EVENT_SOURCE_MAX_RETRIES"), true, "createInferenceEventSource must cap retries at 3 by default (B4)");
+assert.equal(DEFAULT_INFERENCE_EVENT_SOURCE_MAX_RETRIES, 3, "default SSE retry cap should be 3");
+assert.equal(DEFAULT_INFERENCE_EVENT_SOURCE_BASE_DELAY_MS, 200, "default SSE base retry delay should be 200ms");
+assert.equal(DEFAULT_INFERENCE_EVENT_SOURCE_MAX_DELAY_MS, 2000, "default SSE max retry delay should be 2s");
 assert.equal(mainSource.includes("[inference] labelFile"), false, "front-end should not log uploaded label filenames");
 assert.equal(inferenceClientSource.includes("console.log"), false, "inference client should not log uploaded filenames or label presence");
 assert.equal(mainSource.includes("const idleProgress = inferenceTimeline.length ? clampedProgress : 0"), true, "waiting progress rail should not show the previous 100% baseline before any inference event");

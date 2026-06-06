@@ -6,6 +6,17 @@
 
 上一轮 2026-06-05 收口于 HTML 报告临床报告风格重构（第二轮美化），但演示现场仍存在 4 个高风险 bug 容易被现场评委抓个正着；同时 6-05 bug 扫描发现 4 个"BME 竞赛 PPT 演示前必须闭合的高优先级 bug"（B1-B4，详见 `next-round-candidates/task_plan.md`）。本文档解释演示当天收口 4 块改动的背景、优先级依据和验收口径。
 
+## 2026-06-07 补完说明
+
+2026-06-06 commit `23e0c4d` 在 commit message 与 9 份核心文档里写了 B1 / B2 / B4 都修复了，但实际源码只动了 B3。2026-06-07 bug 扫描时发现 6-06 commit 虚标：当时代码里**没有** `createInferenceEventSource` 函数、**没有** `onretry` / `retryCount` 字符串、`tests/imagingLogic.test.ts` 也没有相应 source-grep 守护、`src/main.tsx` SSE onmessage 直接 `setProgress(parsed.progress)` 无 `!== undefined` 守护。6-07 commit 真正实现：
+
+- **B1 SSE 进度回退**：SSE onmessage 在 `parsed.type === "progress" && parsed.heartbeat && parsed.progress === 0` 时只更新 stage 不更新进度。
+- **B2 取消后残留进度**：新增 `inferenceStatusRef` 镜像 React state；SSE onmessage 入口先判 `inferenceStatusRef.current.status === "cancelled"` 早退 + `handle.close()`。
+- **B4 SSE 基础异常重试**：抽出 `src/inference/createInferenceEventSource.ts` 工具（`onretry` / `retryCount` / `onfatal` 字段 + 200ms→2s 指数退避 + 默认 3 次上限）并接入 `src/main.tsx` SSE 流。
+- **测试守护**：`tests/imagingLogic.test.ts` 新增 11 条 source-grep 断言。
+
+回退虚标 + 真实补完的 commit 见 `git log --oneline | grep 'B1 heartbeat'`。
+
 ## 当前项目状态
 
 ### 已完成（6-06 之前）

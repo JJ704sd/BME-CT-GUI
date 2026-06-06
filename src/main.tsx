@@ -43,6 +43,7 @@ import { OrthogonalViewer } from "./components/OrthogonalViewer";
 import { buildLabelLookup, defaultOrganLabels, getOrganDetail, organDetails as ORGAN_DETAIL_MAP } from "./data/organDetails";
 import { exportReport, type ReportFormat } from "./report/exportReport";
 import { cancelInferenceJob, createInferenceJob, downloadInferenceResult, fetchModelLabels, getInferenceResultMeta, getInferenceStatusCopy, getPhaseTimingSummary, getResourceSnapshotCopy, parseInferenceEvent, type InferenceOptions, type InferenceProfile, type InferenceStatus, type LabelTaxonomy, type PhaseTimings, type ResourceSnapshot, type RuntimeTarget, type ValidationSummary } from "./inference/inferenceClient";
+import { createInferenceEventSource } from "./inference/createInferenceEventSource";
 import { summarizeSegmentationQuantification, formatQuantificationValue } from "./imaging/quantification";
 import { renderNiftiSliceToDataUrl as renderOrientedNiftiSliceToDataUrl } from "./imaging/sliceRenderer";
 import type { VoxelCoord } from "./imaging/voxelMapping";
@@ -563,6 +564,8 @@ function App() {
   const [logs, setLogs] = useState(baseLogs);
   const [toast, setToast] = useState("演示病例已加载");
   const [inferenceStatus, setInferenceStatus] = useState<InferenceStatus>({ status: "idle" });
+  const inferenceStatusRef = useRef<InferenceStatus>(inferenceStatus);
+  inferenceStatusRef.current = inferenceStatus;
   const [inferenceTimeline, setInferenceTimeline] = useState<InferenceTimelineEntry[]>([]);
   const [inferenceStartedAt, setInferenceStartedAt] = useState<number | null>(null);
   const [elapsedNow, setElapsedNow] = useState(() => Date.now());
@@ -1100,71 +1103,94 @@ function App() {
       let resourceLatest: ResourceSnapshot | undefined;
       let phaseTimings: PhaseTimings | undefined;
       await new Promise<void>((resolve, reject) => {
-        const events = new EventSource(`${endpoint}/api/segment/jobs/${job.job_id}/events`);
-        events.onmessage = (event) => {
-          try {
-            const parsed = parseInferenceEvent(`data: ${event.data}`);
-            if (parsed.type === "error") {
-              const logTailSummary = parsed.log_tail?.split(/\r?\n/).filter(Boolean).slice(-2).join(" / ");
-              appendInferenceTimelineEntry({
-                type: "error",
-                stage: parsed.message,
-                message: logTailSummary ? `${parsed.message} · ${logTailSummary}` : parsed.message
-              });
-              events.close();
-              reject(new Error(parsed.log_tail ? `${parsed.message}\n${parsed.log_tail}` : parsed.message));
+        const sse = createInferenceEventSource({
+          url: `${endpoint}/api/segment/jobs/${job.job_id}/events`,
+          onmessage: (event) => {
+            // B2: 取消状态优先于后续 SSE 事件，避免进度条在取消后继续推进。
+            if (inferenceStatusRef.current.status === "cancelled") {
+              sse.close();
               return;
             }
-            setProgress(parsed.progress);
-            setInferenceStatus({ status: "running", jobId: job.job_id, progress: parsed.progress, stage: parsed.stage });
-            if (parsed.type === "progress" && parsed.heartbeat) {
-              if (Number.isFinite(parsed.elapsed_seconds)) {
-                setInferenceStartedAt(Date.now() - (parsed.elapsed_seconds as number) * 1000);
+            try {
+              const parsed = parseInferenceEvent(`data: ${event.data}`);
+              if (parsed.type === "error") {
+                const logTailSummary = parsed.log_tail?.split(/\r?\n/).filter(Boolean).slice(-2).join(" / ");
+                appendInferenceTimelineEntry({
+                  type: "error",
+                  stage: parsed.message,
+                  message: logTailSummary ? `${parsed.message} · ${logTailSummary}` : parsed.message
+                });
+                sse.close();
+                reject(new Error(parsed.log_tail ? `${parsed.message}\n${parsed.log_tail}` : parsed.message));
+                return;
               }
-              setLogs((items) => [`后端运行中 · ${parsed.stage} · ${parsed.progress}%`, ...items].slice(0, 8));
-            } else {
-              appendInferenceTimelineEntry({
-                type: parsed.type === "complete" ? "complete" : "progress",
-                progress: parsed.progress,
-                stage: parsed.stage,
-                message: parsed.type === "complete" ? "阶段事件完成，正在下载分割结果" : parsed.stage
-              });
-              setLogs((items) => [`${parsed.stage} · ${parsed.progress}%`, ...items].slice(0, 8));
+              // B1: 心跳事件可能不带 progress（被 parseInferenceEvent clamp 成 0），
+              // 这种情况下不要把进度条打回 0%。
+              if (parsed.type === "progress" && parsed.heartbeat && parsed.progress === 0) {
+                setInferenceStatus((prev) => prev.status === "running"
+                  ? { ...prev, stage: parsed.stage }
+                  : { status: "running", jobId: job.job_id, stage: parsed.stage, progress: 0 });
+              } else {
+                setProgress(parsed.progress);
+                setInferenceStatus({ status: "running", jobId: job.job_id, progress: parsed.progress, stage: parsed.stage });
+              }
+              if (parsed.type === "progress" && parsed.heartbeat) {
+                if (Number.isFinite(parsed.elapsed_seconds)) {
+                  setInferenceStartedAt(Date.now() - (parsed.elapsed_seconds as number) * 1000);
+                }
+                setLogs((items) => [`后端运行中 · ${parsed.stage} · ${parsed.progress}%`, ...items].slice(0, 8));
+              } else {
+                appendInferenceTimelineEntry({
+                  type: parsed.type === "complete" ? "complete" : "progress",
+                  progress: parsed.progress,
+                  stage: parsed.stage,
+                  message: parsed.type === "complete" ? "阶段事件完成，正在下载分割结果" : parsed.stage
+                });
+                setLogs((items) => [`${parsed.stage} · ${parsed.progress}%`, ...items].slice(0, 8));
+              }
+              if (parsed.type === "complete") {
+                const validation = parsed.validation;
+                if (validation) {
+                  setValidationSummary(validation);
+                  syncOrganLayers(modelLabels, validation.labels);
+                  setLogs((items) => [`标准答案验证：${formatDiceMetric(validation.mean_dice)} · ${validation.message ?? "已生成验证摘要"}`, ...items].slice(0, 8));
+                }
+                durationSeconds = parsed.duration_seconds;
+                resultSizeBytes = parsed.result_size_bytes;
+                resourceLatest = parsed.resource_latest;
+                phaseTimings = parsed.phase_timings;
+                if (parsed.inference_options) inferenceOptions = parsed.inference_options;
+                if (parsed.cached_result === true) cachedResultFromEvent = true;
+                if (typeof parsed.cache_source_job_id === "string" && parsed.cache_source_job_id) {
+                  cacheSourceJobIdFromEvent = parsed.cache_source_job_id;
+                }
+                if (resourceLatest) {
+                  setLogs((items) => [`资源记录：${getResourceSnapshotCopy(resourceLatest)}`, ...items].slice(0, 8));
+                }
+                if (phaseTimings) {
+                  setLogs((items) => [`耗时瓶颈：${getPhaseTimingSummary(phaseTimings)}`, ...items].slice(0, 8));
+                }
+                sse.close();
+                resolve();
+              }
+            } catch (error) {
+              sse.close();
+              reject(error);
             }
-            if (parsed.type === "complete") {
-              const validation = parsed.validation;
-              if (validation) {
-                setValidationSummary(validation);
-                syncOrganLayers(modelLabels, validation.labels);
-                setLogs((items) => [`标准答案验证：${formatDiceMetric(validation.mean_dice)} · ${validation.message ?? "已生成验证摘要"}`, ...items].slice(0, 8));
-              }
-              durationSeconds = parsed.duration_seconds;
-              resultSizeBytes = parsed.result_size_bytes;
-              resourceLatest = parsed.resource_latest;
-              phaseTimings = parsed.phase_timings;
-              if (parsed.inference_options) inferenceOptions = parsed.inference_options;
-              if (parsed.cached_result === true) cachedResultFromEvent = true;
-              if (typeof parsed.cache_source_job_id === "string" && parsed.cache_source_job_id) {
-                cacheSourceJobIdFromEvent = parsed.cache_source_job_id;
-              }
-              if (resourceLatest) {
-                setLogs((items) => [`资源记录：${getResourceSnapshotCopy(resourceLatest)}`, ...items].slice(0, 8));
-              }
-              if (phaseTimings) {
-                setLogs((items) => [`耗时瓶颈：${getPhaseTimingSummary(phaseTimings)}`, ...items].slice(0, 8));
-              }
-              events.close();
-              resolve();
-            }
-          } catch (error) {
-            events.close();
-            reject(error);
+          },
+          onretry: ({ retryCount, nextDelayMs }) => {
+            setLogs((items) => [`SSE 连接已断开，正在第 ${retryCount} 次重试（${nextDelayMs}ms 后）`, ...items].slice(0, 8));
+            appendInferenceTimelineEntry({
+              type: "info",
+              stage: "SSE 重连中",
+              message: `已断开 ${retryCount} 次，将在 ${nextDelayMs}ms 后重连`
+            });
+          },
+          onfatal: ({ retryCount }) => {
+            sse.close();
+            reject(new Error(`无法连接${selectedRuntimeTargetOption.label}服务，请确认后端已在 ${API_ENDPOINT} 启动（已重试 ${retryCount} 次）`));
           }
-        };
-        events.onerror = () => {
-          events.close();
-          reject(new Error(`无法连接${selectedRuntimeTargetOption.label}服务，请确认后端已在 ${API_ENDPOINT} 启动`));
-        };
+        });
       });
 
       const resultBuffer = await downloadInferenceResult(endpoint, job.job_id);
