@@ -203,11 +203,11 @@
 
 ---
 
-## 演示前必做 Bug 修复（2026-06-05 bug 扫描 → 2026-06-06 文档虚标 → 2026-06-07 真实补完）
+## 演示前必做 Bug 修复（2026-06-05 bug 扫描 → 2026-06-06 `23e0c4d` 文档虚标 → 同日 `76bb1ff` 真实补完）
 
-> 详情见本目录 6-05 版 `findings.md` B1-B4 段；这 4 条是 BME 竞赛 PPT 演示前必须闭合的高优先级 bug。6-06 commit 写了 B1-B4 都修复了但实际只做了 B3；6-07 真正实现 B1/B2/B4。具体修复点见 `.planning/2026-06-06-demo-day-wrapup/explanation.md` 与 `.planning/2026-06-06-demo-day-wrapup/task_plan.md`。
+> 详情见本目录 6-05 版 `findings.md` B1-B4 段；这 4 条是 BME 竞赛 PPT 演示前必须闭合的高优先级 bug。6-06 commit `23e0c4d` 写了 B1-B4 都修复了但实际只做了 B3；同日 commit `76bb1ff` 真正实现 B1/B2/B4。具体修复点见 `.planning/2026-06-06-demo-day-wrapup/explanation.md` 与 `.planning/2026-06-06-demo-day-wrapup/task_plan.md`。
 
-### B1. SSE 进度回退 [完成 6-06（虚标）；真实实现 6-07]
+### B1. SSE 进度回退 [`23e0c4d` 虚标 / 同日 `76bb1ff` 真实实现]
 
 **位置：** `src/main.tsx:infereneTimeline`
 
@@ -215,11 +215,11 @@
 
 **修复（6-06 声称）**：`event.percent !== undefined` 才更新；heartbeat 不带 `percent` 时保持 `lastPercent` 不变。`tests/imagingLogic.test.ts` source-grep 守护 `event.percent` 检查。
 
-**补完（6-07 真实实现）**：6-06 commit 虚标。6-07 真正实现：SSE onmessage 在 `parsed.type === "progress" && parsed.heartbeat && parsed.progress === 0` 时只更新 `stage` 不更新进度。`tests/imagingLogic.test.ts` source-grep 守护 `parsed.heartbeat && parsed.progress === 0`。
+**补完（同日 `76bb1ff` 真实实现）**：6-06 `23e0c4d` 虚标。`76bb1ff` 真正实现：SSE onmessage 在 `parsed.type === "progress" && parsed.heartbeat && parsed.progress === 0` 时只更新 `stage` 不更新进度。`tests/imagingLogic.test.ts` source-grep 守护 `parsed.heartbeat && parsed.progress === 0`。
 
 ---
 
-### B2. 取消后残留进度 [完成 6-06（虚标）；真实实现 6-07]
+### B2. 取消后残留进度 [`23e0c4d` 虚标 / 同日 `76bb1ff` 真实实现]
 
 **位置：** `src/main.tsx:createInferenceEventSource` / `server/main.py:cancel_job()`
 
@@ -227,7 +227,7 @@
 
 **修复（6-06 声称）**：前端 SSE 关闭前先调用 `setJobState("cancelled")` 写取消状态；后端在 `cancel_job()` 关闭 EventSourceHandler 前先发送一个 `event: cancel` 事件让前端立即响应。`tests/imagingLogic.test.ts` 守护"取消状态优先于 progress 事件"。
 
-**补完（6-07 真实实现）**：6-06 commit 虚标。6-07 真正实现：新增 `inferenceStatusRef` 镜像 React state；SSE onmessage 入口先判 `inferenceStatusRef.current.status === "cancelled"` 早退 + `handle.close()`。`tests/imagingLogic.test.ts` source-grep 守护 `inferenceStatusRef.current.status === "cancelled"`。
+**补完（同日 `76bb1ff` 真实实现）**：6-06 `23e0c4d` 虚标。`76bb1ff` 真正实现：新增 `inferenceStatusRef` 镜像 React state；SSE onmessage 入口先判 `inferenceStatusRef.current.status === "cancelled"` 早退 + `handle.close()`。`tests/imagingLogic.test.ts` source-grep 守护 `inferenceStatusRef.current.status === "cancelled"`。
 
 ---
 
@@ -241,7 +241,7 @@
 
 ---
 
-### B4. SSE 基础异常重试 [完成 6-06（虚标）；真实实现 6-07]
+### B4. SSE 基础异常重试 [`23e0c4d` 虚标 / 同日 `76bb1ff` 真实实现]
 
 **位置：** `src/main.tsx:createInferenceEventSource`
 
@@ -249,7 +249,7 @@
 
 **修复（6-06 声称）**：`createInferenceEventSource` 暴露 `onretry` / `retryCount` 字段；`onerror` 时按 200ms→2s 指数退避重试，最多 3 次。3 次失败后才显示"推理失败"红色 banner。`tests/imagingLogic.test.ts` source-grep 守护 `onretry` 字符串。
 
-**补完（6-07 真实实现）**：6-06 commit 虚标。6-07 真正抽出 `src/inference/createInferenceEventSource.ts` 工具并在 `src/main.tsx` 接入，含 `onretry` / `retryCount` / `onfatal` 字段、200ms→2s 指数退避、默认 3 次上限。`tests/imagingLogic.test.ts` source-grep 守护 `onretry` / `retryCount` / `onfatal` / 指数退避公式 / 默认常量。
+**补完（同日 `76bb1ff` 真实实现）**：6-06 `23e0c4d` 虚标。`76bb1ff` 真正抽出 `src/inference/createInferenceEventSource.ts` 工具并在 `src/main.tsx` 接入，含 `onretry` / `retryCount` / `onfatal` 字段、200ms→2s 指数退避、默认 3 次上限。`tests/imagingLogic.test.ts` source-grep 守护 `onretry` / `retryCount` / `onfatal` / 指数退避公式 / 默认常量。
 
 ---
 

@@ -8,18 +8,18 @@
 
 | 项目 | 值 |
 |---|---|
-| 日期 | 2026-06-06（B3 真实完成 `23e0c4d`）；2026-06-07（B1 / B2 / B4 真实补完 `76bb1ff`） |
+| 日期 | 2026-06-06（B3 真实完成 `23e0c4d`）；2026-06-06（B1 / B2 / B4 真实补完 `76bb1ff`） |
 | 修复内容 | 4 个 demo-day 关键 bug（B1 SSE 进度回退 / B2 取消后残留进度 / B3 后端模型状态对外可读 / B4 SSE 基础异常重试）、演示启动脚本化、server mode gating 6 路径收口、AMOS 0117 演示口径修正、新建演示当天 checklist 短卡片 |
 | 受影响逻辑 | `src/main.tsx` SSE onmessage 加 `parsed.heartbeat && parsed.progress === 0` 守护；新增 `inferenceStatusRef` 镜像 React state + cancelled 早退；`/api/health.model_state` 4 字段外露；新增 `src/inference/createInferenceEventSource.ts` 工具（`onretry` / `retryCount` / `onfatal` + 200ms→2s 指数退避 + 默认 3 次上限）；`tools/start_local_demo.py` 新建（setenv + spawn + 轮询 4 端点 + 失败时打印 runbook 回退）；`server/main.py:1537-1604 get_model_state(runtime_target)` 切换 6 项 server 路径与 4 项本地路径互斥检查 |
 | 回归测试 | `tests/imagingLogic.test.ts` B1/B2/B4：新增 11 条 source-grep 断言守护 4 个核心改动（`createInferenceEventSource` / `inferenceStatusRef` / `parsed.heartbeat && parsed.progress === 0` / `onretry` / `retryCount` / `onfatal` / `handle.close()` 等）；`tests/backendState.test.py::test_health_exposes_model_state_for_gui_status_bar` 守护 B3；3 个 server gating 测试守护 6 路径 |
-| 文档同步 | 9 份核心文档同步到 6-06 状态；4 份 planning 文档落地（`.planning/2026-06-06-demo-day-wrapup/`）；6-07 bug 扫描发现 6-06 虚标后所有 9 份核心文档回退虚标并改写为"6-06 B3 真实 / B1·B2·B4 6-07 `76bb1ff` 真实补完" |
+| 文档同步 | 9 份核心文档同步到 6-06 状态；4 份 planning 文档落地（`.planning/2026-06-06-demo-day-wrapup/`）；6-06 bug 扫描发现 `23e0c4d` 虚标后所有 9 份核心文档回退虚标并改写为"6-06 `23e0c4d` B3 真实 / 同日 `76bb1ff` B1·B2·B4 真实补完" |
 | 自动验证 | `python tools/start_local_demo.py` smoke test 4 端点全过；`node tests/imagingLogic.test.ts`（11 条新断言全过）+ `python tests/backendState.test.py`（4 条新守护全过）+ `npm test` + `npm run build` 全过 |
 
-**6-06 文档虚标与 6-07 补完说明：**
+**6-06 `23e0c4d` 文档虚标与同日 `76bb1ff` 补完说明：**
 
-6-06 commit `23e0c4d` 在 commit message 与文档里写了 B1 / B2 / B4 都修复了，但实际源码只动了 B3（`/api/health.model_state`）。6-07 bug 扫描时通过 source-grep 守护发现 6-06 虚标：当时 `src/main.tsx` / `src/inference/` 代码里**没有** `createInferenceEventSource` 函数、**没有** `onretry` / `retryCount` 字符串、`tests/imagingLogic.test.ts` 也没有相应 source-grep 守护、SSE onmessage 直接 `setProgress(parsed.progress)` 无 `!== undefined` 守护。2026-06-07 commit `76bb1ff`（`fix(sse): B1 heartbeat percent guard + B2 cancel priority + B4 EventSource retry`）真实补完 B1 / B2 / B4 三个 bug，9 份核心文档同步回退虚标并改写为"6-06 B3 真实 / 6-07 补完"。
+6-06 commit `23e0c4d` 在 commit message 与文档里写了 B1 / B2 / B4 都修复了，但实际源码只动了 B3（`/api/health.model_state`）。同日 bug 扫描时通过 source-grep 守护发现 `23e0c4d` 虚标：当时 `src/main.tsx` / `src/inference/` 代码里**没有** `createInferenceEventSource` 函数、**没有** `onretry` / `retryCount` 字符串、`tests/imagingLogic.test.ts` 也没有相应 source-grep 守护、SSE onmessage 直接 `setProgress(parsed.progress)` 无 `!== undefined` 守护。同日 commit `76bb1ff`（`fix(sse): B1 heartbeat percent guard + B2 cancel priority + B4 EventSource retry`）真实补完 B1 / B2 / B4 三个 bug，9 份核心文档同步回退虚标并改写为"6-06 `23e0c4d` B3 真实 / 同日 `76bb1ff` 补完"。
 
-**问题描述（按真实 6-06 B3 + 6-07 B1·B2·B4 复述）：**
+**问题描述（按真实 `23e0c4d` B3 + 同日 `76bb1ff` B1·B2·B4 复述）：**
 
 1. **B1 SSE 进度回退**（高）：长耗时推理时，后端 heartbeat 心跳事件不带 `percent` 字段就被前端当成"进度"事件，进度条会从 60% 突然回退到 30% 然后再涨回去，破坏演示视觉。
 2. **B2 取消后残留进度**（高）：取消 job 后后端可能继续写 progress 事件或心跳，前端在 React state 已变 `cancelled` 后还会被后续 SSE 事件覆盖显示为"还在跑"或"取消失败"，让评委怀疑系统稳定性。
@@ -33,17 +33,17 @@
 
 | 修改项 | 说明 |
 |---|---|
-| B1 heartbeat percent guard（6-07 `76bb1ff`） | `src/main.tsx` SSE onmessage 在 `parsed.type === "progress" && parsed.heartbeat && parsed.progress === 0` 时只更新 `stage` 不更新进度；heartbeat 心跳没有 `percent` 字段不再覆盖当前进度。`tests/imagingLogic.test.ts` source-grep 守护 `parsed.heartbeat && parsed.progress === 0` |
-| B2 cancel priority（6-07 `76bb1ff`） | 新增 `inferenceStatusRef` 镜像 React state；SSE onmessage 入口先判 `inferenceStatusRef.current.status === "cancelled"` 早退 + `handle.close()` 阻止重试。`tests/imagingLogic.test.ts` source-grep 守护 `inferenceStatusRef.current.status === "cancelled"` |
+| B1 heartbeat percent guard（6-06 `76bb1ff`） | `src/main.tsx` SSE onmessage 在 `parsed.type === "progress" && parsed.heartbeat && parsed.progress === 0` 时只更新 `stage` 不更新进度；heartbeat 心跳没有 `percent` 字段不再覆盖当前进度。`tests/imagingLogic.test.ts` source-grep 守护 `parsed.heartbeat && parsed.progress === 0` |
+| B2 cancel priority（6-06 `76bb1ff`） | 新增 `inferenceStatusRef` 镜像 React state；SSE onmessage 入口先判 `inferenceStatusRef.current.status === "cancelled"` 早退 + `handle.close()` 阻止重试。`tests/imagingLogic.test.ts` source-grep 守护 `inferenceStatusRef.current.status === "cancelled"` |
 | B3 /api/health.model_state（6-06 `23e0c4d` 真实完成） | `model_state` 字段从内部变量提升为可被 GUI 状态栏读取的稳定 JSON 字段（`status` / `checkpoint_sha256` / `mode` / `missing` 4 个 key）。`tests/backendState.test.py::test_health_exposes_model_state_for_gui_status_bar` 守护 |
-| B4 EventSource retry（6-07 `76bb1ff`） | 抽出 `src/inference/createInferenceEventSource.ts` 工具，暴露 `onretry` / `retryCount` / `onfatal` 字段；onerror 时按 200ms→2s 指数退避重试，最多 3 次；3 次失败后 `onfatal` → reject Promise。`src/main.tsx` SSE 流接入新工具。`tests/imagingLogic.test.ts` 新增 11 条 source-grep 断言 |
+| B4 EventSource retry（6-06 `76bb1ff`） | 抽出 `src/inference/createInferenceEventSource.ts` 工具，暴露 `onretry` / `retryCount` / `onfatal` 字段；onerror 时按 200ms→2s 指数退避重试，最多 3 次；3 次失败后 `onfatal` → reject Promise。`src/main.tsx` SSE 流接入新工具。`tests/imagingLogic.test.ts` 新增 11 条 source-grep 断言 |
 | server_required_files 扩到 6 项 | `get_model_state(runtime_target=server)` 现在检查 `server_evaluate_full.py` / `server_dataset.json` / `server_nnunet_raw` / `server_nnunet_preprocessed` / `server_nnunet_results` / `server_output_root`；`local_required_files` 与 `server_required_files` 完全互斥 |
 | server gating 3 测试 | `test_server_runtime_reports_missing_server_paths`（4 server 路径缺失时 missing 含对应项）+ `test_local_runtime_does_not_check_server_paths`（`runtime_target=local` 绝不报 server 路径缺失）+ 更新 `test_server_runtime_ready_does_not_require_local_model_files`（4 server + 4 本地路径全缺失，state.missing == []） |
 | start_local_demo.py | setenv（`SEGMENTATION_REFERENCE_CASES_JSON` / `SEGMENTATION_DEVICE` / `SEGMENTATION_PERSISTENT_WORKER` 等）+ spawn backend（uvicorn）+ frontend（vite dev）+ 轮询 4 端点 + 失败时打印 runbook 回退命令；Ctrl+C 优雅清理子进程 |
 | AMOS 0117 演示口径 | runbook 修正：移除"复跑 quality 会更好"假设；改写"2026-05-23 那次就是 quality profile；stomach 0.556 是数据本身的硬骨头；**决策：2026-06-05 接受现状，不复跑 AMOS 0117**"；PPT 直接用"质量推理 mean Dice 0.891，stomach 0.556（review 状态），反映真实临床难度" |
 | demo-day-checklist | 一屏可读：前置确认 5 项（cwd / 4 文件存在 / 显存空闲）、演示流程 5 步（cd → start_local_demo → 等 → 浏览器打开 → Ctrl+C）、可能用到的兜底 curl、start_local_demo 失败时回退 runbook 命令 |
 
-**结论：** B1 SSE 进度回退 + B2 取消后残留进度 + B4 SSE 断连无重试三个 BME 竞赛 PPT 演示现场容易被评委抓个正着的边缘 bug 在 6-07 `76bb1ff` 真实补完；B3 后端模型状态对外可读在 6-06 `23e0c4d` 真实完成；`start_local_demo.py` 脚本化演示启动，runbook 短卡片配合长卡 runbook 兜底；server mode gating 6 路径检查后，`runtime_target=server` 不会被本地 Windows nnUNet 文件缺失阻断，server runtime 缺路径时也会显式列出 missing 项；AMOS 0117 演示口径与现状一致（"stomach 0.556 是数据硬骨头"），不再误传"复跑会改善"。本轮不修改 nnUNetv2 推理、缓存复用 7 字段、HTML 报告样式或影像量化逻辑；不改变历史 AMOS/FLARE baseline。
+**结论：** B1 SSE 进度回退 + B2 取消后残留进度 + B4 SSE 断连无重试三个 BME 竞赛 PPT 演示现场容易被评委抓个正着的边缘 bug 在 6-06 `76bb1ff` 真实补完；B3 后端模型状态对外可读在 6-06 `23e0c4d` 真实完成；`start_local_demo.py` 脚本化演示启动，runbook 短卡片配合长卡 runbook 兜底；server mode gating 6 路径检查后，`runtime_target=server` 不会被本地 Windows nnUNet 文件缺失阻断，server runtime 缺路径时也会显式列出 missing 项；AMOS 0117 演示口径与现状一致（"stomach 0.556 是数据硬骨头"），不再误传"复跑会改善"。本轮不修改 nnUNetv2 推理、缓存复用 7 字段、HTML 报告样式或影像量化逻辑；不改变历史 AMOS/FLARE baseline。
 
 ---
 

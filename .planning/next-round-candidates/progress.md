@@ -26,12 +26,12 @@
 
 ## 上一轮完成情况
 
-### 2026-06-06 演示当天收口 + B1-B4 修复 + 启动脚本化 + server gating 6 路径 [B3 真实完成；B1/B2/B4 虚标，6-07 真实补完]
+### 2026-06-06 演示当天收口 + B1-B4 修复 + 启动脚本化 + server gating 6 路径 [B3 `23e0c4d` 真实完成；B1/B2/B4 `23e0c4d` 虚标，同日 `76bb1ff` 真实补完]
 
-- [x] B1 SSE 进度回退修复（6-06 文档/commit 虚标；6-07 真正实现 `parsed.heartbeat && parsed.progress === 0` 守护）
-- [x] B2 取消后残留进度修复（6-06 文档/commit 虚标；6-07 真正实现 `inferenceStatusRef` 镜像 + cancelled 早退）
-- [x] B3 后端模型状态对外可读（`/api/health.model_state` 4 字段，6-06 真实完成）
-- [x] B4 SSE 基础异常重试（6-06 文档/commit 虚标；6-07 真正抽出 `createInferenceEventSource.ts` 工具并接入，200ms→2s 退避，最多 3 次）
+- [x] B1 SSE 进度回退修复（6-06 `23e0c4d` 文档/commit 虚标；同日 `76bb1ff` 真正实现 `parsed.heartbeat && parsed.progress === 0` 守护）
+- [x] B2 取消后残留进度修复（6-06 `23e0c4d` 文档/commit 虚标；同日 `76bb1ff` 真正实现 `inferenceStatusRef` 镜像 + cancelled 早退）
+- [x] B3 后端模型状态对外可读（`/api/health.model_state` 4 字段，6-06 `23e0c4d` 真实完成）
+- [x] B4 SSE 基础异常重试（6-06 `23e0c4d` 文档/commit 虚标；同日 `76bb1ff` 真正抽出 `createInferenceEventSource.ts` 工具并接入，200ms→2s 退避，最多 3 次）
 - [x] 演示启动脚本化（`tools/start_local_demo.py`）
 - [x] 一屏卡片（`docs/demo-day-checklist.md`）
 - [x] server mode gating 6 路径修复（`get_model_state(runtime_target)` 切换）

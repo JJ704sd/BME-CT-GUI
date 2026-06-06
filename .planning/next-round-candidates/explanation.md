@@ -17,16 +17,16 @@
 5. **2026-06-03 质量评估指标扩展 + surface_distances 2 EDT**：`ValidationSummary` 增补 12 字段（Pixel Accuracy 4 项 + HD/HD95/ASD 9 项 + `surface_distance_unit` + `spacing`）；`server/main.py surface_distances()` 把单 label EDT 调用从 6 次合并到 2 次（AMOS 0117 quality cache hit validation 38.86s → 16.78s，约 2.3× 加速）；`src/report/exportReport.ts` 3 个 metric group（19 张卡片）+ 逐标签 4 列新指标。6-03 baseline 数值：mean Pixel Accuracy 0.999855、mean HD 9.59281mm、mean HD95 3.596449mm、mean ASD 0.660724mm。
 6. **2026-06-04 HTML 报告第一轮美化（视觉层 + 信息层）**：`src/report/exportReport.ts` 从"工程 dump"提升为"卡片式仪表板"。视觉层：色阶图例、Header 渐变、3 个 metric group 加组标题图标、aiFindings 严重度排序 + `.severity-{high,medium,low}` 高亮、器官列表用 `<details><summary>` 折叠、逐标签表列固定 + 列点击排序、@media print A4 页眉页码。信息层：remap_applied 顶部警告条、taxonomy / dataset_hint 展示位、spacing 可视化、historical 警告条。`src/main.tsx:handleExport` 透传 5 个 validation 字段；`tests/imagingLogic.test.ts` 新增 source-grep 断言保护 4 个新 class。
 7. **2026-06-05 HTML 报告临床报告风格重构（第二轮美化）**：`src/report/exportReport.ts` 从"卡片式仪表板"重塑为"临床评估报告"。新增 7 个 CSS 块：`.cover` 封面页、`.exec-summary` 执行摘要、`.toc` 目录、`.formula-tip` 公式小贴士、`.dist-chart` 严重度分布图、`.table-caption` 表格标题、`.footnotes` 脚注；新增 3 个工具函数 `distributionChartHtml()` / `severityBuckets()` / `formulaTips()`；正文模板按 §1 报告概览 / §2 摘要 / §3 数据集 / §4 器官 / §5 体素 / §6 距离 / §7 关键发现 / §8 附录 8 段章节编号排版；字体改为 Source Han Serif / Songti SC + JetBrains Mono；@media print 改为 A4 + 顶部 caseId + 底部 page X of Y。本轮不动 6 类指标、`surface_distances()` 2 EDT 或 `ValidationSummary` / `LabelMetric` 白名单；与 6-04 第一轮美化兼容并叠加。
-8. **2026-06-06 演示当天收口**（**说明**：B1 / B2 / B4 当时只写了 commit message 与文档，源码实际未做；真实实现见 2026-06-07 补完段）：
-   - **B1 SSE 进度回退修复**：6-06 虚标；6-07 真正实现 `parsed.heartbeat && parsed.progress === 0` 守护，`tests/imagingLogic.test.ts` source-grep 守护。
-   - **B2 取消后残留进度修复**：6-06 虚标；6-07 真正实现 `inferenceStatusRef` 镜像 React state + SSE onmessage 入口 cancelled 早退。
-   - **B3 后端模型状态对外可读**：`/api/health` 的 `model_state` 字段从内部变量提升为可被 GUI 状态栏读取的稳定 JSON 字段（`status` / `checkpoint_sha256` / `mode` / `missing`）。`tests/backendState.test.py::test_health_exposes_model_state_for_gui_status_bar` 守护。（2026-06-06 真实完成）
-   - **B4 SSE 基础异常重试**：6-06 虚标；6-07 真正抽出 `src/inference/createInferenceEventSource.ts` 工具并接入。
+8. **2026-06-06 演示当天收口**（**说明**：B1 / B2 / B4 在 `23e0c4d` 当时只写了 commit message 与文档，源码实际未做；真实实现见 2026-06-06 `76bb1ff` 补完段）：
+   - **B1 SSE 进度回退修复**：6-06 `23e0c4d` 虚标；同日 `76bb1ff` 真正实现 `parsed.heartbeat && parsed.progress === 0` 守护，`tests/imagingLogic.test.ts` source-grep 守护。
+   - **B2 取消后残留进度修复**：6-06 `23e0c4d` 虚标；同日 `76bb1ff` 真正实现 `inferenceStatusRef` 镜像 React state + SSE onmessage 入口 cancelled 早退。
+   - **B3 后端模型状态对外可读**：`/api/health` 的 `model_state` 字段从内部变量提升为可被 GUI 状态栏读取的稳定 JSON 字段（`status` / `checkpoint_sha256` / `mode` / `missing`）。`tests/backendState.test.py::test_health_exposes_model_state_for_gui_status_bar` 守护。（2026-06-06 `23e0c4d` 真实完成）
+   - **B4 SSE 基础异常重试**：6-06 `23e0c4d` 虚标；同日 `76bb1ff` 真正抽出 `src/inference/createInferenceEventSource.ts` 工具并接入。
    - **演示启动脚本化**：`tools/start_local_demo.py` 一行启动：setenv + spawn backend/frontend + 轮询 4 个端点 + 失败时打印 runbook 回退命令。`docs/demo-day-checklist.md` 是配套一屏卡片。
    - **server mode gating 6 路径修复**：`server/main.py:1537-1604 get_model_state(runtime_target)` 接受 `runtime_target` 参数切换 `server_required_files`（6 项 server 路径）与 `local_required_files`（4 项本地 nnUNet 文件）两组互斥检查；`tests/backendState.test.py` 新增 3 个守护测试。
    - **AMOS 0117 演示口径决策（2026-06-05 决策，6-06 落地）**：cache hit 命中的是 2026-05-23 quality profile 真实推理（review，stomach Dice 0.556、mean_dice 0.891），stomach 0.556 是数据本身硬骨头。决策：接受现状，不复跑 AMOS 0117；正式 AMOS 报告基线仍是 `b3c528cc9e20`（mean_dice 0.924780）。已写入 `docs/local-cache-demo-runbook.md` 的 AMOS 0117 演示口径段落。
 
-9. **2026-06-07 B1 / B2 / B4 真实补完**（`feat(sse): B1 heartbeat percent guard + B2 cancel priority + B4 EventSource retry`）：
+9. **2026-06-06 `76bb1ff` B1 / B2 / B4 真实补完**（`feat(sse): B1 heartbeat percent guard + B2 cancel priority + B4 EventSource retry`）：
    - **B1 真实实现**：`src/main.tsx` SSE onmessage 在 `parsed.type === "progress" && parsed.heartbeat && parsed.progress === 0` 时只更新 stage 不更新进度。
    - **B2 真实实现**：新增 `inferenceStatusRef` 镜像 React state；SSE onmessage 入口先判 `inferenceStatusRef.current.status === "cancelled"` 早退，`handle.close()` 阻止重试。
    - **B4 真实实现**：抽出 `src/inference/createInferenceEventSource.ts` 工具，含 `onretry` / `retryCount` / `onfatal` 字段、200ms→2s 指数退避、默认 3 次上限。`src/main.tsx` SSE 流接入，3 次失败后 `onfatal` → reject Promise。

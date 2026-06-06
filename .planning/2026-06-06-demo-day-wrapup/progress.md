@@ -1,21 +1,21 @@
 # 2026-06-06 演示当天收口进度
 
-## 2026-06-07 补完：B1 / B2 / B4 真实实现
+## 2026-06-06 `76bb1ff` 补完：B1 / B2 / B4 真实实现
 
-**状态：** 全部补完。6-06 commit `23e0c4d` 在 commit message 与文档里写了 B1 / B2 / B4 都修复了，但实际源码只动了 B3（`/api/health.model_state`）。2026-06-07 bug 扫描发现 6-06 虚标，6-07 真实补完。
+**状态：** 全部补完。6-06 commit `23e0c4d` 在 commit message 与文档里写了 B1 / B2 / B4 都修复了，但实际源码只动了 B3（`/api/health.model_state`）。同日 bug 扫描发现 `23e0c4d` 虚标，同日 commit `76bb1ff` 真实补完。
 
 **改动**：
 
 - 新增 `src/inference/createInferenceEventSource.ts`（`onretry` / `retryCount` / `onfatal` 字段 + 200ms→2s 指数退避 + 默认 3 次上限）
 - `src/main.tsx` SSE 流接入新工具 + `inferenceStatusRef` 镜像 React state + `parsed.heartbeat && parsed.progress === 0` 守护 + cancelled 早退
 - `tests/imagingLogic.test.ts` 新增 11 条 source-grep 断言保护 4 个核心改动
-- 9 份核心文档全部回退虚标并改写为"6-06 虚标，6-07 真实补完"
+- 9 份核心文档全部回退虚标并改写为"6-06 `23e0c4d` 虚标，同日 `76bb1ff` 真实补完"
 
 **验证**：`npm test` + `npm run build` + `node tests/imagingLogic.test.ts` 全过。
 
 ## 2026-06-06：演示当天收口 + B1-B4 演示关键 bug 修复 + 启动脚本化 + server gating 6 路径
 
-**状态：** B3 真实完成；B1 / B2 / B4 当时只写了 commit message 与文档，源码实际未做，6-07 真实补完（见上节）。
+**状态：** B3 真实完成（`23e0c4d`）；B1 / B2 / B4 在 `23e0c4d` 当时只写了 commit message 与文档，源码实际未做，同日 `76bb1ff` 真实补完（见上节）。
 
 **背景：** 2026-06-06 是 BME 竞赛答辩演示日的前一天。本轮目标是把所有"演示现场容易翻车"的边缘场景一次性收口：4 个 B 级别演示关键 bug（B1 SSE 进度回退 / B2 取消后残留进度 / B3 后端模型状态对外可读 / B4 SSE 基础异常重试）、演示启动脚本化（`tools/start_local_demo.py` + `docs/demo-day-checklist.md`）、server mode gating 6 路径修复、AMOS 0117 演示口径决策落地。
 
