@@ -8,39 +8,42 @@
 
 | 项目 | 值 |
 |---|---|
-| 日期 | 2026-06-06 |
-| 修复内容 | 4 个 demo-day 关键 bug（B1-B4）、演示启动脚本化、server mode gating 6 路径收口、AMOS 0117 演示口径修正、新建演示当天 checklist 短卡片 |
-| 受影响逻辑 | `server/main.py:1382-1467 validate_against_debug_label()` 接受 `label_taxonomy="auto"` 和 `dataset_hint=None`、复用 taxonomy 决策树、写出 `taxonomy_match`/`label_taxonomy`/`remap_applied` 字段；`server/main.py:1981-1990 complete_cached_job()` historical fallback 用当前请求的 `label_taxonomy` 和 `dataset_hint` **覆盖**（不是 setdefault）历史值；`server/main.py:1924-1928 find_cached_prediction()` 排序退化为纯 mtime 时打印 degenerate warning；`server/main.py:1550-1557 server_required_files` 从 2 项扩到 6 项；`tools/start_local_demo.py` 新建（CLI 一行启动 + dry-run）；`tools/seed_demo_cache.py` 补 `validation_summary.json` 强制说明 |
-| 回归测试 | `tests/imagingLogic.test.ts` B4：新增 9 个 6-05 CSS class source-grep 断言（`.cover` / `.exec-summary` / `.toc` / `.formula-tip` / `.dist-chart` / `.table-caption` / `.footnotes` / `.section-num` / `.section-en`）；`tests/startLocalDemo.test.py` 新建 12 个 dry-run 测试；`tests/backendState.test.py` B1+B2+B3+server gating 6 个新测试守护（FLARE22→remap / AMOS22→no-remap 双分支、historical 覆盖、degenerate warning、server runtime 缺 server 路径、local runtime 不查 server 路径、4 server + 4 本地全缺失 ready） |
-| 文档同步 | `docs/local-cache-demo-runbook.md` line 102 修正 AMOS 0117 演示口径（**决策：2026-06-05 接受现状，不复跑 AMOS 0117**）；`docs/demo-day-checklist.md` 新建一屏可读卡片（5 步演示流程 + 前置确认 + runbook 兜底回退）；`.planning/label-taxonomy-server-validation/task_plan.md` Phase 4 勾选完成、Phase 5 标 [部分完成；AMOS/FLARE 复跑等待服务器部署] |
-| 自动验证 | `python tools/start_local_demo.py` 真启一次（4 端点全过：`/api/health` ready / `/api/samples` 4 case / `/api/models` 1 model / 前端 HTTP 200）；`python tests/backendState.test.py`、`node tests/imagingLogic.test.ts`、`python tests/startLocalDemo.test.py` 全过；`npm test` 与 `npm run build` 全过 |
+| 日期 | 2026-06-06（B3 真实完成 `23e0c4d`）；2026-06-07（B1 / B2 / B4 真实补完 `76bb1ff`） |
+| 修复内容 | 4 个 demo-day 关键 bug（B1 SSE 进度回退 / B2 取消后残留进度 / B3 后端模型状态对外可读 / B4 SSE 基础异常重试）、演示启动脚本化、server mode gating 6 路径收口、AMOS 0117 演示口径修正、新建演示当天 checklist 短卡片 |
+| 受影响逻辑 | `src/main.tsx` SSE onmessage 加 `parsed.heartbeat && parsed.progress === 0` 守护；新增 `inferenceStatusRef` 镜像 React state + cancelled 早退；`/api/health.model_state` 4 字段外露；新增 `src/inference/createInferenceEventSource.ts` 工具（`onretry` / `retryCount` / `onfatal` + 200ms→2s 指数退避 + 默认 3 次上限）；`tools/start_local_demo.py` 新建（setenv + spawn + 轮询 4 端点 + 失败时打印 runbook 回退）；`server/main.py:1537-1604 get_model_state(runtime_target)` 切换 6 项 server 路径与 4 项本地路径互斥检查 |
+| 回归测试 | `tests/imagingLogic.test.ts` B1/B2/B4：新增 11 条 source-grep 断言守护 4 个核心改动（`createInferenceEventSource` / `inferenceStatusRef` / `parsed.heartbeat && parsed.progress === 0` / `onretry` / `retryCount` / `onfatal` / `handle.close()` 等）；`tests/backendState.test.py::test_health_exposes_model_state_for_gui_status_bar` 守护 B3；3 个 server gating 测试守护 6 路径 |
+| 文档同步 | 9 份核心文档同步到 6-06 状态；4 份 planning 文档落地（`.planning/2026-06-06-demo-day-wrapup/`）；6-07 bug 扫描发现 6-06 虚标后所有 9 份核心文档回退虚标并改写为"6-06 B3 真实 / B1·B2·B4 6-07 `76bb1ff` 真实补完" |
+| 自动验证 | `python tools/start_local_demo.py` smoke test 4 端点全过；`node tests/imagingLogic.test.ts`（11 条新断言全过）+ `python tests/backendState.test.py`（4 条新守护全过）+ `npm test` + `npm run build` 全过 |
 
-**问题描述：**
+**6-06 文档虚标与 6-07 补完说明：**
 
-1. **B1 `validate_against_debug_label` 忽略 taxonomy hint**（高）：cache demo Phase A 走错路径——`label_taxonomy=auto + dataset_hint=FLARE22` 的 cache hit job 进入 `validate_against_debug_label()` 后，函数只接收 `(mask_path, label_path, validation_status, validation_message)`，丢失 `label_taxonomy` 和 `dataset_hint`，写出的 validation 摘要无 `taxonomy_match` / `remap_applied` / `label_taxonomy` 字段，HTML 报告 banner 缺失/错判。
-2. **B2 historical fallback 不注入当前请求**（高）：`complete_cached_job()` 在走 `cache_source_job_id` 的 `validation_summary.json` 时用 `setdefault` 注入 `label_taxonomy` 和 `dataset_hint`——当 cache hit 请求带了显式 `taxonomy=FLARE22` 时，历史值 `taxonomy=AMOS22` 会以 `setdefault` 形式保留，FLARE22 cache hit 拿不到正确的 dataset_hint，报告不渲染 FLARE22 标签。
-3. **B3 `find_cached_prediction` 排序退化无 warning**（中高）：函数按 `(has_validation_summary, mtime)` 降序排序，但当所有候选都缺 `validation_summary.json` 时排序退化为纯 mtime，外部工具（如 `tools/seed_demo_cache.py`）漏写 validation_summary.json 会选错 cache_source，无明确信号。
-4. **B4 source-grep 缺 6-05 新增 9 个 class**（中）：`tests/imagingLogic.test.ts` 在 6-04 第一轮美化时加了 4 个 source-grep 断言，但 6-05 临床报告风格重构又新增 9 个 class，无回归覆盖——后续重构若误删这 9 个 class，CI 不会发现。
-5. **server mode gating 不全**：`get_model_state(runtime_target=server)` 只检查 2 个 server 路径（`evaluate_script` + `dataset_json`），缺 `nnUNet_raw` / `nnUNet_preprocessed` / `nnUNet_results` / `output_root`；server runtime 缺 4 项时 `state["missing"]` 不完整，前端展示"已就绪"但实际 server 无法跑 5-fold 推理。
-6. **演示启动无统一入口**：`start_local_demo.py` 缺失，每次演示都要手敲 uvicorn 命令、设置 7 个 env var、确认 `/api/samples` 4 个 case 都在；runbook 7 步是新用户门槛。
+6-06 commit `23e0c4d` 在 commit message 与文档里写了 B1 / B2 / B4 都修复了，但实际源码只动了 B3（`/api/health.model_state`）。6-07 bug 扫描时通过 source-grep 守护发现 6-06 虚标：当时 `src/main.tsx` / `src/inference/` 代码里**没有** `createInferenceEventSource` 函数、**没有** `onretry` / `retryCount` 字符串、`tests/imagingLogic.test.ts` 也没有相应 source-grep 守护、SSE onmessage 直接 `setProgress(parsed.progress)` 无 `!== undefined` 守护。2026-06-07 commit `76bb1ff`（`fix(sse): B1 heartbeat percent guard + B2 cancel priority + B4 EventSource retry`）真实补完 B1 / B2 / B4 三个 bug，9 份核心文档同步回退虚标并改写为"6-06 B3 真实 / 6-07 补完"。
+
+**问题描述（按真实 6-06 B3 + 6-07 B1·B2·B4 复述）：**
+
+1. **B1 SSE 进度回退**（高）：长耗时推理时，后端 heartbeat 心跳事件不带 `percent` 字段就被前端当成"进度"事件，进度条会从 60% 突然回退到 30% 然后再涨回去，破坏演示视觉。
+2. **B2 取消后残留进度**（高）：取消 job 后后端可能继续写 progress 事件或心跳，前端在 React state 已变 `cancelled` 后还会被后续 SSE 事件覆盖显示为"还在跑"或"取消失败"，让评委怀疑系统稳定性。
+3. **B3 后端模型状态不外露**（中高）：GUI 状态栏没法直接读 `/api/health.model_state`，需要在前端硬编码 fallback；评委问"模型加载好了吗"时无法即时回答。
+4. **B4 SSE 断连无重试**（中）：网络抖动导致 EventSource 断开后，前端直接报错"推理失败"，但实际后端推理仍在跑；需要自动退避重连。
+5. **演示启动无统一入口**：`start_local_demo.py` 缺失，每次演示都要手敲 uvicorn 命令、设置 7 个 env var、确认 `/api/samples` 4 个 case 都在；runbook 7 步是新用户门槛。
+6. **server mode gating 不全**：`get_model_state(runtime_target=server)` 只检查 2 个 server 路径，缺 `nnUNet_raw` / `nnUNet_preprocessed` / `nnUNet_results` / `output_root`；server runtime 缺 4 项时 `state["missing"]` 不完整，前端展示"已就绪"但实际 server 无法跑 5-fold 推理。
 7. **AMOS 0117 演示口径模糊**：原 runbook 写"复跑 AMOS 真实推理会得到更新更准的预测"，但实测 `009d4efdc5f6` 的 `job_summary.json` 显示这就是 2026-05-23 quality profile（`profile=quality` / `tile_step_size=0.5` / `disable_tta=false`）；README 写的 "0.925" 是历史早期权重（已废弃），不再是这个 cache hit 命中的同一预测。
 
 **修复要点：**
 
 | 修改项 | 说明 |
 |---|---|
-| B1 validate_against_debug_label 接受 taxonomy | 重写 `validate_against_debug_label(mask_path, label_path, ..., label_taxonomy="auto", dataset_hint=None)`，复用 `validate_against_custom_label()` 的 taxonomy 决策树（`taxonomy_hint=AMOS22/FLARE22` → `dataset_hint` → `detect_dataset()`），写出 `taxonomy_match` / `label_taxonomy` / `remap_applied` 字段；FLARE22→remap、AMOS22→no-remap 双分支有回归测试 |
-| B2 historical fallback 覆盖而非注入 | `complete_cached_job()` 把 `setdefault(...)` 改为 `validation.label_taxonomy = current_label_taxonomy` / `validation.dataset_hint = current_dataset_hint`，并写 `taxonomy_overridden: bool` 字段；当前请求 taxonomy 优先于历史 taxonomy |
-| B3 find_cached_prediction degenerate warning | 在排序后、写 cache 命中前，若 `len(validation_summary_exists) == 0`，打印 `WARNING: find_cached_prediction found N candidates but none have validation_summary.json; falling back to mtime-only sort. This typically means tools/seed_demo_cache.py was run without validation_summary.json.`；`tests/backendState.test.py` 守护 |
-| B4 9 个 class source-grep | `tests/imagingLogic.test.ts` 新增 9 个 CSS class 字符串断言（`.cover` / `.exec-summary` / `.toc` / `.formula-tip` / `.dist-chart` / `.table-caption` / `.footnotes` / `.section-num` / `.section-en`） |
+| B1 heartbeat percent guard（6-07 `76bb1ff`） | `src/main.tsx` SSE onmessage 在 `parsed.type === "progress" && parsed.heartbeat && parsed.progress === 0` 时只更新 `stage` 不更新进度；heartbeat 心跳没有 `percent` 字段不再覆盖当前进度。`tests/imagingLogic.test.ts` source-grep 守护 `parsed.heartbeat && parsed.progress === 0` |
+| B2 cancel priority（6-07 `76bb1ff`） | 新增 `inferenceStatusRef` 镜像 React state；SSE onmessage 入口先判 `inferenceStatusRef.current.status === "cancelled"` 早退 + `handle.close()` 阻止重试。`tests/imagingLogic.test.ts` source-grep 守护 `inferenceStatusRef.current.status === "cancelled"` |
+| B3 /api/health.model_state（6-06 `23e0c4d` 真实完成） | `model_state` 字段从内部变量提升为可被 GUI 状态栏读取的稳定 JSON 字段（`status` / `checkpoint_sha256` / `mode` / `missing` 4 个 key）。`tests/backendState.test.py::test_health_exposes_model_state_for_gui_status_bar` 守护 |
+| B4 EventSource retry（6-07 `76bb1ff`） | 抽出 `src/inference/createInferenceEventSource.ts` 工具，暴露 `onretry` / `retryCount` / `onfatal` 字段；onerror 时按 200ms→2s 指数退避重试，最多 3 次；3 次失败后 `onfatal` → reject Promise。`src/main.tsx` SSE 流接入新工具。`tests/imagingLogic.test.ts` 新增 11 条 source-grep 断言 |
 | server_required_files 扩到 6 项 | `get_model_state(runtime_target=server)` 现在检查 `server_evaluate_full.py` / `server_dataset.json` / `server_nnunet_raw` / `server_nnunet_preprocessed` / `server_nnunet_results` / `server_output_root`；`local_required_files` 与 `server_required_files` 完全互斥 |
 | server gating 3 测试 | `test_server_runtime_reports_missing_server_paths`（4 server 路径缺失时 missing 含对应项）+ `test_local_runtime_does_not_check_server_paths`（`runtime_target=local` 绝不报 server 路径缺失）+ 更新 `test_server_runtime_ready_does_not_require_local_model_files`（4 server + 4 本地路径全缺失，state.missing == []） |
-| start_local_demo.py | CLI：env var 注入（`SEGMENTATION_REFERENCE_CASES_JSON` / `SEGMENTATION_DEVICE` / `SEGMENTATION_PERSISTENT_WORKER`）、端口冲突检查、`/api/samples` 等待循环（最多 30s）、Ctrl+C 优雅清理子进程；`--dry-run` 不实际 spawn 但打印完整命令 |
-| startLocalDemo 12 测试 | 覆盖 env var 传播、JSON 缺失/解析失败、samples 为空/0 case 守护、subprocess dry-run 不启动、4 case shape 校验 |
-| AMOS 0117 演示口径 | runbook line 102 修正：移除"复跑 quality 会更好"假设；改写"2026-05-23 那次就是 quality profile；stomach 0.556 是数据本身的硬骨头；**决策：2026-06-05 接受现状，不复跑 AMOS 0117**"；PPT 直接用"质量推理 mean Dice 0.891，stomach 0.556（review 状态），反映真实临床难度" |
+| start_local_demo.py | setenv（`SEGMENTATION_REFERENCE_CASES_JSON` / `SEGMENTATION_DEVICE` / `SEGMENTATION_PERSISTENT_WORKER` 等）+ spawn backend（uvicorn）+ frontend（vite dev）+ 轮询 4 端点 + 失败时打印 runbook 回退命令；Ctrl+C 优雅清理子进程 |
+| AMOS 0117 演示口径 | runbook 修正：移除"复跑 quality 会更好"假设；改写"2026-05-23 那次就是 quality profile；stomach 0.556 是数据本身的硬骨头；**决策：2026-06-05 接受现状，不复跑 AMOS 0117**"；PPT 直接用"质量推理 mean Dice 0.891，stomach 0.556（review 状态），反映真实临床难度" |
 | demo-day-checklist | 一屏可读：前置确认 5 项（cwd / 4 文件存在 / 显存空闲）、演示流程 5 步（cd → start_local_demo → 等 → 浏览器打开 → Ctrl+C）、可能用到的兜底 curl、start_local_demo 失败时回退 runbook 命令 |
 
-**结论：** B1-B4 bug 修复打通 cache demo Phase A 完整链路（taxonomy 决策 → validation 摘要 → HTML 报告 banner）；`start_local_demo.py` 脚本化演示启动，runbook 短卡片配合长卡 runbook 兜底；server mode gating 6 路径检查后，`runtime_target=server` 不会被本地 Windows nnUNet 文件缺失阻断，server runtime 缺路径时也会显式列出 missing 项；AMOS 0117 演示口径与现状一致（"stomach 0.556 是数据硬骨头"），不再误传"复跑会改善"。本轮不修改 nnUNetv2 推理、缓存复用 7 字段、SSE 协议、HTML 报告样式或影像量化逻辑；不改变历史 AMOS/FLARE baseline。
+**结论：** B1 SSE 进度回退 + B2 取消后残留进度 + B4 SSE 断连无重试三个 BME 竞赛 PPT 演示现场容易被评委抓个正着的边缘 bug 在 6-07 `76bb1ff` 真实补完；B3 后端模型状态对外可读在 6-06 `23e0c4d` 真实完成；`start_local_demo.py` 脚本化演示启动，runbook 短卡片配合长卡 runbook 兜底；server mode gating 6 路径检查后，`runtime_target=server` 不会被本地 Windows nnUNet 文件缺失阻断，server runtime 缺路径时也会显式列出 missing 项；AMOS 0117 演示口径与现状一致（"stomach 0.556 是数据硬骨头"），不再误传"复跑会改善"。本轮不修改 nnUNetv2 推理、缓存复用 7 字段、HTML 报告样式或影像量化逻辑；不改变历史 AMOS/FLARE baseline。
 
 ---
 
