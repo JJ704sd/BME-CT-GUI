@@ -1,8 +1,8 @@
 # 下一轮候选任务规划
 
-**范围：** 基于 2026-06-05 项目现状，规划下一轮可执行任务。
+**范围：** 基于 2026-06-06 项目现状，规划下一轮可执行任务。完整 6-06 收口 4 块改动的 planning 记录见 `.planning/2026-06-06-demo-day-wrapup/`。
 
-**当前状态：** 本地缓存演示 7 步 + cache 链路补丁 + detect_dataset 二轮收紧 + dataset_hint 字段 + 6 类医学影像指标扩展 + surface_distances 2 EDT + HTML 报告第一轮美化（视觉层 + 信息层）+ HTML 报告临床报告风格重构（封面 + 摘要 + TOC + 8 段章节 + 公式 tip + 严重度分布图 + caption/footnote + 打印页眉页码）均已收口。9 份核心文档全部同步到 6-05 状态，4 份 planning 文档落地。当前阻塞点转为 `runtime_target=server` 创建任务不应依赖本地 nnUNet 文件、服务器 AMOS validation 需用显式 taxonomy 复跑、高分辨率 CT 推理需优化、AMOS 预热预测需复跑、跨数据集 cache 链路需产品化、演示启动脚本需自动化、runbook 校验需自动化。
+**当前状态：** 本地缓存演示 7 步 + cache 链路补丁 + detect_dataset 二轮收紧 + dataset_hint 字段 + 6 类医学影像指标扩展 + surface_distances 2 EDT + HTML 报告第一轮美化（视觉层 + 信息层）+ HTML 报告临床报告风格重构（封面 + 摘要 + TOC + 8 段章节 + 公式 tip + 严重度分布图 + caption/footnote + 打印页眉页码）+ 演示当天收口（B1-B4 修复 + 启动脚本化 + server mode gating 6 路径 + AMOS 0117 决策）均已收口。9 份核心文档全部同步到 6-06 状态，4 份 planning 文档落地（`.planning/2026-06-06-demo-day-wrapup/` + 本目录）。当前阻塞点转为高分辨率 CT 推理优化、5-fold 提分策略、服务器 AMOS/FLARE 显式 taxonomy 复跑、跨数据集 cache 链路产品化、runbook 校验自动化、跨数据集标签评估增强。
 
 **本轮已完成（2026-06-01）：**
 
@@ -45,68 +45,25 @@
 - 9 份核心文档同步到 6-05
 - 4 份 planning 文档落地（`explanation.md` / `findings.md` / `progress.md` / `task_plan.md`）
 
+**本轮已完成（2026-06-06）：**
+
+- B1 SSE 进度回退修复：heartbeat 不带 `percent` 不覆盖
+- B2 取消后残留进度修复：cancel 状态优先于 progress 事件
+- B3 后端模型状态对外可读：`/api/health.model_state` 4 字段
+- B4 SSE 基础异常重试：200ms→2s 退避，最多 3 次
+- 演示启动脚本化：`tools/start_local_demo.py`
+- 一屏卡片：`docs/demo-day-checklist.md`
+- server mode gating 6 路径修复：`get_model_state(runtime_target)` 切换
+- AMOS 0117 演示口径决策落地（2026-06-05 决策，6-06 写入 runbook）
+- Smoke test 验证：`python tools/start_local_demo.py` 真启后端 + 前端，4 个端点全过
+- 9 份核心文档同步到 6-06
+- 4 份 planning 文档落地（`.planning/2026-06-06-demo-day-wrapup/`）
+
 ---
 
 ## 推荐下一轮任务
 
-### 1. AMOS 预热预测复跑
-
-**优先级：** 高
-
-**前置文档：** `.planning/2026-06-01-local-cache-demo/findings.md` 发现 4
-
-**目标：** 用 quality profile 复跑 AMOS 0117，替换 cache demo Phase A 命中的 review status 预测 `009d4efdc5f6`，让 Phase A 在 PPT 演示中也能挂上一个 stomach Dice 不再是 0.556 的预测。
-
-**关键步骤：**
-
-1. 在本地以 `runtime_target=local`、`profile=quality`、`label_taxonomy=AMOS22` 重新提交 AMOS 0117 job。
-2. 检查 `validation_status` 不再是 review，stomach Dice 恢复到 0.8 以上。
-3. 用 `tools/seed_demo_cache.py` 把新的预测 entry 替换 `009d4efdc5f6`，让 Phase A 自动命中新预测。
-4. 更新 `docs/local-cache-demo-runbook.md` 中的 job 表格。
-
-**风险：** quality profile 在 AMOS 0117 上耗时约 23 分钟，演示当天不要现场重跑；提前完成。
-
----
-
-### 2. server mode gating 修复
-
-**优先级：** 高
-
-**前置文档：** `.planning/label-taxonomy-server-validation/`
-
-**目标：** `runtime_target=server` 创建 job 时只检查 server runtime 必需路径，不再要求本地 Windows `dataset.json/plans/checkpoint/python.exe`。
-
-**关键步骤：**
-
-1. 修改 `/api/segment/jobs` 路径检查逻辑。
-2. `runtime_target=server` 只检查 `SEGMENTATION_SERVER_EVALUATE_SCRIPT`、`SEGMENTATION_SERVER_DATASET_JSON`、`SEGMENTATION_SERVER_NNUNET_RAW`、`SEGMENTATION_SERVER_NNUNET_PREPROCESSED`、`SEGMENTATION_SERVER_NNUNET_RESULTS`、`SEGMENTATION_SERVER_OUTPUT_ROOT`。
-3. `runtime_target=local` 才检查本地 `dataset.json`、`plans`、`checkpoint`、`python.exe`。
-4. 确认 `/api/models` 不再因本地文件缺失而报错。
-
-**风险：** 该修复只影响 job 创建时的路径检查，不改变 nnUNet 原始预测输出。
-
----
-
-### 3. 服务器 validation 复跑
-
-**优先级：** 高
-
-**前置条件：** server gating 修复完成
-
-**目标：** 用显式 `label_taxonomy=AMOS22` 复跑服务器 AMOS，确认 `remap_applied=false` 后纳入正式质量基线。
-
-**关键步骤：**
-
-1. 复跑 AMOS：选择 `label_taxonomy=AMOS22`，预期 `remap_applied=false`。
-2. 复跑 FLARE：选择 `label_taxonomy=FLARE22`，预期 `remap_applied=true`、`remap_source=FLARE22`。
-3. 记录服务器质量基线指标（mean Dice、min Dice、foreground Dice）。
-4. 与本地 quality 基线（`b3c528cc9e20`，mean Dice 0.924780）对比。
-
-**风险：** 服务器链路可运行不等于质量基线已完成；AMOS 服务器指标必须先排除 taxonomy 误判。
-
----
-
-### 4. 高分辨率推理优化
+### 1. 高分辨率 CT 推理优化（预降采样）
 
 **优先级：** 中高
 
@@ -126,11 +83,45 @@
 
 ---
 
-### 5. 跨数据集 cache 链路产品化
+### 2. 5-fold 提分策略
+
+**优先级：** 中高
+
+**目标：** 用 `nnUNetv2_ensemble -np 5` 拿全部 5 个 fold 的 softmax 概率图后取 mean，再做 argmax；当前服务器只跑 fold 0 单次，5-fold ensemble 预计 +2-3% Dice。
+
+**关键步骤：**
+
+1. 服务器后端增加 5-fold ensemble 调用入口。
+2. 前端 cache_key 7 字段加入 `ensemble_folds` 区分单 fold / 5 fold。
+3. 服务器 AMOS/FLARE 显式 taxonomy 复跑时使用 5-fold ensemble。
+4. 记录 5-fold vs 单 fold 的指标对照。
+
+---
+
+### 3. 服务器 AMOS/FLARE 显式 taxonomy 复跑
 
 **优先级：** 中
 
-**前置文档：** `.planning/next-round-candidates/findings.md` 发现 2
+**前置条件：** server gating 修复完成（6-06 已完成）
+
+**目标：** 用显式 `label_taxonomy=AMOS22` 复跑服务器 AMOS，确认 `remap_applied=false` 后纳入正式质量基线。
+
+**关键步骤：**
+
+1. 复跑 AMOS：选择 `label_taxonomy=AMOS22`，预期 `remap_applied=false`。
+2. 复跑 FLARE：选择 `label_taxonomy=FLARE22`，预期 `remap_applied=true`、`remap_source=FLARE22`。
+3. 记录服务器质量基线指标（mean Dice、min Dice、foreground Dice）。
+4. 与本地 quality 基线（`b3c528cc9e20`，mean Dice 0.924780）对比。
+
+**风险：** 服务器链路可运行不等于质量基线已完成；AMOS 服务器指标必须先排除 taxonomy 误判。
+
+---
+
+### 4. 跨数据集 cache 链路产品化
+
+**优先级：** 中
+
+**前置文档：** `.planning/2026-06-06-demo-day-wrapup/findings.md` 发现 2
 
 **目标：** 把"按历史指标改写 cache_source 摘要"做成可复用机制，让其他数据集/其他 cache_source 也能享受 cache hit 时显示历史 validation 摘要的链路。
 
@@ -145,31 +136,11 @@
 
 ---
 
-### 6. 演示启动脚本化
+### 5. runbook 自动校验
 
 **优先级：** 中
 
-**前置文档：** `.planning/next-round-candidates/findings.md` 发现 3 + 发现 5
-
-**目标：** 写 `tools/start_local_demo.py`，自动 setenv + spawn backend/frontend，避免演示现场漏设 `SEGMENTATION_REFERENCE_CASES_JSON`、`SEGMENTATION_PERSISTENT_WORKER`、`SEGMENTATION_DEVICE` 等环境变量。
-
-**关键步骤：**
-
-1. `tools/start_local_demo.py` 接收 `--reference-cases-json` 参数（默认 `examples/reference_cases.json`）。
-2. 自动 setenv：`SEGMENTATION_REFERENCE_CASES_JSON` / `SEGMENTATION_PERSISTENT_WORKER=1`（可选）/ `SEGMENTATION_DEVICE=cuda`（可选）。
-3. 子进程 spawn：`python -m uvicorn server.main:app --host 127.0.0.1 --port 8000` 和 `npm run dev -- --port 5173`。
-4. 输出 `curl http://127.0.0.1:8000/api/samples` 提示用户验证 4 个 case。
-5. 补 `tests/startLocalDemo.test.py` dry-run 验证 env var 正确传递。
-
-**风险：** 脚本不能取代手动 runbook 作为兜底；保留 runbook 作为停止脚本后的 fallback。
-
----
-
-### 7. runbook 自动校验
-
-**优先级：** 中
-
-**前置文档：** `.planning/next-round-candidates/findings.md` 待验证假设 6
+**前置文档：** `.planning/2026-06-06-demo-day-wrapup/findings.md` 待验证假设
 
 **目标：** 写 `tests/cacheDemoRunbook.test.py`，自动确认 runbook 中提到的 4 个已知约束仍在代码里成立。
 
@@ -185,7 +156,7 @@
 
 ---
 
-### 8. 跨数据集标签评估增强
+### 6. 跨数据集标签评估增强
 
 **优先级：** 中
 
@@ -202,7 +173,7 @@
 
 ---
 
-### 9. 文档与验收口径再同步
+### 7. 文档与验收口径再同步
 
 **优先级：** 中
 
@@ -214,11 +185,9 @@
 2. 对 `SEGMENTATION_METRICS_SUMMARY.md`、`SEGMENTATION_EXPERIMENT_COMPARISON.md` 和 `SEGMENTATION_RECENT_ROUNDS.md` 继续坚持"新工程链路不混入旧指标"的口径。
 3. 后续若新增 validation 字段或新视觉元素，必须同时改 `inferenceClient.ts normalizeValidation` 白名单 + `exportReport.ts` 模板 + `tests/imagingLogic.test.ts` source-grep 断言三处。
 
-**风险：** 这类工作本身不难，但容易在没有同步代码现状时写入过时结论。
-
 ---
 
-### 10. 多模型支持准备
+### 8. 多模型支持准备
 
 **优先级：** 低（等待新 checkpoint）
 
@@ -234,19 +203,61 @@
 
 ---
 
-## 推荐执行顺序
+## 演示前必做 Bug 修复（2026-06-05 bug 扫描 → 2026-06-06 全部完成）
 
-1. **AMOS 预热预测复跑**（让 cache demo Phase A 命中一个非 review 状态预测）。
-2. **server mode gating 修复**（解除服务器模式的阻塞点，独立 planning）。
-3. **AMOS/FLARE 服务器显式 taxonomy 复跑**（确认服务器质量基线，独立 planning）。
-4. **高分辨率推理优化**（预降采样，独立 planning）。
-5. **跨数据集 cache 链路产品化**（让 cache 链路补丁成为通用机制）。
-6. **演示启动脚本化**（演示当天减少手输命令）。
-7. **runbook 自动校验**（防止下次复现同样的困惑）。
-8. **跨数据集标签评估增强**（持续）。
-9. **文档与验收口径再同步**（持续）。
-10. **多模型支持准备**（等待新模型或新 checkpoint 后再启动）。
+> 详情见本目录 6-05 版 `findings.md` B1-B4 段；这 4 条是 BME 竞赛 PPT 演示前必须闭合的高优先级 bug。**本轮（6-06）全部修复**。具体修复点见 `.planning/2026-06-06-demo-day-wrapup/explanation.md`。
+
+### B1. SSE 进度回退 [完成 6-06]
+
+**位置：** `src/main.tsx:infereneTimeline`
+
+**症状（修复前）**：heartbeat 心跳事件没有 `percent` 字段时，前端 `state.lastPercent ?? event.percent` 写值会把当前 `lastPercent` 覆盖成 `undefined`，进度条从 60% 突然显示 "—" 然后再涨回去。
+
+**修复**：`event.percent !== undefined` 才更新；heartbeat 不带 `percent` 时保持 `lastPercent` 不变。`tests/imagingLogic.test.ts` source-grep 守护 `event.percent` 检查。
 
 ---
 
-*更新日期：2026-06-05*
+### B2. 取消后残留进度 [完成 6-06]
+
+**位置：** `src/main.tsx:createInferenceEventSource` / `server/main.py:cancel_job()`
+
+**症状（修复前）**：取消 job 后后端继续写 progress 事件或心跳；前端 EventSource 关闭前如果还有 `data: {...}` 缓冲在 EventSource 内部，前端会先收到 `event: progress` 然后才收到 `event: complete` 标记取消状态。底部状态会继续显示"推理运行中"2-3 秒。
+
+**修复**：前端 SSE 关闭前先调用 `setJobState("cancelled")` 写取消状态；后端在 `cancel_job()` 关闭 EventSourceHandler 前先发送一个 `event: cancel` 事件让前端立即响应。`tests/imagingLogic.test.ts` 守护"取消状态优先于 progress 事件"。
+
+---
+
+### B3. 后端模型状态对外可读 [完成 6-06]
+
+**位置：** `server/main.py:/api/health` 响应 / `get_model_state()`
+
+**症状（修复前）**：`/api/health` 响应没有 `model_state` 字段；前端状态栏展示"模型状态"时只能用 `/api/models` 端点拼凑。
+
+**修复**：`/api/health` 响应的 `model_state` 字段（4 个 key：`status` / `checkpoint_sha256` / `mode` / `missing`）。`tests/backendState.test.py::test_health_exposes_model_state_for_gui_status_bar` 守护。
+
+---
+
+### B4. SSE 基础异常重试 [完成 6-06]
+
+**位置：** `src/main.tsx:createInferenceEventSource`
+
+**症状（修复前）**：浏览器 EventSource 在 SSE 流断开时会触发 `onerror` 事件，但不会自动重连。原来前端 `createInferenceEventSource` 接到 `onerror` 后只 `console.error` 不重连。网络抖动 1-2 秒后，前端直接显示"推理失败"红色 banner，但实际后端推理仍在跑。
+
+**修复**：`createInferenceEventSource` 暴露 `onretry` / `retryCount` 字段；`onerror` 时按 200ms→2s 指数退避重试，最多 3 次。3 次失败后才显示"推理失败"红色 banner。`tests/imagingLogic.test.ts` source-grep 守护 `onretry` 字符串。
+
+---
+
+## 推荐执行顺序
+
+1. **高分辨率 CT 推理优化**（预降采样 768→512，独立 planning）。
+2. **5-fold 提分策略**（服务器 5-fold ensemble，预计 +2-3% Dice）。
+3. **服务器 AMOS/FLARE 显式 taxonomy 复跑**（确认服务器质量基线，独立 planning）。
+4. **跨数据集 cache 链路产品化**（让 cache 链路补丁成为通用机制）。
+5. **runbook 自动校验**（防止下次复现同样的困惑）。
+6. **跨数据集标签评估增强**（持续）。
+7. **文档与验收口径再同步**（持续）。
+8. **多模型支持准备**（等待新模型或新 checkpoint 后再启动）。
+
+---
+
+*更新日期：2026-06-06*

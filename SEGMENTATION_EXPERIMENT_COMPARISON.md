@@ -401,3 +401,16 @@
 - 修复点：`server/main.py` 新增 `_load_cached_validation_summary()` + `complete_cached_job()` historical 回退；`find_cached_prediction()` 候选排序改为 `(has_validation_summary, mtime)` 降序；`tools/rewrite_flare22_historical_summary.py` 把 2026-05-26 remap 后的 metrics 写入 0aa7323a4c01 的 output；前端 `getValidationStatusCopy()` 增加 cachedResult 参数；`tests/backendState.test.py` 新增 2 个回归测试。
 - 教训：`SEGMENTATION_REFERENCE_CASES_JSON` 必须指向 `examples/reference_cases.json`（或 `nnunetv2_files/reference_cases.local.json`），否则 `/api/samples` 只会返回内置 `amos_0117`，FLARE22 Tr 0009 不可选；现场复测时漏设这个 env var 会让所有"载入参考病例"都跑错。
 - 本轮不修改本表中任何历史实验指标数值；AMOS 原生基线 `b3c528cc9e20`、FLARE22 自动 remap `a717dacf42d3`、FLARE22 离线 remap `86b0153d0a73` 仍是同一份数据。
+
+## 2026-06-06 演示当天收口审核记录
+
+- 本轮不是新实验，而是为 6 月竞赛答辩做的演示当天收口。共 4 块独立改动：演示关键 bug 修复（B1-B4）、演示启动脚本化、server mode gating 6 路径修复、AMOS 0117 演示口径决策。
+- **B1-B4 演示关键 bug 修复**：
+  - **B1 SSE 进度回退**：heartbeat 心跳事件没有 `percent` 字段时不再覆盖当前进度；只有带 `percent` 的事件才更新进度条。`tests/imagingLogic.test.ts` source-grep 守护 `event.percent` 检查。
+  - **B2 取消后残留进度**：后端 `cancel_job()` 在 `EventSourceHandler` 关闭后写取消状态；前端不把 cancel 后的心跳误显示为"还在跑"。
+  - **B3 后端模型状态对外可读**：`/api/health` 的 `model_state` 字段从内部变量提升为可被 GUI 状态栏读取的稳定 JSON 字段（`status` / `checkpoint_sha256` / `mode` / `missing`）。`tests/backendState.test.py::test_health_exposes_model_state_for_gui_status_bar` 守护。
+  - **B4 SSE 基础异常重试**：`createInferenceEventSource` 暴露 `onretry` / `retryCount` 字段；单次断连后自动退避重连（200ms→2s 指数退避，最多 3 次）。`tests/imagingLogic.test.ts` source-grep 守护。
+- **演示启动脚本化**：`tools/start_local_demo.py` 一行启动演示：setenv + spawn backend（uvicorn 127.0.0.1:8000）+ frontend（vite dev 127.0.0.1:5173）+ 轮询 4 个端点（`/api/health` ready / `/api/samples` 4 case / `/api/models` 1 model / 前端 HTTP 200）+ 失败时打印 `docs/local-cache-demo-runbook.md` 回退命令。配套一屏卡片见 `docs/demo-day-checklist.md`。
+- **server mode gating 6 路径修复**：`server/main.py:1537-1604 get_model_state(runtime_target)` 接受 `runtime_target` 参数切换 `server_required_files`（6 项 server 路径）与 `local_required_files`（4 项本地 nnUNet 文件）两组互斥检查。`tests/backendState.test.py` 新增 3 个守护测试（`test_server_runtime_ready_does_not_require_local_model_files` 扩 4 server 路径 / `test_server_runtime_reports_missing_server_paths` / `test_local_runtime_does_not_check_server_paths`）。Smoke test 2026-06-06 验证 4 端点全过。
+- **AMOS 0117 演示口径（2026-06-05 决策，6-06 落地）**：cache hit `aea4e7cdbaf0` 命中的是 2026-05-23 quality profile 真实推理 `009d4efdc5f6`（review 状态，stomach Dice 0.556、mean_dice 0.891），stomach 0.556 是数据本身硬骨头（边界模糊），复跑 quality 不会显著改善。决策：接受现状，不复跑 AMOS 0117。正式 AMOS 报告基线仍是 `b3c528cc9e20`（mean_dice 0.924780）。
+- 本轮不修改本表中任何历史实验指标数值：AMOS 原生基线 `b3c528cc9e20`（mean Dice 0.924780）、FLARE22 自动 remap `a717dacf42d3`（mean Dice 0.926）、FLARE22 离线 remap `86b0153d0a73`（mean Dice 0.893127）仍是同一份数据；B1-B4 修复影响的是前端 UI 行为与服务端 gating 路径，不影响 Dice 数值。推荐基线表不变。

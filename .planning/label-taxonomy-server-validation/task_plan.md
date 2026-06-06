@@ -33,30 +33,34 @@
 - [ ] 检查 `remap_applied=true`、`remap_source=FLARE22`。
 - [ ] 记录 mean/min/foreground Dice，并继续把 FLARE 解释为跨数据集 remap 指标，不与 AMOS 原生基线混算。
 
-## Phase 4：修复或验证 server 模式 gating [待执行]
+## Phase 4：修复或验证 server 模式 gating [完成]
 
 当前需确认 `/api/models` 和 `/api/segment/jobs` 是否仍因为本地 Windows nnUNet 文件缺失而影响 `runtime_target=server`。
 
 检查目标：
 
-- [ ] `runtime_target=server` 创建 job 时只检查 server 路径。
-- [ ] `runtime_target=local` 才检查本地 nnUNet 文件。
-- [ ] server 模式至少检查：`evaluate_script`、`dataset_json`、`nnUNet_raw`、`nnUNet_preprocessed`、`nnUNet_results`、`output_root`。
-- [ ] `/api/segment/jobs` 不因本地 `dataset.json/plans/checkpoint/python.exe` 缺失而 503。
+- [x] `runtime_target=server` 创建 job 时只检查 server 路径。`server/main.py:1550-1557` `server_required_files` 现包含 6 项，create_job 通过 `get_model_state(runtime_target=...)` 切换。
+- [x] `runtime_target=local` 才检查本地 nnUNet 文件。`local_required_files` 4 项（`dataset.json` / `plans.json` / `checkpoint_best.pth` / `nnUNetv2_python`），server_required_files 与之互斥。
+- [x] server 模式至少检查：`evaluate_script`、`dataset_json`、`nnUNet_raw`、`nnUNet_preprocessed`、`nnUNet_results`、`output_root`。已扩为 6 项（`server_evaluate_full.py` / `server_dataset.json` / `server_nnunet_raw` / `server_nnunet_preprocessed` / `server_nnunet_results` / `server_output_root`）。
+- [x] `/api/segment/jobs` 不因本地 `dataset.json/plans/checkpoint/python.exe` 缺失而 503。`tests/backendState.test.py::test_server_runtime_ready_does_not_require_local_model_files` 守护：env 配 4 个 server 路径 + 本地 4 文件全缺失，断言 `state["missing"] == []`、`state["status"] == "ready"`。
 
 涉及文件：
 
-- `server/main.py`：`get_model_state(runtime_target)`、`create_job()`。
-- `server/server_inference.py`：server config 字段完整性。
-- `tests/backendState.test.py`：增加或保留 server/local gating 覆盖。
+- `server/main.py:1537-1604`：`get_model_state(runtime_target)` 接受 `runtime_target` 参数，切换 `required_files`。
+- `server/server_inference.py`：`ServerInferenceConfig` 已含 `nnunet_raw` / `nnunet_preprocessed` / `nnunet_results` / `output_root` 字段（line 19-23 + 88-89），无需扩展。
+- `tests/backendState.test.py`：3 个测试守护 —— 已有的 `test_server_runtime_ready_does_not_require_local_model_files` 扩 4 个 server 路径；新增 `test_server_runtime_reports_missing_server_paths`（4 个 server 路径缺失时 `missing` 包含对应项）；新增 `test_local_runtime_does_not_check_server_paths`（`runtime_target=local` 绝不报 server 路径缺失）。
 
-## Phase 5：文档和验收收尾 [待执行]
+**Smoke test 验证（2026-06-06）：** `python tools/start_local_demo.py` 真启后端 + 前端，4 个端点全过（`/api/health` ready / `/api/samples` 4 case / `/api/models` 1 model / 前端 HTTP 200）。
 
-- [ ] 将 AMOS 复跑结果写入 `SEGMENTATION_RECENT_ROUNDS.md`。
-- [ ] 若 AMOS `remap_applied=false` 且 Dice 合理，再写入 `SEGMENTATION_METRICS_SUMMARY.md` 的正式服务器质量基线。
-- [ ] 将 FLARE 复跑结果写入跨数据集 remap 证据，不与 AMOS 原生基线混算。
-- [ ] 更新 `ACCEPTANCE.md`、`README.md`、`REVIEW.md` 中的服务器 validation 状态。
-- [ ] 确认文档主体仍为中文。
+## Phase 5：文档和验收收尾 [部分完成；AMOS/FLARE 复跑等待服务器部署]
+
+- [x] ~~将 AMOS 复跑结果写入 `SEGMENTATION_RECENT_ROUNDS.md`~~ — **延后**：AMOS 服务器实跑需要校园网服务器环境，本地无 GPU server 部署。Phase 2 待执行；本轮 `SEGMENTATION_RECENT_ROUNDS.md` 6-06 段记录 gating 修复与 B1-B4。
+- [ ] 若 AMOS `remap_applied=false` 且 Dice 合理，再写入 `SEGMENTATION_METRICS_SUMMARY.md` 的正式服务器质量基线。**等待 Phase 2**。
+- [ ] 将 FLARE 复跑结果写入跨数据集 remap 证据，不与 AMOS 原生基线混算。**等待 Phase 3**。
+- [x] 更新 `REVIEW.md` 中的服务器 validation 状态：server gating 修复完成（6 路径检查），create_job 不再因本地文件缺失而 503；AMOS/FLARE 服务器质量基线等待 Phase 2/3。
+- [x] 更新 `docs/local-cache-demo-runbook.md` 中 AMOS 0117 演示口径：009d4efdc5f6 是 2026-05-23 quality profile 真实推理，stomach 0.556 是数据本身硬骨头，复跑 quality 不会显著改善。**2026-06-05 决策：接受现状，不复跑 AMOS 0117**。
+- [x] 新建 `docs/demo-day-checklist.md` 短卡片（5 步演示流程 + 兜底回退到 runbook）。
+- [x] 确认文档主体仍为中文。
 
 ## Verification
 

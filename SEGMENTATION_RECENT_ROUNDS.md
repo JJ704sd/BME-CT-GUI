@@ -2,9 +2,49 @@
 
 > 本文档按时间滚动覆写，只保留最近三轮成功或具备诊断价值的推理数据。历史完整记录见 `SEGMENTATION_EXPERIMENT_COMPARISON.md`。
 
-最近更新：2026-06-05
+最近更新：2026-06-06
 
-## 第 1 轮（最新）— HTML 报告临床报告风格重构（封面 + 摘要 + TOC + 公式 + 分布图）
+## 第 1 轮（最新）— 演示当天 B1-B4 修复 + start_local_demo + server mode gating 收口
+
+| 项目 | 值 |
+|---|---|
+| 日期 | 2026-06-06 |
+| 修复内容 | 4 个 demo-day 关键 bug（B1-B4）、演示启动脚本化、server mode gating 6 路径收口、AMOS 0117 演示口径修正、新建演示当天 checklist 短卡片 |
+| 受影响逻辑 | `server/main.py:1382-1467 validate_against_debug_label()` 接受 `label_taxonomy="auto"` 和 `dataset_hint=None`、复用 taxonomy 决策树、写出 `taxonomy_match`/`label_taxonomy`/`remap_applied` 字段；`server/main.py:1981-1990 complete_cached_job()` historical fallback 用当前请求的 `label_taxonomy` 和 `dataset_hint` **覆盖**（不是 setdefault）历史值；`server/main.py:1924-1928 find_cached_prediction()` 排序退化为纯 mtime 时打印 degenerate warning；`server/main.py:1550-1557 server_required_files` 从 2 项扩到 6 项；`tools/start_local_demo.py` 新建（CLI 一行启动 + dry-run）；`tools/seed_demo_cache.py` 补 `validation_summary.json` 强制说明 |
+| 回归测试 | `tests/imagingLogic.test.ts` B4：新增 9 个 6-05 CSS class source-grep 断言（`.cover` / `.exec-summary` / `.toc` / `.formula-tip` / `.dist-chart` / `.table-caption` / `.footnotes` / `.section-num` / `.section-en`）；`tests/startLocalDemo.test.py` 新建 12 个 dry-run 测试；`tests/backendState.test.py` B1+B2+B3+server gating 6 个新测试守护（FLARE22→remap / AMOS22→no-remap 双分支、historical 覆盖、degenerate warning、server runtime 缺 server 路径、local runtime 不查 server 路径、4 server + 4 本地全缺失 ready） |
+| 文档同步 | `docs/local-cache-demo-runbook.md` line 102 修正 AMOS 0117 演示口径（**决策：2026-06-05 接受现状，不复跑 AMOS 0117**）；`docs/demo-day-checklist.md` 新建一屏可读卡片（5 步演示流程 + 前置确认 + runbook 兜底回退）；`.planning/label-taxonomy-server-validation/task_plan.md` Phase 4 勾选完成、Phase 5 标 [部分完成；AMOS/FLARE 复跑等待服务器部署] |
+| 自动验证 | `python tools/start_local_demo.py` 真启一次（4 端点全过：`/api/health` ready / `/api/samples` 4 case / `/api/models` 1 model / 前端 HTTP 200）；`python tests/backendState.test.py`、`node tests/imagingLogic.test.ts`、`python tests/startLocalDemo.test.py` 全过；`npm test` 与 `npm run build` 全过 |
+
+**问题描述：**
+
+1. **B1 `validate_against_debug_label` 忽略 taxonomy hint**（高）：cache demo Phase A 走错路径——`label_taxonomy=auto + dataset_hint=FLARE22` 的 cache hit job 进入 `validate_against_debug_label()` 后，函数只接收 `(mask_path, label_path, validation_status, validation_message)`，丢失 `label_taxonomy` 和 `dataset_hint`，写出的 validation 摘要无 `taxonomy_match` / `remap_applied` / `label_taxonomy` 字段，HTML 报告 banner 缺失/错判。
+2. **B2 historical fallback 不注入当前请求**（高）：`complete_cached_job()` 在走 `cache_source_job_id` 的 `validation_summary.json` 时用 `setdefault` 注入 `label_taxonomy` 和 `dataset_hint`——当 cache hit 请求带了显式 `taxonomy=FLARE22` 时，历史值 `taxonomy=AMOS22` 会以 `setdefault` 形式保留，FLARE22 cache hit 拿不到正确的 dataset_hint，报告不渲染 FLARE22 标签。
+3. **B3 `find_cached_prediction` 排序退化无 warning**（中高）：函数按 `(has_validation_summary, mtime)` 降序排序，但当所有候选都缺 `validation_summary.json` 时排序退化为纯 mtime，外部工具（如 `tools/seed_demo_cache.py`）漏写 validation_summary.json 会选错 cache_source，无明确信号。
+4. **B4 source-grep 缺 6-05 新增 9 个 class**（中）：`tests/imagingLogic.test.ts` 在 6-04 第一轮美化时加了 4 个 source-grep 断言，但 6-05 临床报告风格重构又新增 9 个 class，无回归覆盖——后续重构若误删这 9 个 class，CI 不会发现。
+5. **server mode gating 不全**：`get_model_state(runtime_target=server)` 只检查 2 个 server 路径（`evaluate_script` + `dataset_json`），缺 `nnUNet_raw` / `nnUNet_preprocessed` / `nnUNet_results` / `output_root`；server runtime 缺 4 项时 `state["missing"]` 不完整，前端展示"已就绪"但实际 server 无法跑 5-fold 推理。
+6. **演示启动无统一入口**：`start_local_demo.py` 缺失，每次演示都要手敲 uvicorn 命令、设置 7 个 env var、确认 `/api/samples` 4 个 case 都在；runbook 7 步是新用户门槛。
+7. **AMOS 0117 演示口径模糊**：原 runbook 写"复跑 AMOS 真实推理会得到更新更准的预测"，但实测 `009d4efdc5f6` 的 `job_summary.json` 显示这就是 2026-05-23 quality profile（`profile=quality` / `tile_step_size=0.5` / `disable_tta=false`）；README 写的 "0.925" 是历史早期权重（已废弃），不再是这个 cache hit 命中的同一预测。
+
+**修复要点：**
+
+| 修改项 | 说明 |
+|---|---|
+| B1 validate_against_debug_label 接受 taxonomy | 重写 `validate_against_debug_label(mask_path, label_path, ..., label_taxonomy="auto", dataset_hint=None)`，复用 `validate_against_custom_label()` 的 taxonomy 决策树（`taxonomy_hint=AMOS22/FLARE22` → `dataset_hint` → `detect_dataset()`），写出 `taxonomy_match` / `label_taxonomy` / `remap_applied` 字段；FLARE22→remap、AMOS22→no-remap 双分支有回归测试 |
+| B2 historical fallback 覆盖而非注入 | `complete_cached_job()` 把 `setdefault(...)` 改为 `validation.label_taxonomy = current_label_taxonomy` / `validation.dataset_hint = current_dataset_hint`，并写 `taxonomy_overridden: bool` 字段；当前请求 taxonomy 优先于历史 taxonomy |
+| B3 find_cached_prediction degenerate warning | 在排序后、写 cache 命中前，若 `len(validation_summary_exists) == 0`，打印 `WARNING: find_cached_prediction found N candidates but none have validation_summary.json; falling back to mtime-only sort. This typically means tools/seed_demo_cache.py was run without validation_summary.json.`；`tests/backendState.test.py` 守护 |
+| B4 9 个 class source-grep | `tests/imagingLogic.test.ts` 新增 9 个 CSS class 字符串断言（`.cover` / `.exec-summary` / `.toc` / `.formula-tip` / `.dist-chart` / `.table-caption` / `.footnotes` / `.section-num` / `.section-en`） |
+| server_required_files 扩到 6 项 | `get_model_state(runtime_target=server)` 现在检查 `server_evaluate_full.py` / `server_dataset.json` / `server_nnunet_raw` / `server_nnunet_preprocessed` / `server_nnunet_results` / `server_output_root`；`local_required_files` 与 `server_required_files` 完全互斥 |
+| server gating 3 测试 | `test_server_runtime_reports_missing_server_paths`（4 server 路径缺失时 missing 含对应项）+ `test_local_runtime_does_not_check_server_paths`（`runtime_target=local` 绝不报 server 路径缺失）+ 更新 `test_server_runtime_ready_does_not_require_local_model_files`（4 server + 4 本地路径全缺失，state.missing == []） |
+| start_local_demo.py | CLI：env var 注入（`SEGMENTATION_REFERENCE_CASES_JSON` / `SEGMENTATION_DEVICE` / `SEGMENTATION_PERSISTENT_WORKER`）、端口冲突检查、`/api/samples` 等待循环（最多 30s）、Ctrl+C 优雅清理子进程；`--dry-run` 不实际 spawn 但打印完整命令 |
+| startLocalDemo 12 测试 | 覆盖 env var 传播、JSON 缺失/解析失败、samples 为空/0 case 守护、subprocess dry-run 不启动、4 case shape 校验 |
+| AMOS 0117 演示口径 | runbook line 102 修正：移除"复跑 quality 会更好"假设；改写"2026-05-23 那次就是 quality profile；stomach 0.556 是数据本身的硬骨头；**决策：2026-06-05 接受现状，不复跑 AMOS 0117**"；PPT 直接用"质量推理 mean Dice 0.891，stomach 0.556（review 状态），反映真实临床难度" |
+| demo-day-checklist | 一屏可读：前置确认 5 项（cwd / 4 文件存在 / 显存空闲）、演示流程 5 步（cd → start_local_demo → 等 → 浏览器打开 → Ctrl+C）、可能用到的兜底 curl、start_local_demo 失败时回退 runbook 命令 |
+
+**结论：** B1-B4 bug 修复打通 cache demo Phase A 完整链路（taxonomy 决策 → validation 摘要 → HTML 报告 banner）；`start_local_demo.py` 脚本化演示启动，runbook 短卡片配合长卡 runbook 兜底；server mode gating 6 路径检查后，`runtime_target=server` 不会被本地 Windows nnUNet 文件缺失阻断，server runtime 缺路径时也会显式列出 missing 项；AMOS 0117 演示口径与现状一致（"stomach 0.556 是数据硬骨头"），不再误传"复跑会改善"。本轮不修改 nnUNetv2 推理、缓存复用 7 字段、SSE 协议、HTML 报告样式或影像量化逻辑；不改变历史 AMOS/FLARE baseline。
+
+---
+
+## 第 2 轮 — HTML 报告临床报告风格重构（封面 + 摘要 + TOC + 公式 + 分布图）
 
 | 项目 | 值 |
 |---|---|
@@ -38,7 +78,7 @@
 
 ---
 
-## 第 2 轮 — HTML 报告第一轮美化（视觉层 + 信息层）
+## 第 3 轮 — HTML 报告第一轮美化（视觉层 + 信息层）
 
 | 项目 | 值 |
 |---|---|
@@ -68,7 +108,7 @@
 
 ---
 
-## 第 3 轮 — 质量评估指标扩展 + 表面距离计算加速
+## 第 4 轮 — 质量评估指标扩展 + 表面距离计算加速
 
 | 项目 | 值 |
 |---|---|
@@ -98,7 +138,7 @@
 
 ---
 
-## 第 2 轮 — dataset_hint 字段打通 auto 边界
+## 第 5 轮 — dataset_hint 字段打通 auto 边界
 
 | 项目 | 值 |
 |---|---|
@@ -127,7 +167,7 @@
 
 ---
 
-## 第 3 轮 — detect_dataset 二轮收紧 + 前端按 dataset 预设 taxonomy
+## 第 6 轮 — detect_dataset 二轮收紧 + 前端按 dataset 预设 taxonomy
 
 | 项目 | 值 |
 ||---|
@@ -168,7 +208,7 @@
 
 ---
 
-## 第 4 轮 — 本地缓存演示 7 步验证
+## 第 7 轮 — 本地缓存演示 7 步验证
 
 | 项目 | 值 |
 |---|---|
@@ -215,7 +255,7 @@
 
 ---
 
-## 第 5 轮 — label_taxonomy 修复与 AMOS CT 推理完成
+## 第 8 轮 — label_taxonomy 修复与 AMOS CT 推理完成
 
 | 项目 | 值 |
 |---|---|
@@ -249,7 +289,7 @@
 
 ---
 
-## 第 6 轮 — 服务器 AMOS 0117 validation 异常
+## 第 9 轮 — 服务器 AMOS 0117 validation 异常
 
 | 项目 | 值 |
 |---|---|
@@ -280,7 +320,7 @@
 
 ---
 
-## 第 7 轮 — 服务器 FLARE22 + 自动 remap 在线验证
+## 第 10 轮 — 服务器 FLARE22 + 自动 remap 在线验证
 
 | 项目 | 值 |
 |---|---|
@@ -335,13 +375,13 @@
 
 ## 近三轮趋势
 
-| 维度 | 第 1 轮（HTML 报告临床报告风格重构） | 第 2 轮（HTML 报告第一轮美化） | 第 3 轮（质量评估指标扩展 + 表面距离加速） |
+| 维度 | 第 1 轮（B1-B4 + start_local_demo + server gating） | 第 2 轮（HTML 报告临床报告风格重构） | 第 3 轮（HTML 报告第一轮美化） |
 |---|---|---|---|
-| 范围 | 封面 + 摘要 + TOC + 公式 tip + 严重度分布图 + caption/footnote + 打印页眉页码 | 色阶图例 + remap/historical 警告条 + taxonomy 展示位 + spacing 可视化 + aiFindings 排序 + 器官折叠 + 列固定/排序 | 6 类医学影像主流指标补齐，2 EDT/label 优化 |
-| 改动 | exportReport.ts +7 个新 CSS 块 + 3 个工具函数；8 段章节结构 | exportReport.ts +6 个新 CSS 块 + 2 个工具函数；HTML 注入列排序脚本 | ValidationSummary +12 字段、HTML 报告 3 metric group、4 列逐标签 |
-| 耗时影响 | 仅影响导出/打印渲染时间（与 6-04 同量级） | 仅影响导出渲染时间 | AMOS quality cache hit validation 38.86s → 16.78s（2.3× 加速） |
-| 验证口径 | 9 项视觉/信息元素 + 打印预览；`tests/imagingLogic.test.ts` source-grep 保护 4 个新 class | 9 项视觉/信息元素浏览器自检；同 source-grep 保护 | 新指标 mean HD 9.59mm、mean HD95 3.60mm、mean ASD 0.66mm（AMOS quality cache hit） |
-| 核心问题 | 报告从仪表板升级为临床报告，演示与答辩可直出 PDF | 信息密度与可读性提升，cache hit / remap / historical 三态都有专门提示 | validation 比推理慢 10× 已收口 |
+| 范围 | cache demo Phase A taxonomy 链路收口 + 演示启动脚本化 + server mode gating 6 路径 | 封面 + 摘要 + TOC + 公式 tip + 严重度分布图 + caption/footnote + 打印页眉页码 | 色阶图例 + remap/historical 警告条 + taxonomy 展示位 + spacing 可视化 + aiFindings 排序 + 器官折叠 + 列固定/排序 |
+| 改动 | `validate_against_debug_label` 接 taxonomy 字段、`complete_cached_job` 覆盖 historical、`find_cached_prediction` degenerate warning、`server_required_files` 2→6 项、新建 `tools/start_local_demo.py` + 12 测试 | exportReport.ts +7 个新 CSS 块 + 3 个工具函数；8 段章节结构 | exportReport.ts +6 个新 CSS 块 + 2 个工具函数；HTML 注入列排序脚本 |
+| 耗时影响 | smoke test 4 端点全过；start_local_demo.py 一行启动 ≈5s | 仅影响导出/打印渲染时间（与 6-04 同量级） | 仅影响导出渲染时间 |
+| 验证口径 | 6 个新 backend 测试 + 12 个 start_local_demo 测试 + 9 个 6-05 CSS source-grep；AMOS 0117 演示口径文档化 | 9 项视觉/信息元素 + 打印预览；`tests/imagingLogic.test.ts` source-grep 保护 4 个新 class | 9 项视觉/信息元素浏览器自检；同 source-grep 保护 |
+| 核心问题 | 演示当天 4 类关键 bug 收口 + 启动流程脚本化 + server gating 不会因本地文件缺失误判 | 报告从仪表板升级为临床报告，演示与答辩可直出 PDF | 信息密度与可读性提升，cache hit / remap / historical 三态都有专门提示 |
 
 ---
 

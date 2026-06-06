@@ -1379,21 +1379,79 @@ def is_debug_original_upload(input_path: Path) -> bool:
   return file_sha256(input_path) == file_sha256(DEBUG_ORIGINAL)
 
 
-def validate_against_debug_label(prediction_path: Path) -> dict[str, Any]:
+def validate_against_debug_label(prediction_path: Path, label_taxonomy: str = "auto", dataset_hint: str | None = None) -> dict[str, Any]:
   reference_path = DEBUG_LABEL if DEBUG_LABEL.exists() else FALLBACK_LABEL
+  taxonomy_hint = normalize_label_taxonomy(label_taxonomy)
+  dataset_hint_normalized = str(dataset_hint or "").strip().upper() or None
+  if dataset_hint_normalized not in {"AMOS22", "FLARE22", None}:
+    dataset_hint_normalized = None
   if not reference_path.exists():
-    return unavailable_validation("标准答案标签不存在，无法验证推理效果。")
+    return {
+      **unavailable_validation("标准答案标签不存在，无法验证推理效果。"),
+      "taxonomy_match": None,
+      "label_taxonomy": taxonomy_hint,
+    }
   try:
     import nibabel as nib
     import numpy as np
   except Exception as exc:
-    return unavailable_validation(f"当前 Python 环境缺少 NIfTI 验证依赖：{exc}")
+    return {
+      **unavailable_validation(f"当前 Python 环境缺少 NIfTI 验证依赖：{exc}"),
+      "taxonomy_match": None,
+      "label_taxonomy": taxonomy_hint,
+    }
   prediction_image = nib.load(str(prediction_path))
   reference_image = nib.load(str(reference_path))
   prediction = np.asanyarray(prediction_image.dataobj)
   reference = np.asanyarray(reference_image.dataobj)
   spacing = tuple(float(item) for item in prediction_image.header.get_zooms()[: prediction.ndim])
-  return compute_label_metrics(prediction, reference, read_labels(), spacing=spacing)
+  labels = read_labels()
+  checkpoint_labels = {int(item["label"]) for item in labels}
+  reference_labels = set(np.unique(reference).astype(int)) - {0}
+
+  try:
+    from server.taxonomy import detect_dataset, build_remap_mapping, apply_remap
+  except ModuleNotFoundError:
+    from taxonomy import detect_dataset, build_remap_mapping, apply_remap
+
+  if taxonomy_hint == "AMOS22":
+    detected = None
+  elif taxonomy_hint == "FLARE22":
+    detected = "FLARE22"
+  elif dataset_hint_normalized == "FLARE22":
+    detected = "FLARE22"
+  elif dataset_hint_normalized == "AMOS22":
+    detected = None
+  else:
+    detected = detect_dataset(reference_labels, labels)
+  if detected:
+    try:
+      mapping = build_remap_mapping(labels, detected)
+      if mapping:
+        remapped_reference = apply_remap(reference, mapping)
+        result = compute_label_metrics(prediction, remapped_reference, labels, sample_id="debug", spacing=spacing)
+        result["taxonomy_match"] = True
+        result["label_taxonomy"] = taxonomy_hint
+        result["remap_applied"] = True
+        result["remap_source"] = detected
+        result["remap_mapping"] = {str(k): v for k, v in mapping.items()}
+        action = "已按用户选择" if taxonomy_hint == "FLARE22" else ("已按参考病例" if dataset_hint_normalized == "FLARE22" else "已自动")
+        result["message"] = f"{action}重映射标签 ID（{detected} → 当前模型）。" + (result.get("message") or "")
+        return result
+    except Exception as remap_exc:
+      print(f"[taxonomy] debug remap failed, falling through: {remap_exc}")
+
+  if not reference_labels.intersection(checkpoint_labels):
+    return {
+      **unavailable_validation("标签 ID 与当前 checkpoint 定义不匹配，需要离线 taxonomy remap。"),
+      "taxonomy_match": False,
+      "label_taxonomy": taxonomy_hint,
+    }
+  result = compute_label_metrics(prediction, reference, labels, sample_id="debug", spacing=spacing)
+  result["taxonomy_match"] = True
+  result["label_taxonomy"] = taxonomy_hint
+  result["remap_applied"] = False
+  return result
 
 
 def normalize_label_taxonomy(value: str | None = None) -> str:
@@ -1492,6 +1550,10 @@ def get_model_state(runtime_target: str | None = None) -> dict[str, Any]:
   server_required_files = [
     ("server_evaluate_full.py", server_config.evaluate_script),
     ("server_dataset.json", server_config.dataset_json),
+    ("server_nnunet_raw", server_config.nnunet_raw),
+    ("server_nnunet_preprocessed", server_config.nnunet_preprocessed),
+    ("server_nnunet_results", server_config.nnunet_results),
+    ("server_output_root", server_config.output_root),
   ]
   required_files = local_required_files if normalized_runtime_target == "local" else server_required_files
   missing = [name for name, path in required_files if path is not None and not path.exists()]
@@ -1917,6 +1979,11 @@ def find_cached_prediction(cache_key: str, input_path: Path, current_job_id: str
       ))
     if candidates:
       candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+      if not candidates[0][0]:
+        print(
+          f"[cache] WARN: no cache_source with validation_summary.json for cache_key, "
+          f"falling back to mtime-only sort. Selected job_id={candidates[0][2]['job_id']}."
+        )
       return candidates[0][2]
 
   legacy_job_id = "009d4efdc5f6"
@@ -1977,6 +2044,11 @@ def complete_cached_job(job: Job, input_path: Path, cache: dict[str, Any]) -> No
       historical = dict(historical)
       historical["historical"] = True
       historical["source_job_id"] = str(cache.get("job_id"))
+      historical["label_taxonomy"] = normalize_label_taxonomy(getattr(job, "label_taxonomy", None) or "auto")
+      job_dataset_hint = str(getattr(job, "dataset_hint", None) or "").strip().upper() or None
+      if job_dataset_hint not in {"AMOS22", "FLARE22", None}:
+        job_dataset_hint = None
+      historical["dataset_hint"] = job_dataset_hint
       historical.setdefault("message", "（历史离线缓存摘要，未在当前 job 重新验证）")
       validation = historical
   if validation is not None:

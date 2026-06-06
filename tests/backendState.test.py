@@ -180,6 +180,12 @@ def test_server_runtime_ready_does_not_require_local_model_files():
     missing_local = base / "missing-local"
     evaluate_script = base / "evaluate_full.py"
     server_dataset = base / "server-dataset.json"
+    server_raw = base / "server_nnunet_raw"
+    server_preprocessed = base / "server_nnunet_preprocessed"
+    server_results = base / "server_nnunet_results"
+    server_output_root = base / "server_output_root"
+    for path in (server_raw, server_preprocessed, server_results, server_output_root):
+        path.mkdir(parents=True, exist_ok=True)
     evaluate_script.write_text("ok", encoding="utf-8")
     server_dataset.write_text("ok", encoding="utf-8")
 
@@ -187,6 +193,10 @@ def test_server_runtime_ready_does_not_require_local_model_files():
         "SEGMENTATION_RUNTIME_TARGET": "server",
         "SEGMENTATION_SERVER_EVALUATE_SCRIPT": str(evaluate_script),
         "SEGMENTATION_SERVER_DATASET_JSON": str(server_dataset),
+        "SEGMENTATION_SERVER_NNUNET_RAW": str(server_raw),
+        "SEGMENTATION_SERVER_NNUNET_PREPROCESSED": str(server_preprocessed),
+        "SEGMENTATION_SERVER_NNUNET_RESULTS": str(server_results),
+        "SEGMENTATION_SERVER_OUTPUT_ROOT": str(server_output_root),
     }, clear=True), \
          patch.object(server, "FLARE_DATASET_JSON", missing_local / "dataset.json"), \
          patch.object(server, "FLARE_PLANS_JSON", missing_local / "plans.json"), \
@@ -199,6 +209,87 @@ def test_server_runtime_ready_does_not_require_local_model_files():
     assert state["runtime_target"] == "server"
     assert state["status"] == "ready"
     assert state["missing"] == []
+
+
+def test_server_runtime_reports_missing_server_paths():
+    """runtime_target=server 必须严格检查 6 个 server 路径：缺少时 missing
+    包含对应项；这样 create_job 不会因 Linux 默认路径在 Windows 上
+    /mnt/data0/... 不存在而误判 ready。"""
+    server = load_server_module()
+
+    base = make_test_output_dir("server-runtime-missing-server-paths")
+    evaluate_script = base / "evaluate_full.py"
+    server_dataset = base / "server-dataset.json"
+    server_raw = base / "server_nnunet_raw"
+    server_preprocessed = base / "server_nnunet_preprocessed"
+    server_results = base / "server_nnunet_results"
+    server_output_root = base / "server_output_root"
+    evaluate_script.write_text("ok", encoding="utf-8")
+    server_dataset.write_text("ok", encoding="utf-8")
+    # 故意不 mkdir raw / preprocessed / results / output_root
+
+    with patch.dict(os.environ, {
+        "SEGMENTATION_RUNTIME_TARGET": "server",
+        "SEGMENTATION_SERVER_EVALUATE_SCRIPT": str(evaluate_script),
+        "SEGMENTATION_SERVER_DATASET_JSON": str(server_dataset),
+        "SEGMENTATION_SERVER_NNUNET_RAW": str(server_raw),
+        "SEGMENTATION_SERVER_NNUNET_PREPROCESSED": str(server_preprocessed),
+        "SEGMENTATION_SERVER_NNUNET_RESULTS": str(server_results),
+        "SEGMENTATION_SERVER_OUTPUT_ROOT": str(server_output_root),
+    }, clear=True), \
+         patch.object(server, "load_checkpoint_init_args", return_value=AMOS_CHECKPOINT_ARGS):
+        state = server.get_model_state()
+
+    assert state["runtime_target"] == "server"
+    assert state["status"] == "incomplete"
+    assert "server_nnunet_raw" in state["missing"]
+    assert "server_nnunet_preprocessed" in state["missing"]
+    assert "server_nnunet_results" in state["missing"]
+    assert "server_output_root" in state["missing"]
+
+
+def test_local_runtime_does_not_check_server_paths():
+    """runtime_target=local 仍只检查 4 个本地文件，绝不能因 server 路径缺失而
+    误报 missing。"""
+    server = load_server_module()
+
+    base = make_test_output_dir("local-runtime-ignores-server-paths")
+    evaluate_script = base / "evaluate_full.py"
+    server_dataset = base / "server-dataset.json"
+    server_raw = base / "server_nnunet_raw"
+    server_preprocessed = base / "server_nnunet_preprocessed"
+    server_results = base / "server_nnunet_results"
+    server_output_root = base / "server_output_root"
+    evaluate_script.write_text("ok", encoding="utf-8")
+    server_dataset.write_text("ok", encoding="utf-8")
+    # server 4 个路径都缺失；本地 4 个文件必须独立检查
+
+    with patch.dict(os.environ, {
+        "SEGMENTATION_RUNTIME_TARGET": "local",
+        "SEGMENTATION_SERVER_EVALUATE_SCRIPT": str(evaluate_script),
+        "SEGMENTATION_SERVER_DATASET_JSON": str(server_dataset),
+        "SEGMENTATION_SERVER_NNUNET_RAW": str(server_raw),
+        "SEGMENTATION_SERVER_NNUNET_PREPROCESSED": str(server_preprocessed),
+        "SEGMENTATION_SERVER_NNUNET_RESULTS": str(server_results),
+        "SEGMENTATION_SERVER_OUTPUT_ROOT": str(server_output_root),
+    }, clear=True), \
+         patch.object(server, "load_checkpoint_init_args", return_value=AMOS_CHECKPOINT_ARGS), \
+         patch.object(server, "FLARE_DATASET_JSON", base / "FLARE_DATASET_JSON"), \
+         patch.object(server, "FLARE_PLANS_JSON", base / "FLARE_PLANS_JSON"), \
+         patch.object(server, "FLARE_CHECKPOINT", base / "FLARE_CHECKPOINT"), \
+         patch.object(server, "PROJECT_CHECKPOINT", base / "FLARE_CHECKPOINT"), \
+         patch.object(server, "NNUNET_PYTHON_COMMAND", base / "python.exe", create=True):
+        state = server.get_model_state()
+
+    assert state["runtime_target"] == "local"
+    assert "server_nnunet_raw" not in state["missing"]
+    assert "server_nnunet_preprocessed" not in state["missing"]
+    assert "server_nnunet_results" not in state["missing"]
+    assert "server_output_root" not in state["missing"]
+    assert "dataset.json" in state["missing"]
+    assert "plans.json" in state["missing"]
+    assert "checkpoint_best.pth" in state["missing"]
+    assert "nnUNetv2_python" in state["missing"]
 
 
 def test_health_and_models_expose_server_runtime_config():
@@ -1549,6 +1640,92 @@ def test_cached_prediction_falls_back_to_source_validation_summary():
     assert server.jobs[body["job_id"]].events[-1]["validation"]["historical"] is True
 
 
+def test_historical_fallback_overrides_with_current_request_taxonomy():
+    """cache hit 走 historical fallback 时，validation 里的 label_taxonomy /
+    dataset_hint 必须来自当前请求，不能从 cache_source 沿用。否则 FLARE22 cache
+    hit 显示 historical 摘要时 HTML 报告会渲染成 AMOS 标签。"""
+    server = load_server_module()
+    temp_root = make_test_output_dir("cached-jobs-historical-current-taxonomy")
+    cached_job_id = "cached0003b"
+    cached_output = temp_root / cached_job_id / "output"
+    cached_output.mkdir(parents=True, exist_ok=True)
+    cached_result = cached_output / f"{cached_job_id}.nii.gz"
+    cached_result.write_bytes(b"cached-result")
+    historical_validation = {
+        "status": "review",
+        "sample_id": "flare22_tr_0009",
+        "mean_dice": 0.89313,
+        "min_dice": 0.67377,
+        "foreground_dice": 0.949909,
+        "label_taxonomy": "auto",
+        "dataset_hint": "AMOS22",
+        "remap_applied": True,
+        "remap_source": "FLARE22",
+        "message": "（历史离线 remap 摘要）",
+    }
+    (cached_output / "validation_summary.json").write_text(
+        json.dumps(historical_validation, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    (cached_output / "job_summary.json").write_text(json.dumps({
+        "job_id": cached_job_id,
+        "status": "succeeded",
+        "progress": 100,
+        "stage": "历史推理结果已生成",
+        "mode": "real-nnunetv2",
+        "result_ready": True,
+        "result_path": str(cached_result),
+        "result_size_bytes": cached_result.stat().st_size,
+        "cache_key": "cache-key-3b",
+        "validation": historical_validation,
+    }, ensure_ascii=False), encoding="utf-8")
+
+    def fail_if_started(*_args, **_kwargs):
+        raise AssertionError("cached jobs must not start a real inference thread")
+
+    with patch.object(server, "WORK_DIR", temp_root), \
+         patch.object(server, "get_model_state", return_value={
+             "ready": True,
+             "status": "ready",
+             "mode": "real-nnunetv2",
+             "missing": [],
+         }), \
+         patch.object(server, "build_prediction_cache_key", return_value="cache-key-3b"), \
+         patch.object(server.threading, "Thread", side_effect=fail_if_started):
+        client = TestClient(server.app)
+        response = client.post(
+            "/api/segment/jobs",
+            files={"file": ("case_0000.nii.gz", b"same-input", "application/octet-stream")},
+            data={
+                "model_id": "abdomen",
+                "label_taxonomy": "FLARE22",
+                "dataset_hint": "FLARE22",
+            },
+        )
+        body = response.json()
+        state = client.get(f"/api/segment/jobs/{body['job_id']}").json()
+
+    current_output = temp_root / body["job_id"] / "output"
+    summary_path = current_output / "validation_summary.json"
+    summary_payload = json.loads(summary_path.read_text(encoding="utf-8"))
+
+    assert response.status_code == 200
+    assert body["cached_result"] is True
+    assert body["cache_source_job_id"] == cached_job_id
+    # historical / source_job_id 标记必须保留
+    assert state["validation"]["historical"] is True
+    assert state["validation"]["source_job_id"] == cached_job_id
+    # 当前请求的 taxonomy / dataset_hint 必须覆盖 cache_source 的
+    assert state["validation"]["label_taxonomy"] == "FLARE22"
+    assert state["validation"]["dataset_hint"] == "FLARE22"
+    assert summary_payload["label_taxonomy"] == "FLARE22"
+    assert summary_payload["dataset_hint"] == "FLARE22"
+    # 其余字段（mean_dice / remap_applied）应该从 cache_source 沿用
+    assert state["validation"]["mean_dice"] == 0.89313
+    assert state["validation"]["remap_applied"] is True
+    assert server.jobs[body["job_id"]].events[-1]["validation"]["dataset_hint"] == "FLARE22"
+
+
 def test_cached_prediction_without_historical_validation_summary():
     server = load_server_module()
     temp_root = make_test_output_dir("cached-jobs-no-historical")
@@ -1599,6 +1776,45 @@ def test_cached_prediction_without_historical_validation_summary():
     last_event = server.jobs[body["job_id"]].events[-1]
     assert last_event.get("validation") is None
     assert "validation" not in last_event
+
+
+def test_find_cached_prediction_warns_when_no_candidate_has_validation_summary():
+    import contextlib
+    server = load_server_module()
+    temp_root = make_test_output_dir("cached-jobs-degenerate-mtime-sort")
+    cache_key = "degenerate-key"
+    input_path = temp_root / "current" / "input" / "current_0000.nii.gz"
+    input_path.parent.mkdir(parents=True, exist_ok=True)
+    input_path.write_bytes(b"current-input")
+
+    for offset, cached_job_id in enumerate(["cached0005a", "cached0005b"]):
+      cached_output = temp_root / cached_job_id / "output"
+      cached_output.mkdir(parents=True, exist_ok=True)
+      cached_result = cached_output / f"{cached_job_id}.nii.gz"
+      cached_result.write_bytes(f"cached-result-{offset}".encode("utf-8"))
+      (cached_output / "job_summary.json").write_text(json.dumps({
+          "job_id": cached_job_id,
+          "status": "succeeded",
+          "progress": 100,
+          "stage": "历史推理结果已生成",
+          "mode": "real-nnunetv2",
+          "result_ready": True,
+          "result_path": str(cached_result),
+          "result_size_bytes": cached_result.stat().st_size,
+          "cache_key": cache_key,
+      }, ensure_ascii=False), encoding="utf-8")
+      assert not (cached_output / "validation_summary.json").exists()
+
+    stdout_buffer = io.StringIO()
+    with contextlib.redirect_stdout(stdout_buffer), \
+         patch.object(server, "WORK_DIR", temp_root):
+      cache = server.find_cached_prediction(cache_key, input_path, "current_job_id")
+    captured = stdout_buffer.getvalue()
+
+    assert cache is not None
+    assert "validation_summary.json" in captured
+    assert "mtime-only sort" in captured
+    assert cache["job_id"] in {"cached0005a", "cached0005b"}
 
 
 def test_real_job_uses_persistent_worker_when_enabled():
@@ -2355,6 +2571,69 @@ def test_validate_against_custom_label_uses_dataset_hint_when_taxonomy_is_auto()
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_validate_against_debug_label_propagates_taxonomy_hint():
+    """validate_against_debug_label 必须接受 label_taxonomy / dataset_hint 并写
+    taxonomy_match / label_taxonomy / remap_applied 字段，否则 cache demo Phase A
+    走 debug label 路径时 HTML 报告 banner 缺失。"""
+    import nibabel as nib
+    import numpy as np
+    import tempfile
+
+    server = load_server_module()
+    tmp = Path(tempfile.mkdtemp(prefix="seg-debug-taxonomy-"))
+    try:
+        amos_labels = [
+            {"label": 1, "id": "spleen", "nameEn": "spleen", "nameZh": "脾脏"},
+            {"label": 2, "id": "right_kidney", "nameEn": "right_kidney", "nameZh": "右肾"},
+            {"label": 3, "id": "left_kidney", "nameEn": "left_kidney", "nameZh": "左肾"},
+            {"label": 6, "id": "liver", "nameEn": "liver", "nameZh": "肝脏"},
+        ]
+        # FLARE22 视角下的 reference：1=liver, 3=spleen
+        flare_label = np.zeros((4, 4, 4), dtype=np.int16)
+        flare_label[0:1, 0:2, 0:2] = 1
+        flare_label[1:2, 0:2, 0:2] = 3
+        # AMOS 视角下的 prediction：6=liver, 1=spleen
+        prediction = np.zeros((4, 4, 4), dtype=np.int16)
+        prediction[0:1, 0:2, 0:2] = 6
+        prediction[1:2, 0:2, 0:2] = 1
+
+        label_path = tmp / "debug_label.nii.gz"
+        pred_path = tmp / "pred.nii.gz"
+        nib.save(nib.Nifti1Image(flare_label, np.eye(4)), str(label_path))
+        nib.save(nib.Nifti1Image(prediction, np.eye(4)), str(pred_path))
+
+        with patch.object(server, "DEBUG_LABEL", label_path), \
+             patch.object(server, "read_labels", return_value=amos_labels), \
+             patch.object(server, "FALLBACK_LABEL", label_path):
+            # 1) label_taxonomy=FLARE22 必须触发 remap
+            result_flare = server.validate_against_debug_label(
+                pred_path, label_taxonomy="FLARE22"
+            )
+            assert result_flare.get("remap_applied") is True, \
+                f"Expected remap when taxonomy=FLARE22, got {result_flare}"
+            assert result_flare.get("remap_source") == "FLARE22"
+            assert result_flare.get("label_taxonomy") == "FLARE22"
+            assert result_flare.get("taxonomy_match") is True
+            assert "已按用户选择" in (result_flare.get("message") or "")
+
+            # 2) label_taxonomy=AMOS22 + AMOS-style reference 不 remap
+            amos_label = np.zeros((4, 4, 4), dtype=np.int16)
+            amos_label[0:1, 0:2, 0:2] = 6
+            amos_label[1:2, 0:2, 0:2] = 1
+            amos_label_path = tmp / "debug_label_amos.nii.gz"
+            nib.save(nib.Nifti1Image(amos_label, np.eye(4)), str(amos_label_path))
+            with patch.object(server, "DEBUG_LABEL", amos_label_path):
+                result_amos = server.validate_against_debug_label(
+                    pred_path, label_taxonomy="AMOS22"
+                )
+            assert result_amos.get("remap_applied") is False, \
+                f"AMOS22 hint on AMOS-style label should not remap, got {result_amos}"
+            assert result_amos.get("label_taxonomy") == "AMOS22"
+            assert result_amos.get("taxonomy_match") is True
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     test_taxonomy_detects_flare22_and_remaps_label_ids()
     test_taxonomy_detects_partial_flare22_labels_when_ids_are_mismatched()
@@ -2362,9 +2641,12 @@ if __name__ == "__main__":
     test_taxonomy_returns_none_when_amos_reference_matches_full_amos_checkpoint()
     test_taxonomy_returns_none_for_realistic_amos_1_to_13_reference()
     test_validate_against_custom_label_uses_dataset_hint_when_taxonomy_is_auto()
+    test_validate_against_debug_label_propagates_taxonomy_hint()
     test_validate_against_custom_label_respects_explicit_taxonomy_hints()
     test_model_state_reports_missing_required_files()
     test_server_runtime_ready_does_not_require_local_model_files()
+    test_server_runtime_reports_missing_server_paths()
+    test_local_runtime_does_not_check_server_paths()
     test_create_job_rejects_when_model_is_not_ready()
     test_server_source_does_not_log_uploaded_filenames()
     test_predict_command_uses_model_folder_and_job_io()
@@ -2392,7 +2674,9 @@ if __name__ == "__main__":
     test_create_job_reuses_cached_prediction_for_matching_cache_key()
     test_cached_prediction_revalidates_against_current_label_file()
     test_cached_prediction_falls_back_to_source_validation_summary()
+    test_historical_fallback_overrides_with_current_request_taxonomy()
     test_cached_prediction_without_historical_validation_summary()
+    test_find_cached_prediction_warns_when_no_candidate_has_validation_summary()
     test_real_job_uses_persistent_worker_when_enabled()
     test_persistent_worker_stdout_reader_is_reused_across_events()
     test_process_log_is_persisted_as_utf8_and_tail_is_returned()

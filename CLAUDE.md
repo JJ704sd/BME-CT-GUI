@@ -22,6 +22,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **`surface_distances()` 2 EDT 是单 label 性能不变量**：每个 label 在 1 次 crop + 2 次 `distance_transform_edt`（预测→参考、参考→预测）后用 value 数组派生 `asd` / `hd` / `hd95`。新写 `compute_*_metrics` 时不应回退到 6 EDT 模式；旧 `average_surface_distance` / `hausdorff_95` / `hausdorff_distance_full` 仅保留供回归测试对照，不再走主路径。AMOS 0117 quality cache hit validation 实测 38.86s → 16.78s（约 2.3× 加速）
 - **HTML 报告输出路径是临床报告而非仪表板**：`src/report/exportReport.ts` 在 2026-06-04 第一轮美化和 2026-06-05 临床报告风格重构之后，输出结构由"卡片堆叠"升级为"封面 + 摘要 + TOC + 8 段章节 + 公式 tip + 严重度分布图 + caption/footnote + A4 打印页眉页码"。新增视觉/CSS 块（`.cover` / `.exec-summary` / `.toc` / `.formula-tip` / `.dist-chart` / `.table-caption` / `.footnotes` / `.legend` / `.remap-banner` / `.historical-banner` / `.spacing-bar`）必须有对应 `tests/imagingLogic.test.ts` source-grep 断言保护。改 exportReport.ts 时**不要**回退到 6-04 之前那种"工程 dump"风格。后续若新增 validation 字段（`remap_applied` / `taxonomy_match` / `dataset_hint` / `historical` / `label_taxonomy` / `quantification`），必须同时改 `inferenceClient.ts normalizeValidation` 白名单 + `exportReport.ts` 模板 + `tests/imagingLogic.test.ts` source-grep 三处
 - **AGENTS.md 是只读 agent 指令文件**：自动权限会拒绝直接覆盖；如需统一中文主体、修订编码风格或调整 PR 规范，必须**先取得用户单独授权**。CLAUDE.md 与 AGENTS.md 的分工：CLAUDE.md 放本仓库特定的非显然事实，AGENTS.md 放跨项目共享的工作流规范
+- **2026-06-06 演示当天收口不变量**（已落地）：
+  - **B1 SSE 进度百分比不再随资源快照心跳回退到旧值**：`src/main.tsx:infereneTimeline` 的百分比追踪以 `event.percent` 存在为强信号，未带 `percent` 的心跳事件不覆盖当前进度；`tests/imagingLogic.test.ts` 守护。
+  - **B2 取消 job 后 SSE 不会再有 progress 事件**：`cancel_job()` 在 `EventSourceHandler` 关闭后写入取消状态；前端不把 cancel 后的心跳误显示为"还在跑"。
+  - **B3 后端模型状态可对外暴露**：FastAPI `/api/health` 的 `model_state` 字段从内部变量提升为可被状态栏读取的稳定 JSON 字段；`tests/backendState.test.py` 守护 4 字段（`status` / `checkpoint_sha256` / `mode` / `missing`）。
+  - **B4 浏览器 SSE 事件源具备基础异常重试**：`createInferenceEventSource` 暴露 `onretry` / `retryCount` 字段；单次断连后自动退避重连（200ms→2s 指数退避，最多 3 次），不再让网络抖动直接打断演示。
+  - **`tools/start_local_demo.py` 是演示启动的唯一入口**：setenv + spawn backend/frontend + 健康检查 + 打印 URL，幂等可重跑；前置约束已固化到 `docs/demo-day-checklist.md`。
+  - **server 模式 gating 6 路径**：`runtime_target=server` 创建 job 时只检查 `SEGMENTATION_SERVER_*` 6 个路径（`server_evaluate_full.py` / `server_dataset.json` / `server_nnunet_raw` / `server_nnunet_preprocessed` / `server_nnunet_results` / `server_output_root`），不被本地 Windows nnUNet 文件缺失阻断；`runtime_target=local` 才检查 `dataset.json / plans.json / checkpoint_best.pth / nnUNetv2_python` 4 个本地文件，两组检查互斥。`server/main.py:1537-1604 get_model_state(runtime_target)` 接受 `runtime_target` 参数切换。
+  - **AMOS 0117 演示口径（2026-06-05 决策）**：cache hit `aea4e7cdbaf0` 命中的是 2026-05-23 quality profile 真实推理 `009d4efdc5f6`（review 状态，stomach Dice 0.556、mean_dice 0.891），是数据本身硬骨头（stomach 在 AMOS 0117 的边界模糊），复跑 quality 不会显著改善；正式 AMOS 报告基线仍是 `b3c528cc9e20`（mean_dice 0.924780）。决策：接受现状，不复跑 AMOS 0117。
 
 ## 安全 / 隐私边界（必读）
 

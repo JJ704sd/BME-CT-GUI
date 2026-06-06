@@ -4,6 +4,17 @@
 
 ## 当前运行状态
 
+2026-06-06 已完成：
+- **演示当天收口 + B1-B4 演示关键 bug 修复**：
+  - **B1 SSE 进度回退**：`src/main.tsx` 的 `inferenceTimeline` 进度追踪以 `event.percent` 存在为强信号；心跳事件没有 `percent` 字段时不再覆盖当前进度。`tests/imagingLogic.test.ts` source-grep 守护 `event.percent` 检查存在。
+  - **B2 取消后残留进度**：后端 `cancel_job()` 在 `EventSourceHandler` 关闭后写取消状态；前端不再把 cancel 后的心跳误显示为"还在跑"。
+  - **B3 后端模型状态对外可读**：`/api/health` 的 `model_state` 字段从内部变量提升为可被 GUI 状态栏读取的稳定 JSON 字段（`status` / `checkpoint_sha256` / `mode` / `missing`）。`tests/backendState.test.py::test_health_exposes_model_state_for_gui_status_bar` 守护。
+  - **B4 SSE 基础异常重试**：`createInferenceEventSource` 暴露 `onretry` / `retryCount` 字段；单次断连后自动退避重连（200ms→2s 指数退避，最多 3 次）。`tests/imagingLogic.test.ts` source-grep 守护 `onretry` 字符串。
+  - **演示启动脚本化**：`tools/start_local_demo.py` 一行启动：setenv（`SEGMENTATION_REFERENCE_CASES_JSON` / `SEGMENTATION_DEVICE` / `SEGMENTATION_INFERENCE_PROFILE`）+ spawn backend（uvicorn 127.0.0.1:8000）+ frontend（vite dev 127.0.0.1:5173）+ 轮询 4 个端点（`/api/health` ready / `/api/samples` 4 case / `/api/models` 1 model / 前端 HTTP 200）+ 失败时打印 `docs/local-cache-demo-runbook.md` 回退命令。配套一屏卡片见 `docs/demo-day-checklist.md`。
+  - **server mode gating 6 路径修复**：`server/main.py:1537-1604 get_model_state(runtime_target)` 接受 `runtime_target` 参数切换 `server_required_files`（6 项 server 路径）与 `local_required_files`（4 项本地 nnUNet 文件）两组互斥检查。`tests/backendState.test.py` 新增 3 个守护测试（`test_server_runtime_ready_does_not_require_local_model_files` 扩 4 server 路径 / `test_server_runtime_reports_missing_server_paths` / `test_local_runtime_does_not_check_server_paths`）。Smoke test 2026-06-06 验证 4 端点全过。
+  - **AMOS 0117 演示口径（2026-06-05 决策，6-06 落地）**：cache hit `aea4e7cdbaf0` 命中的是 2026-05-23 quality profile 真实推理 `009d4efdc5f6`（review 状态，stomach Dice 0.556、mean_dice 0.891），stomach 0.556 是数据本身硬骨头（边界模糊），复跑 quality 不会显著改善。决策：接受现状，不复跑 AMOS 0117；正式 AMOS 报告基线仍是 `b3c528cc9e20`（mean_dice 0.924780）。已写入 `docs/local-cache-demo-runbook.md`。
+- **新增脚本/文档**：`tools/start_local_demo.py`、`docs/demo-day-checklist.md`。
+
 2026-06-05 已完成：
 - HTML 报告临床报告风格重构（第二轮美化）：`src/report/exportReport.ts` 从"卡片式仪表板"重塑为"临床评估报告"。新增 7 个 CSS 块：`.cover` 封面页（题图条 + 报告编号 + 主副标题 + 数据集/病例/生成时间三列）、`.exec-summary` 执行摘要（通过 / 关注点 / 建议三栏）、`.toc` 目录（§1-§8 锚点导航）、`.formula-tip` 公式小贴士（Dice / IoU、Pixel Accuracy、HD95 三张）、`.dist-chart` 严重度分布图（高/中/低 bar chart）、`.table-caption` 表格标题、`.footnotes` 脚注；新增 3 个工具函数 `distributionChartHtml()` / `severityBuckets()` / `formulaTips()`；正文模板按 §1 报告概览 / §2 摘要 / §3 数据集 / §4 器官 / §5 体素 / §6 距离 / §7 关键发现 / §8 附录 8 段章节编号排版；字体改为 Source Han Serif / Songti SC + JetBrains Mono；@media print 改为 A4 + 顶部 caseId + 底部 page X of Y。本轮不动 6 类指标、`surface_distances()` 2 EDT、`ValidationSummary` / `LabelMetric` 白名单或影像量化逻辑；与 2026-06-04 第一轮美化兼容并叠加。
 - 打印页眉页码：CSS counter 在每页加 `报告 · caseId · generatedAt` 顶部条 + `page X of Y` 底部条；正文 padding 适配 A4；`.cover` / `.dist-chart` `break-inside: avoid` 避免打印分页错位。
@@ -50,7 +61,8 @@
 9. 到 `tools/segmentation_metrics_summary.py` 讲 Dice、IoU、Voxel Accuracy 和 Hausdorff Distance 指标如何离线复算。
 10. 到 `tools/seed_demo_cache.py` 讲本地缓存演示预热：稳定 SHA-256 计算 `input_sha256` / `checkpoint_sha256`，用 7 字段 `build_cache_key()` 写 `job_summary.json`，让 AMOS 历史推理（`009d4efdc5f6`）成为 cache hit 源；FLARE 真实推理缺失时打印明确提示。
 11. 到 `tools/rewrite_flare22_historical_summary.py` 讲 cache 链路补丁：当 cache_source 的新预测与历史 remap 指标字节不一致时，按离线 remap 后的 metrics 改写 cache_source 的 `validation_summary.json`，加 `historical: true` 和 `source_job_id` 标记；这是"cache hit 显示历史 validation 摘要"的实现支撑。
-12. 最后用 `tests/` 和文档说明验收边界：AMOS 原生 validation 与 FLARE22 自动 taxonomy-remap validation 的区别；并把 `docs/local-cache-demo-runbook.md` 作为本地缓存演示复跑手册。
+12. 到 `tools/start_local_demo.py` 讲演示启动脚本化（2026-06-06 新增）：setenv + spawn backend（uvicorn）+ frontend（vite dev）+ 轮询 4 个端点验证 ready。配合 `docs/demo-day-checklist.md` 一屏卡片可作演示现场速查；启动失败时脚本会打印 `docs/local-cache-demo-runbook.md` 中的 runbook 回退命令。
+13. 最后用 `tests/` 和文档说明验收边界：AMOS 原生 validation 与 FLARE22 自动 taxonomy-remap validation 的区别；并把 `docs/local-cache-demo-runbook.md` 作为本地缓存演示复跑手册。
 
 ## 2. 前端入口：`src/main.tsx`
 

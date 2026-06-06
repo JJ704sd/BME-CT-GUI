@@ -5,6 +5,12 @@ AMOS 0117:
     (138 KB, real nnUNetv2 output from 2026-05-23) and writes a job_summary.json
     so find_cached_prediction() can register it as a cache hit.
 
+    IMPORTANT: must also write validation_summary.json. Otherwise
+    find_cached_prediction() degenerates to mtime-only sort and may pick a
+    cache_source from a different cache_key. The cache demo runbook
+    (`docs/local-cache-demo-runbook.md`) and server/main.py emit a warning
+    when no candidate has validation_summary.json.
+
 FLARE22 Tr 0009:
     Reuses server/work/0aa7323a4c01/output/job_summary.json (the 218 s real
     inference that this runbook produced on 2026-06-01). On a fresh machine

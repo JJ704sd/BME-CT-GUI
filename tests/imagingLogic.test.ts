@@ -557,4 +557,23 @@ for (const card of [
 }
 assert.equal(exportReportSource.includes("dist-good"), true, "HTML report should style distance bars");
 assert.equal(exportReportSource.includes("pix-good"), true, "HTML report should style pixel accuracy bars");
+
+// --- 6-05 clinical-paper report style: cover, exec-summary, toc, formula-tip, dist-chart, captions, footnotes, section-num/en ---
+for (const className of [
+  "cover",
+  "exec-summary",
+  "toc",
+  "formula-tip",
+  "dist-chart",
+  "table-caption",
+  "footnotes",
+  "section-num",
+  "section-en"
+] as const) {
+  assert.equal(
+    exportReportSource.includes(`.${className}`),
+    true,
+    `HTML report should keep the 6-05 clinical-paper class .${className}`
+  );
+}
 assert.equal(exportReportSource.includes("distBarPercent"), true, "HTML report should invert distance bars so smaller is better");

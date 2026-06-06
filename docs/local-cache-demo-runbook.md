@@ -99,5 +99,5 @@ cat "D:/BME2026/BME_CT_Seg/segmentation-gui-prototype/server/work/<job_id>/outpu
 - **`/api/samples` 默认走回退配置**（`default_reference_case_specs()`），只暴露 1 例 AMOS。要看全部 4 例必须设置 `SEGMENTATION_REFERENCE_CASES_JSON` 指向 `examples/reference_cases.json`（4 例模板：AMOS 0117 / FLARE22 Tr 0009 / WORD 占位 / AbdomenCT-1K 占位）。
 - **取消真实推理 job** 走 `POST /api/segment/jobs/{id}/cancel`，但取消信号需要 nnUNetv2 子进程轮询才会落状态；如果 GPU 已经在跑，下一个 cancel 信号要等下一次心跳。直接重启后端最快。
 - **FLARE 推理 218 秒**比 5–20 分钟估计快很多，因为 FLARE22 Tr 0009 体积（512×512×87）较小且 2D 模型 patch 轻。
-- **AMOS 预热预测的 quality 表现**（stomach 0.556、mean_dice 0.891）明显低于 README/AGENTS.md 写的"0.925"。原因可能是 5 月 23 日的预测用的是 fast/早期权重；本次未重训，复现的指标就是这个版本。**复跑 AMOS 真实推理会得到更新更准的预测**。
+- **AMOS 预热预测的 quality 表现**（stomach 0.556、mean_dice 0.891）明显低于 README/AGENTS.md 写的"0.925"。job_summary.json 显示 2026-05-23 那次就是 `profile=quality`、`tile_step_size=0.5`、`disable_tta=false` 的标准 quality 配置（不是 fast/早期权重）；stomach 0.556 是 AMOS 0117 真实数据本身的硬骨头（胃边界模糊、形态多变，是医学影像公认难任务），复跑同样的 quality 配置大概率得到几乎一样的结果。**决策（2026-06-05）：接受现状，不复跑 AMOS 0117**。PPT 口径直接用"质量推理 mean Dice 0.891，stomach 0.556（review 状态），反映真实临床难度"。如果将来要进一步提 stomach 分数，要走 5-fold ensemble 或 fold 投票路线（见 `.planning/next-round-candidates/findings.md` 与 `task_plan.md`），不是再跑一次单次 quality 推理。
 - **本次没有 commit 任何代码改动**（`docs/local-cache-demo-runbook.md` 是新建文档，`tools/seed_amos_cache.py` 是新建脚本）。是否 git commit 由你决定。

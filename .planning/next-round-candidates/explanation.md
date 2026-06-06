@@ -2,7 +2,9 @@
 
 ## 为什么需要这个说明
 
-2026-06-05 项目已连续完成六项里程碑：本地缓存演示 7 步（AMOS cache hit → FLARE 真实推理 → FLARE cache hit）、晚间的 cache 链路补丁、detect_dataset 二轮收紧 + dataset_hint 字段、质量评估指标扩展 + surface_distances 2 EDT、HTML 报告第一轮美化（视觉层 + 信息层）、HTML 报告临床报告风格重构（第二轮美化）。本文档解释下一轮任务的背景和优先级依据。
+2026-06-06 项目已连续完成八项里程碑：本地缓存演示 7 步（AMOS cache hit → FLARE 真实推理 → FLARE cache hit）、晚间的 cache 链路补丁、detect_dataset 二轮收紧 + dataset_hint 字段、质量评估指标扩展 + surface_distances 2 EDT、HTML 报告第一轮美化（视觉层 + 信息层）、HTML 报告临床报告风格重构（第二轮美化）、演示当天收口（B1-B4 演示关键 bug 修复 + 演示启动脚本化 + server mode gating 6 路径修复 + AMOS 0117 演示口径决策）。本文档解释下一轮任务的背景和优先级依据。
+
+完整 6-06 收口 4 块改动的 planning 记录见 `.planning/2026-06-06-demo-day-wrapup/`（explanation / findings / progress / task_plan 4 文档）。
 
 ## 当前项目状态
 
@@ -15,36 +17,24 @@
 5. **2026-06-03 质量评估指标扩展 + surface_distances 2 EDT**：`ValidationSummary` 增补 12 字段（Pixel Accuracy 4 项 + HD/HD95/ASD 9 项 + `surface_distance_unit` + `spacing`）；`server/main.py surface_distances()` 把单 label EDT 调用从 6 次合并到 2 次（AMOS 0117 quality cache hit validation 38.86s → 16.78s，约 2.3× 加速）；`src/report/exportReport.ts` 3 个 metric group（19 张卡片）+ 逐标签 4 列新指标。6-03 baseline 数值：mean Pixel Accuracy 0.999855、mean HD 9.59281mm、mean HD95 3.596449mm、mean ASD 0.660724mm。
 6. **2026-06-04 HTML 报告第一轮美化（视觉层 + 信息层）**：`src/report/exportReport.ts` 从"工程 dump"提升为"卡片式仪表板"。视觉层：色阶图例、Header 渐变、3 个 metric group 加组标题图标、aiFindings 严重度排序 + `.severity-{high,medium,low}` 高亮、器官列表用 `<details><summary>` 折叠、逐标签表列固定 + 列点击排序、@media print A4 页眉页码。信息层：remap_applied 顶部警告条、taxonomy / dataset_hint 展示位、spacing 可视化、historical 警告条。`src/main.tsx:handleExport` 透传 5 个 validation 字段；`tests/imagingLogic.test.ts` 新增 source-grep 断言保护 4 个新 class。
 7. **2026-06-05 HTML 报告临床报告风格重构（第二轮美化）**：`src/report/exportReport.ts` 从"卡片式仪表板"重塑为"临床评估报告"。新增 7 个 CSS 块：`.cover` 封面页、`.exec-summary` 执行摘要、`.toc` 目录、`.formula-tip` 公式小贴士、`.dist-chart` 严重度分布图、`.table-caption` 表格标题、`.footnotes` 脚注；新增 3 个工具函数 `distributionChartHtml()` / `severityBuckets()` / `formulaTips()`；正文模板按 §1 报告概览 / §2 摘要 / §3 数据集 / §4 器官 / §5 体素 / §6 距离 / §7 关键发现 / §8 附录 8 段章节编号排版；字体改为 Source Han Serif / Songti SC + JetBrains Mono；@media print 改为 A4 + 顶部 caseId + 底部 page X of Y。本轮不动 6 类指标、`surface_distances()` 2 EDT 或 `ValidationSummary` / `LabelMetric` 白名单；与 6-04 第一轮美化兼容并叠加。
+8. **2026-06-06 演示当天收口**：
+   - **B1 SSE 进度回退修复**：`src/main.tsx:infereneTimeline` 的进度追踪以 `event.percent !== undefined` 才更新；heartbeat 不带 `percent` 时保持 `lastPercent` 不变。`tests/imagingLogic.test.ts` source-grep 守护。
+   - **B2 取消后残留进度修复**：后端 `cancel_job()` 在 `EventSourceHandler` 关闭前先发送 `event: cancel` 事件；前端 SSE 关闭前先写 `cancelled` 状态。
+   - **B3 后端模型状态对外可读**：`/api/health` 的 `model_state` 字段从内部变量提升为可被 GUI 状态栏读取的稳定 JSON 字段（`status` / `checkpoint_sha256` / `mode` / `missing`）。`tests/backendState.test.py::test_health_exposes_model_state_for_gui_status_bar` 守护。
+   - **B4 SSE 基础异常重试**：`createInferenceEventSource` 暴露 `onretry` / `retryCount` 字段；`onerror` 时按 200ms→2s 指数退避重试，最多 3 次。
+   - **演示启动脚本化**：`tools/start_local_demo.py` 一行启动：setenv + spawn backend/frontend + 轮询 4 个端点 + 失败时打印 runbook 回退命令。`docs/demo-day-checklist.md` 是配套一屏卡片。
+   - **server mode gating 6 路径修复**：`server/main.py:1537-1604 get_model_state(runtime_target)` 接受 `runtime_target` 参数切换 `server_required_files`（6 项 server 路径）与 `local_required_files`（4 项本地 nnUNet 文件）两组互斥检查；`tests/backendState.test.py` 新增 3 个守护测试。
+   - **AMOS 0117 演示口径决策（2026-06-05 决策，6-06 落地）**：cache hit 命中的是 2026-05-23 quality profile 真实推理（review，stomach Dice 0.556、mean_dice 0.891），stomach 0.556 是数据本身硬骨头。决策：接受现状，不复跑 AMOS 0117；正式 AMOS 报告基线仍是 `b3c528cc9e20`（mean_dice 0.924780）。已写入 `docs/local-cache-demo-runbook.md` 的 AMOS 0117 演示口径段落。
 
 ### 待完成
 
-1. **server mode gating**：`runtime_target=server` 创建 job 时仍可能因本地 Windows nnUNet 文件缺失而 503。
-2. **服务器 validation 复跑**：需用显式 `label_taxonomy=AMOS22` 复跑 AMOS，确认 `remap_applied=false`。
-3. **高分辨率推理优化**：768×768 输入面积是标准 512×512 的 2.25 倍，推理时间显著延长。
+1. **高分辨率推理优化**：768×768 输入面积是标准 512×512 的 2.25 倍，推理时间显著延长。
+2. **5-fold 提分策略**：当前服务器只跑 fold 0 单次，5-fold ensemble 预计 +2-3% Dice。
+3. **服务器 AMOS/FLARE 显式 taxonomy 复跑**：用显式 `label_taxonomy=AMOS22` 复跑服务器 AMOS，确认 `remap_applied=false` 后纳入正式质量基线。
 4. **跨数据集 cache 链路产品化**：当前 cache 链路补丁只针对 FLARE22 Tr 0009 + 0aa7323a4c01 这一对 cache_source；其他 cache_source 命中时若没有 `validation_summary.json`，仍然会显示"无历史验证摘要"。
-5. **AMOS 预热预测复跑**：cache demo Phase A 命中的 `009d4efdc5f6` 仍是 2026-05-23 历史 review 状态（stomach 0.556）。
-6. **演示启动脚本化**：把 7 步 demo 和 env var setenv 包成 `tools/start_local_demo.py`，避免演示现场漏设。
-7. **runbook 自动校验**：写 `tests/cacheDemoRunbook.test.py` 自动确认 runbook 中 4 个已知约束仍在代码里成立。
+5. **runbook 自动校验**：写 `tests/cacheDemoRunbook.test.py` 自动确认 runbook 中 4 个已知约束仍在代码里成立。
 
 ## 优先级依据
-
-### 高优先级：AMOS 预热预测复跑
-
-**原因**：cache demo Phase A 命中的是 2026-05-23 历史 review 预测（stomach 0.556），不能在 PPT 演示中当成 AMOS 质量基线。用 quality profile 复跑后可换更新预测，让 Phase A 在 cache demo 中挂上"非 review 状态预测"。
-
-**影响范围**：`tools/seed_demo_cache.py`、`docs/local-cache-demo-runbook.md` 表格、PPT 演示口径。
-
-### 高优先级：server gating 修复
-
-**原因**：服务器推理链路已跑通，但创建 job 时的路径检查仍依赖本地 Windows 文件。这会阻塞服务器模式的正常使用。
-
-**影响范围**：`server/main.py` 中 `/api/segment/jobs` 的路径检查逻辑。
-
-### 高优先级：服务器 validation 复跑
-
-**原因**：2026-05-31 的服务器 AMOS 轮次出现 `mean_dice=0.076015`、`foreground_dice=0.979808`，且 `remap_source=FLARE22`，疑似 taxonomy 误判。需要用显式 `label_taxonomy=AMOS22` 复跑确认。
-
-**影响范围**：服务器质量基线的可信度。
 
 ### 中高优先级：高分辨率推理优化
 
@@ -52,17 +42,23 @@
 
 **影响范围**：前端推理选项、后端降采样逻辑、结果上采样。
 
+### 中高优先级：5-fold 提分策略
+
+**原因**：当前服务器只跑 fold 0 单次。nnUNetv2 标准 5-fold ensemble（`nnUNetv2_ensemble -np 5` 拿全部 5 个 fold 的 softmax 概率图后取 mean 再 argmax）预计 +2-3% Dice。本地 quality 复跑 `b3c528cc9e20`（mean Dice 0.924780）已是单 fold 上限，要进一步提分必须走 5-fold。
+
+**影响范围**：服务器后端 `server_inference.py` 的 5-fold 编排入口；cache_key 7 字段加入 `ensemble_folds` 区分单 fold / 5 fold。
+
+### 中优先级：服务器 AMOS/FLARE 显式 taxonomy 复跑
+
+**原因**：2026-05-31 的服务器 AMOS 轮次出现 `mean_dice=0.076015`、`foreground_dice=0.979808`，且 `remap_source=FLARE22`，疑似 taxonomy 误判。需要用显式 `label_taxonomy=AMOS22` 复跑确认（server gating 6 路径修复已完成，6-06）。
+
+**影响范围**：服务器质量基线的可信度。
+
 ### 中优先级：跨数据集 cache 链路产品化
 
 **原因**：当前 cache 链路补丁只针对 FLARE22 Tr 0009 这一具体 cache_source（`0aa7323a4c01`）。其他 cache_source 命中时如果 cache_source 的 output 没有 `validation_summary.json`，UI 仍会显示"无历史验证摘要"。需要把"按历史指标改写 cache_source 摘要"做成可复用工具。
 
 **影响范围**：`tools/`、`server/main.py` 的 `complete_cached_job()` 回退路径、未来新增数据集的接入流程。
-
-### 中优先级：演示启动脚本化
-
-**原因**：演示现场容易漏设 `SEGMENTATION_REFERENCE_CASES_JSON`、`SEGMENTATION_PERSISTENT_WORKER`、`SEGMENTATION_DEVICE` 等环境变量。`tools/start_local_demo.py` 自动 setenv + spawn backend/frontend，能避免现场翻车。
-
-**影响范围**：`tools/start_local_demo.py`、`tests/startLocalDemo.test.py` dry-run。
 
 ### 中优先级：runbook 自动校验
 
@@ -79,22 +75,21 @@
 ## 与其他 planning 文档的关系
 
 - `.planning/2026-06-01-local-cache-demo/`：本地缓存演示 + cache 链路补丁已完成。
-- `.planning/label-taxonomy-server-validation/`：taxonomy fix 已完成，server gating 和 validation 复跑是下一步。
-- `.planning/high-resolution-inference-optimization/`：推理已完成，优化方案评估是下一步。
+- `.planning/label-taxonomy-server-validation/`：taxonomy fix + server gating 修复已完成（6-06），validation 复跑是下一轮。
+- `.planning/high-resolution-inference-optimization/`：推理已完成，优化方案评估是下一轮。
+- `.planning/2026-06-06-demo-day-wrapup/`：6-06 演示当天收口（B1-B4 修复 + 启动脚本化 + server gating 6 路径 + AMOS 0117 决策）已完成。
 - `.planning/campus-network-and-public-access/`：校园网 smoke 已跑通，稳定性补验是下一步。
 
 ## 执行顺序建议
 
-1. **AMOS 预热预测复跑**：让 cache demo Phase A 命中一个非 review 状态预测。
-2. **server gating 修复**：解除服务器模式的阻塞点。
-3. **服务器 validation 复跑**：确认 AMOS 服务器质量基线。
-4. **高分辨率推理优化**：实现预降采样，缩短推理时间。
-5. **跨数据集 cache 链路产品化**：把 cache 链路补丁做成通用机制。
-6. **演示启动脚本化**：演示现场不再漏设 env var。
-7. **runbook 自动校验**：防止下次复现同样的困惑。
-8. **跨数据集标签评估增强**：补单 label hint、remap 覆盖率提示。
-9. **文档与验收口径再同步**：确保文档持续跟随代码变化。
+1. **高分辨率推理优化**：实现预降采样，缩短推理时间。
+2. **5-fold 提分策略**：服务器 5-fold ensemble，预计 +2-3% Dice。
+3. **服务器 AMOS/FLARE 显式 taxonomy 复跑**：确认服务器质量基线。
+4. **跨数据集 cache 链路产品化**：把 cache 链路补丁做成通用机制。
+5. **runbook 自动校验**：防止下次复现同样的困惑。
+6. **跨数据集标签评估增强**：补单 label hint、remap 覆盖率提示。
+7. **文档与验收口径再同步**：确保文档持续跟随代码变化。
 
 ---
 
-*更新日期：2026-06-05*
+*更新日期：2026-06-06*

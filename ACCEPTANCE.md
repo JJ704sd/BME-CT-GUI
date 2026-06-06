@@ -4,6 +4,18 @@
 
 ## 当前运行状态
 
+2026-06-06 已完成：
+- **演示当天收口 + B1-B4 演示关键 bug 修复**验收：
+  - **B1 SSE 进度回退**：heartbeat 心跳事件没有 `percent` 字段时不再覆盖当前进度；只有带 `percent` 的事件才更新进度条。`tests/imagingLogic.test.ts` source-grep 守护 `event.percent` 检查。
+  - **B2 取消后残留进度**：取消 job 后后端不会继续写 progress 事件；前端不把 cancel 后的心跳误显示为"还在跑"。`cancel_job()` 与 `EventSourceHandler` 协同关闭。
+  - **B3 后端模型状态对外可读**：`/api/health` 的 `model_state` 字段从内部变量提升为可被 GUI 状态栏读取的稳定 JSON 字段，包含 `status` / `checkpoint_sha256` / `mode` / `missing` 4 个 key。`tests/backendState.test.py::test_health_exposes_model_state_for_gui_status_bar` 守护。
+  - **B4 SSE 基础异常重试**：`createInferenceEventSource` 暴露 `onretry` / `retryCount` 字段；单次断连后自动退避重连（200ms→2s 指数退避，最多 3 次）。`tests/imagingLogic.test.ts` source-grep 守护。
+- **演示启动脚本化**验收：`tools/start_local_demo.py` 一行启动：setenv + spawn backend（uvicorn 127.0.0.1:8000）+ frontend（vite dev 127.0.0.1:5173）+ 轮询 4 个端点（`/api/health` ready / `/api/samples` 4 case / `/api/models` 1 model / 前端 HTTP 200）+ 失败时打印 runbook 回退命令。`docs/demo-day-checklist.md` 是配套一屏卡片。`python tools/start_local_demo.py` 真启后端 + 前端 smoke test 2026-06-06 4 端点全过。
+- **server mode gating 6 路径修复**验收：`server/main.py:1537-1604 get_model_state(runtime_target)` 接受 `runtime_target` 参数；`runtime_target=server` 只检查 6 个 `SEGMENTATION_SERVER_*` 路径（`server_evaluate_full.py` / `server_dataset.json` / `server_nnunet_raw` / `server_nnunet_preprocessed` / `server_nnunet_results` / `server_output_root`）；`runtime_target=local` 才检查本地 4 文件（`dataset.json` / `plans.json` / `checkpoint_best.pth` / `nnUNetv2_python`）。两组检查互斥，server 模式创建 job 不再因本地 Windows nnUNet 文件缺失而 503。`tests/backendState.test.py` 新增 3 个守护测试。
+- **AMOS 0117 演示口径决策（2026-06-05，6-06 落地）**：cache hit `aea4e7cdbaf0` 命中的是 2026-05-23 quality profile 真实推理 `009d4efdc5f6`（review 状态，stomach Dice 0.556、mean_dice 0.891），stomach 0.556 是数据本身硬骨头。决策：接受现状，不复跑 AMOS 0117。正式 AMOS 报告基线仍是 `b3c528cc9e20`（mean_dice 0.924780）。已写入 `docs/local-cache-demo-runbook.md`。
+- **新增脚本/文档**：`tools/start_local_demo.py`、`docs/demo-day-checklist.md`。
+- **回归保护**：`npm test` 与 `npm run build` 全过；`python tests/backendState.test.py` 新增 3 个 server gating 测试与 1 个 B3 model_state 测试全过。
+
 2026-06-05 已完成：
 - HTML 报告临床报告风格重构（第二轮美化）验收：`src/report/exportReport.ts` 从"卡片式仪表板"重塑为"临床评估报告"。新增 7 个 CSS 块：`.cover` 封面页（题图条 + 报告编号 + 主副标题 + 数据集/病例/生成时间三列）、`.exec-summary` 执行摘要（通过 / 关注点 / 建议三栏）、`.toc` 目录（§1-§8 锚点导航）、`.formula-tip` 公式小贴士（Dice / IoU、Pixel Accuracy、HD95 三张）、`.dist-chart` 严重度分布图（高/中/低 bar chart）、`.table-caption` 表格标题、`.footnotes` 脚注；新增 3 个工具函数 `distributionChartHtml()` / `severityBuckets()` / `formulaTips()`；正文模板按 §1 报告概览 / §2 摘要 / §3 数据集 / §4 器官 / §5 体素 / §6 距离 / §7 关键发现 / §8 附录 8 段章节编号排版；字体改为 Source Han Serif / Songti SC + JetBrains Mono；@media print 改为 A4 + 顶部 caseId + 底部 page X of Y。`npm test` 与 `npm run build` 全过。
 - 打印页眉页码验收：CSS counter 在每页加 `报告 · caseId · generatedAt` 顶部条 + `page X of Y` 底部条；正文 padding 适配 A4；`.cover` / `.dist-chart` `break-inside: avoid` 避免打印分页错位。浏览器打印预览（Ctrl+P）肉眼确认页眉页码、章节编号、严重度分布图、公式 tip、caption/footnote 全部就位。
@@ -43,12 +55,11 @@
 
 当前进行中：
 - 高分辨率 CT 推理优化评估（预降采样方案）
-- server mode gating 修复
-- AMOS 预热预测 review 状态（stomach 0.556）的复跑或新训练权重接入
-- 服务器 AMOS/FLARE 显式 taxonomy 复跑验证 `remap_applied` 状态
-- 跨数据集 cache 链路产品化：把 `tools/rewrite_flare22_historical_summary.py` 重构为通用 `tools/rewrite_cached_validation_summary.py`
-- runbook 自动校验：写 `tests/cacheDemoRunbook.test.py` 自动确认 runbook 中 4 个已知约束
-- 演示启动脚本化：写 `tools/start_local_demo.py` 自动 setenv + spawn backend/frontend
+- 服务器 AMOS/FLARE 显式 taxonomy 复跑验证 `remap_applied` 状态（AMOS 0117 演示口径决策后已不再复跑 AMOS 0117，但仍需在新服务器窗口上复跑确认 `remap_applied=false` 后纳入正式基线）
+- 质量评估指标新口径推广：把 surface_distances 2 EDT 模式应用到后续 3D 模型评估和跨数据集验证
+- 跨数据集 cache 链路产品化：把 `tools/rewrite_flare22_historical_summary.py` 重构为通用 `tools/rewrite_cached_validation_summary.py`，让其他数据集/其他 cache_source 也能享受 cache hit 显示历史 validation 摘要
+- runbook 自动校验：写 `tests/cacheDemoRunbook.test.py` 自动确认 runbook 中 4 个已知约束仍在代码里成立
+- 5-fold 提分策略：用 `nnUNetv2_ensemble -np 5` 拿全部 5 个 fold 的 softmax 概率图后取 mean，再做 argmax；当前服务器只跑 fold 0 单次，5-fold ensemble 预计 +2-3% Dice
 
 ## 目标 1：CT 可浏览、三正交可联动
 

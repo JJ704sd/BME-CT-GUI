@@ -6,7 +6,23 @@
 
 ---
 
-## 〇、2026-06-05 最新状态更新
+## 〇、2026-06-06 最新状态更新
+
+### 2026-06-06 演示当天 B1-B4 修复 + start_local_demo + server mode gating 收口
+
+- 4 个 demo-day 关键 bug 修复完毕（B1-B4）：
+  - **B1** `server/main.py:1382-1467 validate_against_debug_label()` 现在接受 `label_taxonomy="auto"` 和 `dataset_hint=None`，复用 `validate_against_custom_label()` 的 taxonomy 决策树，写出 `taxonomy_match` / `label_taxonomy` / `remap_applied` 字段；FLARE22→remap、AMOS22→no-remap 双分支有回归测试。
+  - **B2** `server/main.py:1981-1990 complete_cached_job()` historical fallback 把 `setdefault` 改为**覆盖**——当前请求的 `label_taxonomy` 和 `dataset_hint` 优先于历史值；FLARE22 cache hit 现在能拿到正确的 dataset_hint。
+  - **B3** `server/main.py:1924-1928 find_cached_prediction()` 在排序退化为纯 mtime 时打印 degenerate warning，提示 `tools/seed_demo_cache.py` 漏写 `validation_summary.json`。
+  - **B4** `tests/imagingLogic.test.ts` 新增 9 个 6-05 CSS class source-grep 断言（`.cover` / `.exec-summary` / `.toc` / `.formula-tip` / `.dist-chart` / `.table-caption` / `.footnotes` / `.section-num` / `.section-en`）。
+- `tools/start_local_demo.py` 新建：一行命令启动后端 + 前端，CLI 参数 `--reference-cases-json` / `--no-persistent-worker` / `--device auto|cuda|cpu` / `--backend-port` / `--frontend-port` / `--dry-run`；等待 `/api/samples` 暴露 4 个 case（最多 30s）；Ctrl+C 优雅清理子进程。配套 `tests/startLocalDemo.test.py` 12 个 dry-run 测试，已加入 `npm test` 测试链。
+- `server/main.py:1550-1557 server_required_files` 从 2 项扩到 6 项（新增 `server_nnunet_raw` / `server_nnunet_preprocessed` / `server_nnunet_results` / `server_output_root`），`local_required_files` 与 `server_required_files` 完全互斥。`runtime_target=server` 不会被本地 Windows nnUNet 文件缺失阻断，server runtime 缺路径时也会显式列出 missing 项。
+- `tests/backendState.test.py` 新增 6 个守护测试：`test_validate_against_debug_label_propagates_taxonomy_hint`（FLARE22→remap / AMOS22→no-remap 双分支）、`test_historical_fallback_overrides_with_current_request_taxonomy`、`test_find_cached_prediction_warns_when_no_candidate_has_validation_summary`、`test_server_runtime_ready_does_not_require_local_model_files`（4 server + 4 本地路径全缺失，`state["missing"] == []`）、`test_server_runtime_reports_missing_server_paths`、`test_local_runtime_does_not_check_server_paths`。
+- `docs/local-cache-demo-runbook.md` line 102 AMOS 0117 演示口径修正：**决策（2026-06-05）接受现状，不复跑 AMOS 0117**。`009d4efdc5f6` 的 `job_summary.json` 显示这就是 2026-05-23 quality profile（`profile=quality` / `tile_step_size=0.5` / `disable_tta=false`），stomach 0.556 是数据本身的硬骨头（胃边界模糊、形态多变），复跑 quality 不会显著改善；PPT 直接用"质量推理 mean Dice 0.891，stomach 0.556（review 状态），反映真实临床难度"。
+- `docs/demo-day-checklist.md` 新建一屏可读卡片：5 步演示流程（cd → start_local_demo → 等 → 浏览器打开 → Ctrl+C）+ 前置确认 5 项（cwd / 4 文件存在 / 显存空闲）+ 兜底 curl + start_local_demo 失败时回退 runbook 命令。
+- Smoke test（2026-06-06）：`python tools/start_local_demo.py` 真启后端 + 前端，4 个端点全过（`/api/health` ready / `/api/samples` 4 case / `/api/models` 1 model / 前端 HTTP 200），Ctrl+C 干净退出。
+- `.planning/label-taxonomy-server-validation/task_plan.md` Phase 4 勾选完成、Phase 5 标 [部分完成；AMOS/FLARE 复跑等待服务器部署]。
+- 本轮不动 nnUNetv2 推理、缓存复用 7 字段、SSE 协议、HTML 报告样式或影像量化逻辑；不改变历史 AMOS/FLARE baseline。
 
 ### 2026-06-05 HTML 报告临床报告风格重构（第二轮美化）
 

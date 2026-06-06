@@ -1,16 +1,31 @@
-# 下一轮候选任务进度
+# 2026-06-06 演示当天收口进度
 
-## 2026-06-06：演示当天收口 + B1-B4 修复 + 启动脚本化 + server gating 6 路径
+## 2026-06-06：演示当天收口 + B1-B4 演示关键 bug 修复 + 启动脚本化 + server gating 6 路径
 
-**状态：** 全部收口。详见 `.planning/2026-06-06-demo-day-wrapup/`（explanation / findings / progress / task_plan 4 文档）。
+**状态：** 全部收口。
 
-**背景：** 2026-06-06 是 BME 竞赛答辩演示日的前一天。本轮目标是把所有"演示现场容易翻车"的边缘场景一次性收口：4 个 B 级别演示关键 bug（B1 SSE 进度回退 / B2 取消后残留进度 / B3 后端模型状态对外可读 / B4 SSE 基础异常重试）、演示启动脚本化（`tools/start_local_demo.py` + `docs/demo-day-checklist.md`）、server mode gating 6 路径修复、AMOS 0117 演示口径决策落地。Smoke test 2026-06-06 验证 4 端点全过。
+**背景：** 2026-06-06 是 BME 竞赛答辩演示日的前一天。本轮目标是把所有"演示现场容易翻车"的边缘场景一次性收口：4 个 B 级别演示关键 bug（B1 SSE 进度回退 / B2 取消后残留进度 / B3 后端模型状态对外可读 / B4 SSE 基础异常重试）、演示启动脚本化（`tools/start_local_demo.py` + `docs/demo-day-checklist.md`）、server mode gating 6 路径修复、AMOS 0117 演示口径决策落地。
+
+**完成项：**
+
+- B1 SSE 进度回退修复
+- B2 取消后残留进度修复
+- B3 后端模型状态对外可读
+- B4 SSE 基础异常重试
+- 演示启动脚本化（`tools/start_local_demo.py`）
+- 一屏卡片（`docs/demo-day-checklist.md`）
+- server mode gating 6 路径修复
+- AMOS 0117 演示口径决策（2026-06-05 决策，6-06 落地）
+- 9 份核心文档同步到 6-06
+- 4 份 planning 文档落地（`explanation.md` / `findings.md` / `progress.md` / `task_plan.md`）
+- GitHub 推送
+- GUI 前后端启动验证
 
 ## 2026-06-05：HTML 报告两轮美化已完成
 
 **状态：** 6-04 HTML 报告第一轮美化（视觉层 + 信息层）+ 6-05 HTML 报告临床报告风格重构（第二轮美化）已完成。
 
-**背景：** 2026-06-04 把 `src/report/exportReport.ts` 从"工程 dump"提升为"卡片式仪表板"：色阶图例、Header 渐变、3 个 metric group 加组标题图标、aiFindings 严重度排序 + `.severity-{high,medium,low}` 高亮、器官列表用 `<details><summary>` 折叠、逐标签表列固定 + 列点击排序、@media print A4 页眉页码；信息层加 remap_applied 顶部警告条、taxonomy / dataset_hint 展示位、spacing 可视化、historical 警告条。2026-06-05 进一步从"卡片式仪表板"重塑为"临床评估报告"：`.cover` 封面页、`.exec-summary` 执行摘要、`.toc` 目录（§1-§8 锚点导航）、`.formula-tip` 公式小贴士（Dice / IoU、Pixel Accuracy、HD95 三张）、`.dist-chart` 严重度分布图、`.table-caption` 表格标题、`.footnotes` 脚注；正文模板按 8 段章节编号排版；字体改为 Source Han Serif / Songti SC + JetBrains Mono；@media print 改为 A4 + 顶部 caseId + 底部 page X of Y。两轮均不动 6 类指标、`surface_distances()` 2 EDT 或 `ValidationSummary` / `LabelMetric` 白名单。`tests/imagingLogic.test.ts` 新增 source-grep 断言保护 4 个新 class。9 份核心文档已同步到 6-05 状态；4 份 planning 文档已落地到本目录。
+**背景：** 2026-06-04 把 `src/report/exportReport.ts` 从"工程 dump"提升为"卡片式仪表板"：色阶图例、Header 渐变、3 个 metric group 加组标题图标、aiFindings 严重度排序 + `.severity-{high,medium,low}` 高亮、器官列表用 `<details><summary>` 折叠、逐标签表列固定 + 列点击排序、@media print A4 页眉页码；信息层加 remap_applied 顶部警告条、taxonomy / dataset_hint 展示位、spacing 可视化、historical 警告条。2026-06-05 进一步从"卡片式仪表板"重塑为"临床评估报告"：`.cover` 封面页、`.exec-summary` 执行摘要、`.toc` 目录（§1-§8 锚点导航）、`.formula-tip` 公式小贴士（Dice / IoU、Pixel Accuracy、HD95 三张）、`.dist-chart` 严重度分布图、`.table-caption` 表格标题、`.footnotes` 脚注；正文模板按 8 段章节编号排版；字体改为 Source Han Serif / Songti SC + JetBrains Mono；@media print 改为 A4 + 顶部 caseId + 底部 page X of Y。两轮均不动 6 类指标、`surface_distances()` 2 EDT 或 `ValidationSummary` / `LabelMetric` 白名单。`tests/imagingLogic.test.ts` 新增 source-grep 断言保护 4 个新 class。9 份核心文档已同步到 6-05 状态；4 份 planning 文档已落地到 `next-round-candidates/`。
 
 ## 2026-06-01：本地缓存演示 + cache 链路补丁已完成
 
@@ -22,7 +37,7 @@
 
 **状态：** 完成。详见 `.planning/label-taxonomy-server-validation/` 和 `.planning/high-resolution-inference-optimization/`。
 
-**背景：** 2026-05-31 完成了显式 `label_taxonomy` 修复和 AMOS CT 高分辨率推理。taxonomy fix 验证通过（job `d56bcff76a8b`，`remap_applied=false`），AMOS CT 推理完成（job `ad3d14eba3de`，fast profile，mean_dice=0.77724）。新部署包 `server-runtime-package-20260531.zip` 已创建。
+**背景：** 2026-05-31 完成了显式 `label_taxonomy` 修复和 AMOS CT 高分辨率推理。taxonomy fix 验证通过（job `d56bcff76a8b`，`remap_applied=false`），AMOS CT 推理完成（job `ad3d14eba3de`，fast profile，mean_dice 0.77724）。新部署包 `server-runtime-package-20260531.zip` 已创建。
 
 ## 上一轮完成情况
 
@@ -37,7 +52,7 @@
 - [x] server mode gating 6 路径修复（`get_model_state(runtime_target)` 切换）
 - [x] AMOS 0117 演示口径决策落地（2026-06-05 决策，6-06 写入 runbook）
 - [x] 9 份核心文档同步到 6-06
-- [x] 4 份 planning 文档落地（`.planning/2026-06-06-demo-day-wrapup/`）
+- [x] 4 份 planning 文档落地（本目录）
 - [x] `npm test` / `npm run build` 全过
 - [x] `python tests/backendState.test.py` 新增 4 个守护测试全过
 - [x] `python tools/start_local_demo.py` smoke test 4 端点全过
@@ -128,7 +143,7 @@
 
 ## 下一轮候选任务（2026-06-06 起更新）
 
-### 1. 高分辨率 CT 推理优化 [待开始]
+### 1. 高分辨率推理优化 [待开始]
 
 **优先级：** 中高
 
@@ -225,4 +240,3 @@
 ---
 
 *更新日期：2026-06-06*
-
