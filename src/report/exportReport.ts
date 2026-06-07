@@ -510,17 +510,7 @@ function buildHtmlContent(data: ReportData): string {
   .swatch-warn { background: var(--warn); }
   .swatch-bad  { background: var(--bad); }
 
-  /* ===== remap / historical 顶部警告条 ===== */
-  .remap-banner {
-    display: flex; align-items: center; gap: 10px;
-    margin: 0 -40px; padding: 10px 40px;
-    font-size: 13px; font-weight: 500;
-    border-bottom: 1px solid var(--line);
-    font-family: var(--serif);
-  }
-  .remap-banner.on  { background: var(--warn-bg); color: var(--warn); border-bottom: 1px solid var(--warn); }
-  .remap-banner.off { background: var(--good-bg); color: var(--good); border-bottom: 1px solid var(--good); }
-  .remap-banner .ico { font-size: 14px; line-height: 1; font-weight: 700; }
+  /* ===== historical 顶部警告条（remap 信息已迁到 .tag 与摘要列表内联文字，2026-06-07 清理） ===== */
   .historical-banner {
     margin: 10px 0 18px; padding: 8px 14px;
     background: var(--surface-alt); color: var(--ink-soft);
@@ -803,7 +793,7 @@ function buildHtmlContent(data: ReportData): string {
     table, .metric-card, .overview-card, .dist-chart, .exec-summary, .cover { break-inside: avoid; }
     thead { display: table-header-group; }
     .cover { border-bottom: 2px solid #000; }
-    .remap-banner, .card-bar, .metric-bar, .badge, .tag, .score-pill, .swatch, .spacing-cell, .ai-finding, .dist-chart .dc-bar-fill, .cover-status, .formula-tip { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .card-bar, .metric-bar, .badge, .tag, .score-pill, .swatch, .spacing-cell, .ai-finding, .dist-chart .dc-bar-fill, .cover-status, .formula-tip { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .print-header, .print-footer { display: block !important; }
   }
   .print-header, .print-footer { display: none; }

@@ -590,4 +590,21 @@ for (const className of [
     `HTML report should keep the 6-05 clinical-paper class .${className}`
   );
 }
+// --- 6-04 visual+info layer: legend / historical-banner / spacing-bar / severity-{high,medium,low} / organ-list-details ---
+// (remap-banner CSS block was removed on 2026-06-07 — its visual is now expressed via .tag.tag-progress and inline summary copy)
+for (const className of [
+  "legend",
+  "historical-banner",
+  "spacing-bar",
+  "severity-high",
+  "severity-medium",
+  "severity-low",
+  "organ-list-details"
+] as const) {
+  assert.equal(
+    exportReportSource.includes(`.${className}`),
+    true,
+    `HTML report should keep the 6-04 visual layer class .${className}`
+  );
+}
 assert.equal(exportReportSource.includes("distBarPercent"), true, "HTML report should invert distance bars so smaller is better");
