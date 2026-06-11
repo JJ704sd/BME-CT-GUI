@@ -30,6 +30,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - **`tools/start_local_demo.py` 是演示启动的唯一入口**：setenv + spawn backend/frontend + 健康检查 + 打印 URL，幂等可重跑；前置约束已固化到 `docs/demo-day-checklist.md`。
   - **server 模式 gating 6 路径**：`runtime_target=server` 创建 job 时只检查 `SEGMENTATION_SERVER_*` 6 个路径（`server_evaluate_full.py` / `server_dataset.json` / `server_nnunet_raw` / `server_nnunet_preprocessed` / `server_nnunet_results` / `server_output_root`），不被本地 Windows nnUNet 文件缺失阻断；`runtime_target=local` 才检查 `dataset.json / plans.json / checkpoint_best.pth / nnUNetv2_python` 4 个本地文件，两组检查互斥。`server/main.py:1537-1604 get_model_state(runtime_target)` 接受 `runtime_target` 参数切换。
   - **AMOS 0117 演示口径（2026-06-05 决策）**：cache hit `aea4e7cdbaf0` 命中的是 2026-05-23 quality profile 真实推理 `009d4efdc5f6`（review 状态，stomach Dice 0.556、mean_dice 0.891），是数据本身硬骨头（stomach 在 AMOS 0117 的边界模糊），复跑 quality 不会显著改善；正式 AMOS 报告基线仍是 `b3c528cc9e20`（mean_dice 0.924780）。决策：接受现状，不复跑 AMOS 0117。
+- **2026-06-11 启动操作手册独立化**：把"线下实时启动"从 `docs/demo-day-checklist.md` 中拆出，独立成 `docs/quickstart-launch-guide.md`（10 章：TL;DR / 前置确认 / 标准启动前台+后台 / 启动选项 / 验证 / 停服 / 手工回退 / 局域网 / 一页速记卡 / 相关文档）；与 `demo-day-checklist.md`（演示当天）和 `local-cache-demo-runbook.md`（cache demo 复跑）形成三档分工。任何时候要起 GUI → 走 quickstart；演示当天 → 走 checklist；cache demo → 走 runbook。`tools/start_local_demo.py` 用 `Start-Process` 后台启动而非阻塞前台，是为了避免自动化/SSH 断开场景被 bash 工具超时连带 kill 整个进程组。9 份核心文档同步补索引；新 planning 主题 `.planning/2026-06-11-launch-guide-and-doc-sync/` 4 份文档落地。
 
 ## 安全 / 隐私边界（必读）
 
@@ -89,6 +90,7 @@ Python venv 在 `D:\BME2026\BME_CT_Seg\nnunet_env`（fastapi / uvicorn / python-
 - `docs/superpowers/specs/<date>-<topic>-design.md` 与 `docs/superpowers/plans/<date>-<topic>.md` — 重大变更的设计 / 实施计划
 - `docs/competition/BME_COMPETITION_GUIDE.md` — 竞赛报告写作指南（关键发现、组织形式、禁词）
 - `docs/local-cache-demo-runbook.md` — 本地缓存演示 7 步复跑手册
+- `docs/quickstart-launch-guide.md` — 任何时候要把 GUI 起来的最简操作手册（与 demo-day-checklist / local-cache-demo-runbook 形成三档文档分工）
 
 ## 文档协作（变更同步清单）
 

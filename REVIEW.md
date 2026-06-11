@@ -6,7 +6,16 @@
 
 ---
 
-## 〇、2026-06-06 最新状态更新
+## 〇、2026-06-11 最新状态更新
+
+### 2026-06-11 启动操作手册独立化 + 9 份核心文档巡检同步
+
+- 把 `tools/start_local_demo.py` 的"线下实时启动"操作抽成独立文档 [`docs/quickstart-launch-guide.md`](./docs/quickstart-launch-guide.md)（10 章：TL;DR / 前置确认 / 标准启动前台+后台 / 启动选项 / 验证 / 停服 / 手工回退 / 局域网 / 一页速记卡 / 相关文档）；与 [`docs/demo-day-checklist.md`](./docs/demo-day-checklist.md)（演示当天）和 [`docs/local-cache-demo-runbook.md`](./docs/local-cache-demo-runbook.md)（cache demo 7 步复跑）形成三档分工。
+- 任何时候要把 GUI 起来看 → 走 quickstart；演示当天 → 走 checklist；cache demo 复跑 → 走 runbook。
+- 9 份核心文档（README / AGENTS / CLAUDE / ACCEPTANCE / REVIEW / CODE_MODULE_GUIDE / SEGMENTATION_METRICS_SUMMARY / SEGMENTATION_EXPERIMENT_COMPARISON / SEGMENTATION_RECENT_ROUNDS）全部补一行 quickstart 索引；中文主体仍合格。
+- 实测：`& "D:\BME2026\BME_CT_Seg\nnunet_env\Scripts\python.exe" tools\start_local_demo.py` 在 PowerShell 下用 `Start-Process` 后台启动后，4 个端点全过（`/api/health` ready / `/api/samples` 4 case / `/api/models` 1 model / 前端 HTTP 200）；证明 `Start-Process` 脱离 bash 工具管控的设计假设成立 — 前台跑会被 bash 超时 kill 整个进程组，后台 `Start-Process` 不会。
+- 新 planning 主题 `.planning/2026-06-11-launch-guide-and-doc-sync/` 4 份文档落地。
+- 本轮不动 nnUNetv2 推理、缓存复用 7 字段、SSE 协议、HTML 报告样式或影像量化逻辑；不改变历史 AMOS / FLARE baseline。
 
 ### 2026-06-06 演示当天 B1-B4 修复 + start_local_demo + server mode gating 收口
 

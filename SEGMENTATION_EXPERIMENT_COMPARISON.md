@@ -327,6 +327,15 @@
 - `flare22-tr-0009-quality-20260526` 仍仅作为跨数据集证据。它使用离线器官名 remap 到 AMOS label ID，不能混入 AMOS 原生验证表。
 - `fast` profile `6802e01f1a73` 仍仅作为预览/演示选项，因为它引入 label 14/15 假阳性且整体质量下降。
 
+## 2026-06-11 启动操作手册独立化审核记录
+
+- 本轮不是新实验，而是把"线下实时启动"操作从 `docs/demo-day-checklist.md` 中独立成 [`docs/quickstart-launch-guide.md`](./docs/quickstart-launch-guide.md)（10 章：TL;DR / 前置确认 / 标准启动前台+后台 / 启动选项 / 验证 / 停服 / 手工回退 / 局域网 / 一页速记卡 / 相关文档）。
+- 与 [`docs/demo-day-checklist.md`](./docs/demo-day-checklist.md)（演示当天）和 [`docs/local-cache-demo-runbook.md`](./docs/local-cache-demo-runbook.md)（cache demo 复跑）形成三档分工。任何时候起 GUI → 走 quickstart；演示当天 → 走 checklist；cache demo → 走 runbook。
+- `tools/start_local_demo.py` 在自动化/SSH 断开场景必须用 `Start-Process` 后台启动（PowerShell `Start-Process -FilePath python -ArgumentList tools/start_local_demo.py -WorkingDirectory <项目根> -WindowStyle Hidden`），前台跑会被 bash 工具超时 kill 整个进程组（uvicorn 和 vite 都被连带杀掉）。
+- 实测：`Start-Process` 后台启动后，4 个端点全过（`/api/health` ready / `/api/samples` 4 case / `/api/models` 1 model / 前端 HTTP 200）。
+- 9 份核心文档全部补一行 quickstart 索引；中文主体仍合格。新 planning 主题 `.planning/2026-06-11-launch-guide-and-doc-sync/` 4 份文档落地。
+- 本轮不动 nnUNetv2 推理、缓存复用 7 字段、SSE 协议、validation 字段、HTML 报告样式或影像量化逻辑；不修改本表中任何历史实验指标数值；AMOS 原生基线 `b3c528cc9e20`（mean Dice 0.924780）、FLARE22 自动 remap `a717dacf42d3`（mean Dice 0.926）、FLARE22 离线 remap `86b0153d0a73`（mean Dice 0.893127）仍是同一份数据。推荐基线表不变。
+
 ## 2026-05-26 GUI 拖动修复审核记录
 
 - 本轮矢状/冠状拖动卡顿修复只改变前端三视图渲染调度，不改变本文件中任何推理实验数值。

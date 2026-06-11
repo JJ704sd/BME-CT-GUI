@@ -75,6 +75,7 @@
 - 自动 taxonomy remap：已实现，FLARE22 在线验证 mean_dice 从 0.073 提升到 0.926；服务器最新 FLARE 轮次约 `mean Dice=0.891`、`foreground Dice=0.951`。显式 `label_taxonomy=auto|AMOS22|FLARE22` 已接入，AMOS22 选择下不会执行 FLARE remap，`auto` 模式也更保守。
 - 主要进展和实验记录：见 [REVIEW.md](./REVIEW.md)、[ACCEPTANCE.md](./ACCEPTANCE.md) 与 [SEGMENTATION_EXPERIMENT_COMPARISON.md](./SEGMENTATION_EXPERIMENT_COMPARISON.md)
 - 代码讲解材料：见 [CODE_MODULE_GUIDE.md](./CODE_MODULE_GUIDE.md)
+- 启动操作手册（线下任何时候一键启动用）：见 [docs/quickstart-launch-guide.md](./docs/quickstart-launch-guide.md)。文档分工：`quickstart-launch-guide.md`（任何时候起 GUI） / `docs/demo-day-checklist.md`（演示当天） / `docs/local-cache-demo-runbook.md`（cache demo 复跑 + cache_key 7 字段）
 - 服务器 runtime 部署包：`deployment-packages/server-runtime-package-20260531.zip`，配套最短操作清单见 `deployment-packages/server-runtime-quickstart-20260531.md`。该包只包含后端运行代码和 `server/requirements.txt`，不包含真实 CT/NIfTI、checkpoint、`.env`、日志或推理输出；zip 内已包含 `server/` 前缀，应在项目根目录解压覆盖。
 - 当前推荐部署顺序：校园网 API 直连和 Ubuntu 22.04 真实 5GPU smoke test 已初步跑通；后续先用 20260531 runtime 包更新服务器并复跑 AMOS/FLARE 显式 taxonomy validation，再继续收口 server 模式 gating，最后再考虑 Tailscale / WireGuard 或公网 HTTPS、鉴权、大文件上传和 SSE 反代。
 

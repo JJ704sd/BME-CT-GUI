@@ -61,6 +61,10 @@
 - runbook 自动校验：写 `tests/cacheDemoRunbook.test.py` 自动确认 runbook 中 4 个已知约束仍在代码里成立
 - 5-fold 提分策略：用 `nnUNetv2_ensemble -np 5` 拿全部 5 个 fold 的 softmax 概率图后取 mean，再做 argmax；当前服务器只跑 fold 0 单次，5-fold ensemble 预计 +2-3% Dice
 
+2026-06-11 增量：
+
+- **启动操作手册独立化**：把 `tools/start_local_demo.py` 的"线下实时启动"操作抽成独立文档 [`docs/quickstart-launch-guide.md`](./docs/quickstart-launch-guide.md)，与 [`docs/demo-day-checklist.md`](./docs/demo-day-checklist.md)（演示当天）和 [`docs/local-cache-demo-runbook.md`](./docs/local-cache-demo-runbook.md)（cache demo 7 步复跑）形成三档文档分工。任何时候要把 GUI 起来看 → 走 quickstart；演示当天 → 走 checklist；cache demo → 走 runbook。本轮不修改任何推理 / 缓存 / SSE / validation / 报告代码，不改变 AMOS / FLARE 历史 baseline；9 份核心文档索引段同步补一行。
+
 ## 目标 1：CT 可浏览、三正交可联动
 
 验收对象：

@@ -35,6 +35,12 @@
 - runbook 自动校验：写 `tests/cacheDemoRunbook.test.py` 自动确认 runbook 中 4 个已知约束仍在代码里成立
 - 5-fold 提分策略：用 `nnUNetv2_ensemble -np 5` 拿全部 5 个 fold 的 softmax 概率图后取 mean，再做 argmax；当前服务器只跑 fold 0 单次，5-fold ensemble 预计 +2-3% Dice
 
+2026-06-11 增量：
+
+- **启动操作手册独立化**：把 `tools/start_local_demo.py` 的"线下实时启动"操作抽成独立文档 `docs/quickstart-launch-guide.md`，与 `docs/demo-day-checklist.md`（演示当天）和 `docs/local-cache-demo-runbook.md`（cache demo 7 步复跑）形成三档文档分工。任何时候要把 GUI 起来看 → 走 quickstart；演示当天 → 走 checklist；cache demo → 走 runbook。
+- **文档巡检同步**：9 份核心文档（README / AGENTS / CLAUDE / ACCEPTANCE / REVIEW / CODE_MODULE_GUIDE / SEGMENTATION_METRICS_SUMMARY / SEGMENTATION_EXPERIMENT_COMPARISON / SEGMENTATION_RECENT_ROUNDS）全部补一行 quickstart 索引；中文主体仍合格。
+- **新 planning 主题**：`.planning/2026-06-11-launch-guide-and-doc-sync/` 4 份文档落地。
+
 ## 项目结构与模块组织
 
 本仓库是本地腹部 CT 分割 GUI 原型。前端使用 React + TypeScript + Vite，主要代码位于 `src/`：主应用在 `src/main.tsx`，三正交联动视图在 `src/components/OrthogonalViewer.tsx`，NIfTI 几何映射、切片渲染和影像量化在 `src/imaging/`，推理 API 封装在 `src/inference/`，报告导出在 `src/report/`。后端位于 `server/`，负责 nnUNetv2 job 编排、SSE 进度、预测缓存、validation、taxonomy remap、本地/服务器运行位置分流。测试位于 `tests/`，离线指标与性能工具位于 `tools/`。真实 CT、模型权重、私有 registry 和生成输出只能放在被忽略目录，例如 `nnunetv2_files/`、`.test-output/`、`server/work/`。

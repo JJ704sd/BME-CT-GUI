@@ -2,9 +2,37 @@
 
 > 本文档按时间滚动覆写，只保留最近三轮成功或具备诊断价值的推理数据。历史完整记录见 `SEGMENTATION_EXPERIMENT_COMPARISON.md`。
 
-最近更新：2026-06-06
+最近更新：2026-06-11
 
-## 第 1 轮（最新）— 演示当天 B1-B4 修复 + start_local_demo + server mode gating 收口
+## 第 1 轮（最新）— 启动操作手册独立化 + 文档巡检同步
+
+| 项目 | 值 |
+|---|---|
+| 日期 | 2026-06-11 |
+| 范围 | 把 `tools/start_local_demo.py` 的"线下实时启动"操作单独抽成 `docs/quickstart-launch-guide.md`，与 `docs/demo-day-checklist.md`（演示当天）和 `docs/local-cache-demo-runbook.md`（cache demo 7 步复跑）形成三档文档分工；9 份核心文档全部巡检并补索引 |
+| 受影响逻辑 | 仅文档；`docs/quickstart-launch-guide.md` 新建（10 章：TL;DR / 前置确认 / 标准启动前台+后台 / 启动选项 / 验证 / 停服 / 手工回退 / 局域网 / 一页速记卡 / 相关文档）；9 份核心文档索引段加一行 |
+| 文档同步 | `README.md` 加一行；`AGENTS.md` / `CLAUDE.md` / `REVIEW.md` / `ACCEPTANCE.md` / `CODE_MODULE_GUIDE.md` / `SEGMENTATION_METRICS_SUMMARY.md` / `SEGMENTATION_EXPERIMENT_COMPARISON.md` / `SEGMENTATION_RECENT_ROUNDS.md` 都加一行指向 `docs/quickstart-launch-guide.md` |
+| 三档文档分工 | `quickstart-launch-guide.md`（任何时候要起 GUI） / `demo-day-checklist.md`（演示当天一屏快查） / `local-cache-demo-runbook.md`（cache demo 7 步复跑 + cache_key 7 字段） |
+| 自动验证 | 不涉及代码改动；PowerShell `Start-Process` 后台跑 `tools/start_local_demo.py` 实测确认 4 端点全过（`/api/health` ready / `/api/samples` 4 case / `/api/models` 1 model / 前端 HTTP 200）；前台跑 90s 被 bash 工具超时连带 kill 整个进程组（uvicorn + vite 父进程一起被 kill），与 `docs/quickstart-launch-guide.md` 中"为什么必须用 Start-Process 后台启动"的描述一致 |
+
+**问题描述：**
+
+`docs/demo-day-checklist.md` 是面向"演示当天"的强约束前置 + 演示流程卡片（含权重 / NIfTI 前置 + 5 步演示流程 + runbook 回退命令）；`docs/local-cache-demo-runbook.md` 是面向 cache demo 的复跑手册（含 cache_key 7 字段）。但**任何时候**要让一个新同学或临场调试者把 GUI 起来时，没有"最简版"操作文档 — 他们要么读 39 行 checklist 还要做 cache demo 前置，要么读 103 行 runbook 被 cache_key 7 字段吓退。本次把"日常启动"这层独立成 `docs/quickstart-launch-guide.md`，与另两份明确分工。
+
+**修复要点：**
+
+| 修改项 | 说明 |
+|---|---|
+| `docs/quickstart-launch-guide.md` 新建 | 10 章覆盖：TL;DR 一行启动 + Ctrl+C 停服 / 前置确认 30 秒看完的 3 件事 / 标准启动（前台调试用 + 后台演示用 `Start-Process` 含为什么必须脱离 bash 工具管控的教训）/ 启动选项 flag / 验证启动成功 5 类故障排查 / 停服两种姿势 / 手工回退两条命令 / 局域网联调 / 一页速记卡 / 相关文档 |
+| 9 份核心文档索引同步 | README.md / AGENTS.md / CLAUDE.md / REVIEW.md / ACCEPTANCE.md / CODE_MODULE_GUIDE.md / SEGMENTATION_METRICS_SUMMARY.md / SEGMENTATION_EXPERIMENT_COMPARISON.md / SEGMENTATION_RECENT_ROUNDS.md 均新增一行指向 `docs/quickstart-launch-guide.md`，中文主体仍合格 |
+| 三档文档分工明确 | 任何时候起 GUI → `quickstart-launch-guide.md`；演示当天 → `demo-day-checklist.md`；cache demo 复跑 → `local-cache-demo-runbook.md` |
+| 新 planning 主题落地 | `.planning/2026-06-11-launch-guide-and-doc-sync/` 4 份文档（explanation / findings / progress / task_plan）记录本次启动操作手册独立化与文档巡检同步 |
+
+**结论：** 把"线下实时启动操作"从演示当天 checklist 中独立出来，让日常启动有最简文档可读、演示当天仍走 checklist、cache demo 仍走 runbook；9 份核心文档均已补 quickstart 索引；本轮不修改任何推理 / 缓存 / SSE / validation / 报告代码，不改变 AMOS / FLARE 历史 baseline。
+
+---
+
+## 第 2 轮 — 演示当天 B1-B4 修复 + start_local_demo + server mode gating 收口
 
 | 项目 | 值 |
 |---|---|

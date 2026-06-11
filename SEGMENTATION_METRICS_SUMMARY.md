@@ -50,6 +50,13 @@
 - 高分辨率 CT 推理优化评估（预降采样方案）
 - 服务器 AMOS/FLARE 显式 taxonomy 复跑验证 `remap_applied` 状态（AMOS 0117 演示口径决策后已不再复跑 AMOS 0117，但仍需在新服务器窗口上复跑确认 `remap_applied=false` 后纳入正式基线）
 
+2026-06-11 增量：
+
+- **启动操作手册独立化**：把 `tools/start_local_demo.py` 的"线下实时启动"操作抽成独立文档 [`docs/quickstart-launch-guide.md`](./docs/quickstart-launch-guide.md)，与 `docs/demo-day-checklist.md`（演示当天）和 `docs/local-cache-demo-runbook.md`（cache demo 7 步复跑）形成三档文档分工。任何时候要把 GUI 起来看 → 走 quickstart；演示当天 → 走 checklist；cache demo → 走 runbook。
+- **文档巡检同步**：9 份核心文档全部补一行 quickstart 索引；中文主体仍合格。
+- **新 planning 主题**：`.planning/2026-06-11-launch-guide-and-doc-sync/` 4 份文档落地。
+- 本轮不动 `surface_distances()` 2 EDT 实现、6 类指标计算路径或任何历史 baseline 数值；AMOS quality / FLARE22 自动 remap / FLARE22 离线 remap 三套历史基线（`b3c528cc9e20` mean Dice 0.924780、`a717dacf42d3` mean Dice 0.926、`86b0153d0a73` mean Dice 0.893127）保持不变。
+
 ## 可复用命令
 
 ```powershell

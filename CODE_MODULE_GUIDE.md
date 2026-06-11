@@ -48,6 +48,12 @@
 - 服务器 5GPU/5-fold soft ensemble 校园网 smoke
 - 新部署包 `server-runtime-package-20260531.zip`
 
+2026-06-11 增量：
+
+- **启动操作手册独立化**：把 `tools/start_local_demo.py` 的"线下实时启动"操作抽成独立文档 [`docs/quickstart-launch-guide.md`](./docs/quickstart-launch-guide.md)（10 章），与 [`docs/demo-day-checklist.md`](./docs/demo-day-checklist.md)（演示当天）和 [`docs/local-cache-demo-runbook.md`](./docs/local-cache-demo-runbook.md)（cache demo 7 步复跑）形成三档文档分工。任何时候要把 GUI 起来看 → 走 quickstart；演示当天 → 走 checklist；cache demo → 走 runbook。`tools/start_local_demo.py` 在自动化/SSH 断开场景必须用 `Start-Process` 后台启动，前台跑会被 bash 工具超时 kill 整个进程组。
+- **文档巡检同步**：9 份核心文档全部补一行 quickstart 索引；中文主体仍合格。
+- **新 planning 主题**：`.planning/2026-06-11-launch-guide-and-doc-sync/` 4 份文档落地。
+
 ## 1. 推荐讲解路线
 
 1. 从 `src/main.tsx` 讲产品主流程：病例选择、NIfTI 导入、三视图显示、在线推理、结果回填。
