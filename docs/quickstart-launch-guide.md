@@ -214,4 +214,4 @@ npm run dev:lan
 
 - `docs/demo-day-checklist.md` — 演示当天一屏快查卡（前置约束 + 回退命令）
 - `docs/local-cache-demo-runbook.md` — cache demo 7 步复跑手册 + cache_key 7 字段说明
-- `README.md`「本地运行」段 — 完整 env vars 列表与模型权重准备
+- `README.md`（GitHub 展示版）/ `README.zh-CN.md`（工程详版）「本地运行」段 — 完整 env vars 列表与模型权重准备

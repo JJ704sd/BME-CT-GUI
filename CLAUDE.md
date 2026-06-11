@@ -96,7 +96,8 @@ Python venv 在 `D:\BME2026\BME_CT_Seg\nnunet_env`（fastapi / uvicorn / python-
 
 涉及推理质量 / 缓存 / taxonomy / 量化 / 报告 / 局域网 / 服务器 runtime / 验收的改动，**必须**评估是否同步：
 
-- `README.md` — 入口与状态
+- `README.md` — GitHub 仓库首页展示版（项目亮点 / 截图 / 能力速览 / 文档导航）
+- `README.zh-CN.md` — 工程详版（本地运行 / 服务器部署 / API 概览 / 限制 / 三大目标进度），原 `README.md` 在 2026-06-11 拆分
 - `ACCEPTANCE.md` — 验收口径
 - `REVIEW.md` — 完整 review
 - `SEGMENTATION_EXPERIMENT_COMPARISON.md` / `SEGMENTATION_METRICS_SUMMARY.md` / `SEGMENTATION_RECENT_ROUNDS.md` — 实验 / 指标 / 轮次

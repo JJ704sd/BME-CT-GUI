@@ -113,7 +113,7 @@ git diff --check
 
 涉及推理质量、性能、缓存、taxonomy、影像量化、报告导出、局域网、服务器运行位置或验收证据的变更，应评估是否同步：
 
-- `README.md`
+- `README.md`（GitHub 仓库首页展示版）/ `README.zh-CN.md`（工程详版；2026-06-11 从 README.md 拆分）
 - `ACCEPTANCE.md`
 - `REVIEW.md`
 - `SEGMENTATION_EXPERIMENT_COMPARISON.md`
