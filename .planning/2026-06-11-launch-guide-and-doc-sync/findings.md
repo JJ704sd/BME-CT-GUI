@@ -58,6 +58,45 @@
 
 **行动**：新增段落严格遵守同一原则。
 
+### 发现 6：GitHub repo About 区不能用 git 改、必须走 API（2026-06-11 增量）
+
+**背景**：用户继 6-11 README 拆分后要求设置仓库首页 About 区（description / topics / website），但发现流程比 README 复杂很多（需要 PAT / 设备码 OAuth / 权限调试），疑惑"为什么不能像 README 一样 commit + push"。
+
+**结论**：About 区字段（description / topics / homepage / 默认分支等）存在 **GitHub 服务器端数据库**里，**不是仓库文件**。这是 Git 设计的根本限制 —— git 只能管理仓库内的文件版本，仓库元数据由 GitHub 后端独立存储，必须走 GitHub REST/GraphQL API 或网页手动改。
+
+**对比表**：
+
+| 操作 | 改动落点 | 改法 | 凭据 |
+|---|---|---|---|
+| README.md / 文档正文 | 仓库文件（git tracked）| `git commit` + `git push` | 无（走 ssh key 或 https 凭据） |
+| About 区 description / topics / website | GitHub 后端数据库 | `gh repo edit` 或 REST API 或网页手动 | PAT 或 device code OAuth |
+| Issue / PR / 评论 | GitHub 后端数据库 | `gh` CLI 或 REST API 或网页 | PAT 或 OAuth |
+
+**所以"为什么 About 不能像 README 一样 commit"** — 因为它们就不是同一类东西。文档是 git 管的，About 是 GitHub 后端管的。
+
+**PAT 选型经验**（本次踩坑沉淀）：
+
+| 类型 | Token 格式 | 权限粒度 | 适合场景 |
+|---|---|---|---|
+| Fine-grained | `github_pat_11ABCDEF...` | 精确到仓库 + 权限 | CI / 自动化 / 安全要求高 |
+| Classic | `ghp_xxxxxxxxxxxxxxxx` | 几个粗 scope | 个人快速用、不在乎细粒度 |
+
+**改 About 所需权限**：
+
+- Fine-grained PAT：必须勾 `Administration: Read and write` + 在 Repository access 里选具体仓库
+- Classic PAT：只勾 `repo` 一项即可（包含 description / topics / website 全部需要的权限）
+
+**常见坑**：
+
+- 第一次用 fine-grained 但没勾 Administration → HTTP 403 "Resource not accessible by integration"
+- 用 classic 但漏勾 `repo` → 同样 403
+- gh CLI 看不到 `homepage` 字段在 `--json` 白名单里：要用网页或 REST API
+- PAT 用完必须去 https://github.com/settings/personal-access-tokens 手动 Revoke（gh CLI 登出不会自动撤销 token）
+
+**未来指引**：如果再要做类似的 GitHub 后端改动（设 Topics / 加 collaborators / 开 Actions 权限等），直接问用户"要不要直接生成 PAT 贴过来"，不要再 fallback 到 device code OAuth 浪费时间窗口。
+
+---
+
 ## 待验证假设
 
 1. **`Start-Process` 后台启动在 SSH 断开 / 自动化场景下不挂**：当前只在 PowerShell 本地窗口测试；远程 SSH 场景是否同样可靠，待真实使用时验证。

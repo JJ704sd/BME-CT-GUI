@@ -21,11 +21,13 @@
 - [x] **SEGMENTATION_RECENT_ROUNDS.md 顶部加 6-11 新轮次**：把原"第 1 轮（演示当天 B1-B4）"改为"第 2 轮"，新插入"第 1 轮（最新）— 启动操作手册独立化 + 文档巡检同步"。
 - [x] **新 planning 主题 `.planning/2026-06-11-launch-guide-and-doc-sync/` 4 份文档落地**：explanation.md / findings.md / progress.md / task_plan.md。
 - [x] **中文主体审查**：9 份核心文档复审，无中文乱码 / 中英混杂 / 中文段落不完整等问题。
+- [x] **README.md 拆分为展示版 + 工程详版**（方案 A，2026-06-11）：GitHub 仓库首页用 `README.md`（展示型 ~140 行），工程详版继承到 `README.zh-CN.md`（391 行）。commit `5a937d5 docs: split README.md into showcase + engineering-detail (6-11)` 已推送到 origin。
+- [x] **GitHub About 区设置**（2026-06-11 增量）：通过 fine-grained PAT 走 `gh repo edit` 设 description + 19 个 topics。token 用完登出 gh CLI，待用户去网页 Revoke。发现沉淀到 findings.md（发现 6）：About 区不能用 git 改 / Fine-grained vs Classic PAT 选型 / 常见 403 坑。
 
 ## 待完成任务
 
 - [x] **git commit**：本地 commit `87dc21a docs: add quickstart-launch-guide + sync 9 core docs + new planning topic (6-11)`，14 files changed, 543 insertions(+), 3 deletions(-)。
-- [ ] **git push**：到 GitHub 远程仓库 `JJ704sd/BME-CT-GUI`。**当前网络受限**：本机 `github.com:443` 不可达（"Failed to connect to github.com port 443 via 127.0.0.1 ... Could not connect to server"），SSH 协议因 host key 未配置也不能用。commit 已保存在本地 ahead of origin/main 1 commit，需要在能访问 GitHub 的网络下手动 `git push origin main`，或先 `git remote add <proxy-url>` 走代理。
+- [x] **git push**：到 GitHub 远程仓库 `JJ704sd/BME-CT-GUI`。**当前网络受限**：本机 `github.com:443` 不可达（"Failed to connect to github.com port 443 via 127.0.0.1 ... Could not connect to server"），SSH 协议因 host key 未配置也不能用。commit 已保存在本地 ahead of origin/main 1 commit，需要在能访问 GitHub 的网络下手动 `git push origin main`，或先 `git remote add <proxy-url>` 走代理。
 - [ ] **后续若新增 GUI 启动方式**（Docker / VSCode DevContainer 等），同步更新 `docs/quickstart-launch-guide.md`。
 - [ ] **后续若 `tools/start_local_demo.py` 新增 CLI flag**，同步更新 `docs/quickstart-launch-guide.md` 的"启动选项"段。
 

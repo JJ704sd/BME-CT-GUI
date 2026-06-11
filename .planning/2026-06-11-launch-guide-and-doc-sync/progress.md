@@ -32,6 +32,8 @@
 | 2026-06-11 20:25 | 9 份核心文档巡检 + 同步索引 |
 | 2026-06-11 20:40 | 新 planning 主题落地 |
 | 2026-06-11 20:50 | git commit + push（待执行） |
+| 2026-06-11 21:00 | README.md 拆分（GitHub 展示版 `README.md` + 工程详版 `README.zh-CN.md`）；commit `5a937d5` 推送 |
+| 2026-06-11 21:15 | GitHub About 区设置：通过 fine-grained PAT 走 `gh repo edit` 设 description + 19 个 topics；登出 gh CLI 待用户 Revoke token |
 
 ## 决策记录
 
