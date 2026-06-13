@@ -65,7 +65,7 @@
 | 模块 | 能力 | 验证基线 |
 |---|---|---|
 | CT 浏览 | `.nii` / `.nii.gz` 解析；Axial / Sagittal / Coronal；窗宽窗位预设；十字线 + 体素坐标实时显示 | `tests/imagingLogic.test.ts` |
-| 在线推理 | 本地 nnUNetv2 / 服务器 5-fold ensemble；SSE 进度 + 心跳 + 自动重连 + 取消 | 4 端点 smoke test 全过 |
+| 在线推理 | 本地 nnUNetv2 / 服务器 5-fold ensemble；SSE 进度 + 心跳 + 自动重连 + 取消 | `start_local_demo.py` 后端启动 + 4 例参考病例已暴露 |
 | 缓存回填 | cache_key 7 字段精确隔离；cache hit < 5s；historical validation 摘要 | AMOS `aea4e7cdbaf0` / FLARE `02da885c97d8` |
 | 质量评估 | 6 类指标（Dice / IoU / Pixel Accuracy / HD / HD95 / ASD）；2 EDT 距离计算 | AMOS 0117 quality cache hit validation 38.86s → 16.78s |
 | Taxonomy remap | FLARE22 ↔ AMOS22 自动检测 + 器官名重映射；显式 `label_taxonomy` 三选项 | `a717dacf42d3` mean Dice 0.926 |

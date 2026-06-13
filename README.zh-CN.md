@@ -20,8 +20,8 @@
   - **B2 取消后残留进度**：后端 `cancel_job()` 在 `EventSourceHandler` 关闭后写取消状态；前端不把 cancel 后的心跳误显示为"还在跑"。（2026-06-06 `76bb1ff` 补完）
   - **B3 后端模型状态对外可读**：`/api/health` 的 `model_state` 字段从内部变量提升为可被 GUI 状态栏读取的稳定 JSON 字段（`status` / `checkpoint_sha256` / `mode` / `missing`）。`tests/backendState.test.py::test_health_exposes_model_state_for_gui_status_bar` 守护。
   - **B4 SSE 基础异常重试**：`createInferenceEventSource` 暴露 `onretry` / `retryCount` 字段；单次断连后自动退避重连（200ms→2s 指数退避，最多 3 次）。（2026-06-06 `76bb1ff` 补完）
-  - **演示启动脚本化**：`tools/start_local_demo.py` 一行启动演示：setenv + spawn backend/frontend + 健康检查 4 端点（`/api/health` ready / `/api/samples` 4 case / `/api/models` 1 model / 前端 HTTP 200）+ 失败时打印 runbook 回退命令。配套卡片见 `docs/demo-day-checklist.md`。
-  - **server mode gating 6 路径修复**：`runtime_target=server` 创建 job 时只检查 6 个 `SEGMENTATION_SERVER_*` 路径（`server_evaluate_full.py` / `server_dataset.json` / `server_nnunet_raw` / `server_nnunet_preprocessed` / `server_nnunet_results` / `server_output_root`），不被本地 Windows nnUNet 文件缺失阻断；`runtime_target=local` 才检查本地 4 文件，两组互斥。`tests/backendState.test.py` 新增 3 个守护测试。Smoke test 2026-06-06 验证 4 端点全过。
+  - **演示启动脚本化**：`tools/start_local_demo.py` 一行启动演示：setenv + spawn backend/frontend + 启动后采样 `/api/samples`（最多 15s）校验 4 例参考病例（AMOS 0117 / FLARE22 Tr 0009 / WORD / AbdomenCT-1K）已就绪 + 失败时打印 runbook 回退命令。配套卡片见 `docs/demo-day-checklist.md`。
+  - **server mode gating 6 路径修复**：`runtime_target=server` 创建 job 时只检查 6 个 `SEGMENTATION_SERVER_*` 路径（`server_evaluate_full.py` / `server_dataset.json` / `server_nnunet_raw` / `server_nnunet_preprocessed` / `server_nnunet_results` / `server_output_root`），不被本地 Windows nnUNet 文件缺失阻断；`runtime_target=local` 才检查本地 4 文件，两组互斥。`tests/backendState.test.py` 新增 3 个守护测试。Smoke test 2026-06-06 验证后端启动 + 4 例参考病例已暴露。
   - **AMOS 0117 演示口径（2026-06-05 决策，6-06 落地）**：cache hit `aea4e7cdbaf0` 命中的是 2026-05-23 quality profile 真实推理 `009d4efdc5f6`（review，stomach Dice 0.556）；stomach 0.556 是数据本身硬骨头，决策：接受现状，不复跑 AMOS 0117。正式 AMOS 报告基线仍是 `b3c528cc9e20`（mean_dice 0.924780）。
 
 2026-06-05 已完成：

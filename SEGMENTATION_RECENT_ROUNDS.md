@@ -13,7 +13,7 @@
 | 受影响逻辑 | 仅文档；`docs/quickstart-launch-guide.md` 新建（10 章：TL;DR / 前置确认 / 标准启动前台+后台 / 启动选项 / 验证 / 停服 / 手工回退 / 局域网 / 一页速记卡 / 相关文档）；9 份核心文档索引段加一行 |
 | 文档同步 | `README.md` 加一行；`AGENTS.md` / `CLAUDE.md` / `REVIEW.md` / `ACCEPTANCE.md` / `CODE_MODULE_GUIDE.md` / `SEGMENTATION_METRICS_SUMMARY.md` / `SEGMENTATION_EXPERIMENT_COMPARISON.md` / `SEGMENTATION_RECENT_ROUNDS.md` 都加一行指向 `docs/quickstart-launch-guide.md` |
 | 三档文档分工 | `quickstart-launch-guide.md`（任何时候要起 GUI） / `demo-day-checklist.md`（演示当天一屏快查） / `local-cache-demo-runbook.md`（cache demo 7 步复跑 + cache_key 7 字段） |
-| 自动验证 | 不涉及代码改动；PowerShell `Start-Process` 后台跑 `tools/start_local_demo.py` 实测确认 4 端点全过（`/api/health` ready / `/api/samples` 4 case / `/api/models` 1 model / 前端 HTTP 200）；前台跑 90s 被 bash 工具超时连带 kill 整个进程组（uvicorn + vite 父进程一起被 kill），与 `docs/quickstart-launch-guide.md` 中"为什么必须用 Start-Process 后台启动"的描述一致 |
+| 自动验证 | 不涉及代码改动；PowerShell `Start-Process` 后台跑 `tools/start_local_demo.py` 实测确认后端启动 + 采样 `/api/samples` 校验 4 例参考病例（AMOS 0117 / FLARE22 Tr 0009 / WORD / AbdomenCT-1K）已暴露；前台跑 90s 被 bash 工具超时连带 kill 整个进程组（uvicorn + vite 父进程一起被 kill），与 `docs/quickstart-launch-guide.md` 中"为什么必须用 Start-Process 后台启动"的描述一致 |
 
 **问题描述：**
 
@@ -38,10 +38,10 @@
 |---|---|
 | 日期 | 2026-06-06（B3 真实完成 `23e0c4d`）；2026-06-06（B1 / B2 / B4 真实补完 `76bb1ff`） |
 | 修复内容 | 4 个 demo-day 关键 bug（B1 SSE 进度回退 / B2 取消后残留进度 / B3 后端模型状态对外可读 / B4 SSE 基础异常重试）、演示启动脚本化、server mode gating 6 路径收口、AMOS 0117 演示口径修正、新建演示当天 checklist 短卡片 |
-| 受影响逻辑 | `src/main.tsx` SSE onmessage 加 `parsed.heartbeat && parsed.progress === 0` 守护；新增 `inferenceStatusRef` 镜像 React state + cancelled 早退；`/api/health.model_state` 4 字段外露；新增 `src/inference/createInferenceEventSource.ts` 工具（`onretry` / `retryCount` / `onfatal` + 200ms→2s 指数退避 + 默认 3 次上限）；`tools/start_local_demo.py` 新建（setenv + spawn + 轮询 4 端点 + 失败时打印 runbook 回退）；`server/main.py:1537-1604 get_model_state(runtime_target)` 切换 6 项 server 路径与 4 项本地路径互斥检查 |
+| 受影响逻辑 | `src/main.tsx` SSE onmessage 加 `parsed.heartbeat && parsed.progress === 0` 守护；新增 `inferenceStatusRef` 镜像 React state + cancelled 早退；`/api/health.model_state` 4 字段外露；新增 `src/inference/createInferenceEventSource.ts` 工具（`onretry` / `retryCount` / `onfatal` + 200ms→2s 指数退避 + 默认 3 次上限）；`tools/start_local_demo.py` 新建（setenv + spawn + 启动后采样 `/api/samples` 校验 4 例参考病例 + 失败时打印 runbook 回退）；`server/main.py:1537-1604 get_model_state(runtime_target)` 切换 6 项 server 路径与 4 项本地路径互斥检查 |
 | 回归测试 | `tests/imagingLogic.test.ts` B1/B2/B4：新增 11 条 source-grep 断言守护 4 个核心改动（`createInferenceEventSource` / `inferenceStatusRef` / `parsed.heartbeat && parsed.progress === 0` / `onretry` / `retryCount` / `onfatal` / `handle.close()` 等）；`tests/backendState.test.py::test_health_exposes_model_state_for_gui_status_bar` 守护 B3；3 个 server gating 测试守护 6 路径 |
 | 文档同步 | 9 份核心文档同步到 6-06 状态；4 份 planning 文档落地（`.planning/2026-06-06-demo-day-wrapup/`）；6-06 bug 扫描发现 `23e0c4d` 虚标后所有 9 份核心文档回退虚标并改写为"6-06 `23e0c4d` B3 真实 / 同日 `76bb1ff` B1·B2·B4 真实补完" |
-| 自动验证 | `python tools/start_local_demo.py` smoke test 4 端点全过；`node tests/imagingLogic.test.ts`（11 条新断言全过）+ `python tests/backendState.test.py`（4 条新守护全过）+ `npm test` + `npm run build` 全过 |
+| 自动验证 | `python tools/start_local_demo.py` smoke test 后端启动 + 4 例参考病例已暴露；`node tests/imagingLogic.test.ts`（11 条新断言全过）+ `python tests/backendState.test.py`（4 条新守护全过）+ `npm test` + `npm run build` 全过 |
 
 **6-06 `23e0c4d` 文档虚标与同日 `76bb1ff` 补完说明：**
 
@@ -67,7 +67,7 @@
 | B4 EventSource retry（6-06 `76bb1ff`） | 抽出 `src/inference/createInferenceEventSource.ts` 工具，暴露 `onretry` / `retryCount` / `onfatal` 字段；onerror 时按 200ms→2s 指数退避重试，最多 3 次；3 次失败后 `onfatal` → reject Promise。`src/main.tsx` SSE 流接入新工具。`tests/imagingLogic.test.ts` 新增 11 条 source-grep 断言 |
 | server_required_files 扩到 6 项 | `get_model_state(runtime_target=server)` 现在检查 `server_evaluate_full.py` / `server_dataset.json` / `server_nnunet_raw` / `server_nnunet_preprocessed` / `server_nnunet_results` / `server_output_root`；`local_required_files` 与 `server_required_files` 完全互斥 |
 | server gating 3 测试 | `test_server_runtime_reports_missing_server_paths`（4 server 路径缺失时 missing 含对应项）+ `test_local_runtime_does_not_check_server_paths`（`runtime_target=local` 绝不报 server 路径缺失）+ 更新 `test_server_runtime_ready_does_not_require_local_model_files`（4 server + 4 本地路径全缺失，state.missing == []） |
-| start_local_demo.py | setenv（`SEGMENTATION_REFERENCE_CASES_JSON` / `SEGMENTATION_DEVICE` / `SEGMENTATION_PERSISTENT_WORKER` 等）+ spawn backend（uvicorn）+ frontend（vite dev）+ 轮询 4 端点 + 失败时打印 runbook 回退命令；Ctrl+C 优雅清理子进程 |
+| start_local_demo.py | setenv（`SEGMENTATION_REFERENCE_CASES_JSON` / `SEGMENTATION_DEVICE` / `SEGMENTATION_PERSISTENT_WORKER` 等）+ spawn backend（uvicorn）+ frontend（vite dev）+ 启动后采样 `/api/samples`（最多 15s）校验 4 例参考病例已暴露 + 失败时打印 runbook 回退命令；Ctrl+C 优雅清理子进程 |
 | AMOS 0117 演示口径 | runbook 修正：移除"复跑 quality 会更好"假设；改写"2026-05-23 那次就是 quality profile；stomach 0.556 是数据本身的硬骨头；**决策：2026-06-05 接受现状，不复跑 AMOS 0117**"；PPT 直接用"质量推理 mean Dice 0.891，stomach 0.556（review 状态），反映真实临床难度" |
 | demo-day-checklist | 一屏可读：前置确认 5 项（cwd / 4 文件存在 / 显存空闲）、演示流程 5 步（cd → start_local_demo → 等 → 浏览器打开 → Ctrl+C）、可能用到的兜底 curl、start_local_demo 失败时回退 runbook 命令 |
 
@@ -410,7 +410,7 @@
 |---|---|---|---|
 | 范围 | cache demo Phase A taxonomy 链路收口 + 演示启动脚本化 + server mode gating 6 路径 | 封面 + 摘要 + TOC + 公式 tip + 严重度分布图 + caption/footnote + 打印页眉页码 | 色阶图例 + remap/historical 警告条 + taxonomy 展示位 + spacing 可视化 + aiFindings 排序 + 器官折叠 + 列固定/排序 |
 | 改动 | `validate_against_debug_label` 接 taxonomy 字段、`complete_cached_job` 覆盖 historical、`find_cached_prediction` degenerate warning、`server_required_files` 2→6 项、新建 `tools/start_local_demo.py` + 12 测试 | exportReport.ts +7 个新 CSS 块 + 3 个工具函数；8 段章节结构 | exportReport.ts +6 个新 CSS 块 + 2 个工具函数；HTML 注入列排序脚本 |
-| 耗时影响 | smoke test 4 端点全过；start_local_demo.py 一行启动 ≈5s | 仅影响导出/打印渲染时间（与 6-04 同量级） | 仅影响导出渲染时间 |
+| 耗时影响 | smoke test 后端启动 + 4 例参考病例已暴露；start_local_demo.py 一行启动 ≈5s | 仅影响导出/打印渲染时间（与 6-04 同量级） | 仅影响导出渲染时间 |
 | 验证口径 | 6 个新 backend 测试 + 12 个 start_local_demo 测试 + 9 个 6-05 CSS source-grep；AMOS 0117 演示口径文档化 | 9 项视觉/信息元素 + 打印预览；`tests/imagingLogic.test.ts` source-grep 保护 4 个新 class | 9 项视觉/信息元素浏览器自检；同 source-grep 保护 |
 | 核心问题 | 演示当天 4 类关键 bug 收口 + 启动流程脚本化 + server gating 不会因本地文件缺失误判 | 报告从仪表板升级为临床报告，演示与答辩可直出 PDF | 信息密度与可读性提升，cache hit / remap / historical 三态都有专门提示 |
 
