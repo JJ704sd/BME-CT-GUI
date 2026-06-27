@@ -2,7 +2,7 @@
 
 ## 当前运行状态
 
-截至 2026-06-06，项目已完成：
+截至 2026-06-13，项目已完成：
 
 - **2026-06-06 演示当天收口 + B1-B4 演示关键 bug 修复**：`src/main.tsx` 修复 4 个演示当天容易翻车的边缘场景：
   - **B1 SSE 进度回退**：heartbeat 心跳事件没有 `percent` 字段时不再覆盖当前进度；只有带 `percent` 的事件才更新进度条。`tests/imagingLogic.test.ts` source-grep 守护 `event.percent` 检查。**2026-06-06 `76bb1ff` 补完**：6-06 `23e0c4d` 虚标，源码实际未做；同日 `76bb1ff` 真正实现 `parsed.heartbeat && parsed.progress === 0` 守护。
@@ -40,6 +40,14 @@
 - **启动操作手册独立化**：把 `tools/start_local_demo.py` 的"线下实时启动"操作抽成独立文档 `docs/quickstart-launch-guide.md`，与 `docs/demo-day-checklist.md`（演示当天）和 `docs/local-cache-demo-runbook.md`（cache demo 7 步复跑）形成三档文档分工。任何时候要把 GUI 起来看 → 走 quickstart；演示当天 → 走 checklist；cache demo → 走 runbook。
 - **文档巡检同步**：9 份核心文档（README / AGENTS / CLAUDE / ACCEPTANCE / REVIEW / CODE_MODULE_GUIDE / SEGMENTATION_METRICS_SUMMARY / SEGMENTATION_EXPERIMENT_COMPARISON / SEGMENTATION_RECENT_ROUNDS）全部补一行 quickstart 索引；中文主体仍合格。
 - **新 planning 主题**：`.planning/2026-06-11-launch-guide-and-doc-sync/` 4 份文档落地。
+
+2026-06-13 增量：
+
+- **9 份 md "4 端点 → 1 端点"措辞统一**：`tools/start_local_demo.py` 实际只采样 `/api/samples`（最多 15s）校验 4 例参考病例（AMOS 0117 / FLARE22 Tr 0009 / WORD / AbdomenCT-1K）已就绪；6-06 起的"4 端点 smoke test"措辞漂移 7 天没人发现。lesson：事实声明必须靠 source-grep 守护。
+- **评审在任意电脑极简运行手册**：新增 `RUN_ON_OTHER_PC.md`（4 章 + 6 个 FAQ），面向压缩包评审场景；主仓库 5 个本地 nnUNet 路径加 env var override（`SEGMENTATION_NNUNET_RAW` / `_PREPROCESSED` / `_RESULTS` / `_PYTHON` / `_FILES`），不再硬编码 `D:\BME2026\BME_CT_Seg\` 父目录布局。
+- **`server/server_inference.py` 6 个 server 路径默认值脱敏**：原 `/mnt/data0/LUO_Zheng/...` 改为 `<需设置 SEGMENTATION_SERVER_* 环境变量>`；`tests/backendState.test.py` 31 处 fixture 同步替换 `LUO_Zheng` → `user_eval` 并去 PowerShell `Set-Content -Encoding utf8` 引入的 UTF-8 BOM。
+- 新 planning 主题：`.planning/2026-06-13-doc-consistency-pass/` 4 份文档落地（explanation / findings / progress / task_plan）。
+- 不修改任何推理 / 缓存 / SSE / validation / 报告代码；不改变历史 AMOS / FLARE baseline（`b3c528cc9e20` mean Dice 0.924780、`a717dacf42d3` mean Dice 0.926、`86b0153d0a73` mean Dice 0.893127）。
 
 ## 项目结构与模块组织
 
