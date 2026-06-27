@@ -33,6 +33,16 @@
 
 > 自动化 / SSH 场景必须用 `Start-Process` 后台跑（前台跑会被工具超时连带 kill 整个进程组）。完整说明见 [`docs/quickstart-launch-guide.md`](docs/quickstart-launch-guide.md)。
 
+## 环境变量（可选调优）
+
+默认配置即可跑通正式流程；如需切换模式 / 调整推理精度或缓存策略，可用以下环境变量（`setenv` 或 `export` 都行，详见 [`README.zh-CN.md`](README.zh-CN.md) §在线推理速度策略）：
+
+- `SEGMENTATION_INFERENCE_PROFILE=quality|fast` — 推理模式；默认 `quality`（保留 TTA/mirroring，用于正式报告），`fast` 跳过 TTA 且 `tile_step_size=1.0`，仅作快速预览。
+- `SEGMENTATION_DISABLE_TTA=1` — 显式关闭 mirroring/TTA。
+- `SEGMENTATION_TILE_STEP_SIZE=0.5..1.0` — sliding-window 步长；越大越快但重叠越少。
+
+历史结果缓存（`cached-real-nnunetv2`）按 cache_key 7 字段（`input_sha256 + checkpoint_sha256 + dataset_name + configuration + labels_source + runtime_target + inference_options`）精确隔离，cache hit < 5s 返回；validation 按当前请求标签重算。persistent worker 未证明能加速，仅作为实验路径保留。
+
 ## 项目截图
 
 | 三正交联动 | 器官图层 + Dice 评分 | 临床报告（HTML）|
@@ -60,7 +70,7 @@
 
 详细讲解见 [`CODE_MODULE_GUIDE.md`](CODE_MODULE_GUIDE.md)。
 
-## 当前主要能力（2026-06-06）
+## 当前主要能力（2026-06-13）
 
 | 模块 | 能力 | 验证基线 |
 |---|---|---|
@@ -73,6 +83,13 @@
 | 局域网 / 服务器 | `VITE_API_ENDPOINT` + `SEGMENTATION_ALLOWED_ORIGINS`；校园网 Windows → Ubuntu 5GPU | `1780153055202` FLARE 服务器轮次 |
 
 正式 AMOS 基线：job `b3c528cc9e20`，quality profile，**mean Dice 0.924780**。
+
+### 2026-06-13 增量
+
+- **评审在任意电脑极简运行手册**：[`RUN_ON_OTHER_PC.md`](RUN_ON_OTHER_PC.md)（4 章 + 6 个 FAQ）面向压缩包评审场景；主仓库 nnUNet 路径支持 5 个 env var override（`SEGMENTATION_NNUNET_RAW` / `_PREPROCESSED` / `_RESULTS` / `_PYTHON` / `_FILES`），不再硬编码 `D:\BME2026\BME_CT_Seg\` 父目录。
+- **9 份 md "4 端点 smoke test" → 1 端点措辞统一**：`tools/start_local_demo.py` 实际只采样 `/api/samples`（最多 15s）校验 4 例参考病例（AMOS 0117 / FLARE22 Tr 0009 / WORD / AbdomenCT-1K）已就绪；`/api/health` / `/api/models` / 前端 5173 状态是次要信号。6-06 起的措辞漂移在 6-13 doc consistency pass 收口。
+- **`server/server_inference.py` 6 个 server 路径默认值脱敏**：原 `/mnt/data0/LUO_Zheng/...` 改为 `<需设置 SEGMENTATION_SERVER_* 环境变量>`；`tests/backendState.test.py` 31 处 fixture 同步替换 `LUO_Zheng` → `user_eval` 并去 UTF-8 BOM。
+- 不修改任何推理 / 缓存 / SSE / validation / 报告代码，不改变历史 AMOS / FLARE baseline。
 
 ## 文档导航
 

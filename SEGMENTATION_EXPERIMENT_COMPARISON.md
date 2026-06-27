@@ -336,6 +336,15 @@
 - 9 份核心文档全部补一行 quickstart 索引；中文主体仍合格。新 planning 主题 `.planning/2026-06-11-launch-guide-and-doc-sync/` 4 份文档落地。
 - 本轮不动 nnUNetv2 推理、缓存复用 7 字段、SSE 协议、validation 字段、HTML 报告样式或影像量化逻辑；不修改本表中任何历史实验指标数值；AMOS 原生基线 `b3c528cc9e20`（mean Dice 0.924780）、FLARE22 自动 remap `a717dacf42d3`（mean Dice 0.926）、FLARE22 离线 remap `86b0153d0a73`（mean Dice 0.893127）仍是同一份数据。推荐基线表不变。
 
+## 2026-06-13 文档一致性巡检 + 提交包打包审核记录
+
+- 本轮不是新实验，是把 6-06 起 9 份 md 里"4 端点 smoke test"措辞统一为"启动后采样 `/api/samples`（最多 15s）校验 4 例参考病例（AMOS 0117 / FLARE22 Tr 0009 / WORD / AbdomenCT-1K）已就绪"。`tools/start_local_demo.py:80-91 wait_for_samples()` 实际只 1 个端点采样，6-06 起的"4 端点"措辞漂移 7 天没人发现，因文档不在测试范围内。lesson：事实声明必须靠 source-grep 守护。
+- 新增 [`RUN_ON_OTHER_PC.md`](./RUN_ON_OTHER_PC.md)（4 章 + 6 个 FAQ），面向压缩包评审在别人电脑跑起来的极简操作手册。
+- 主仓库 5 个本地 nnUNet 路径加 env var override（`SEGMENTATION_NNUNET_RAW` / `_PREPROCESSED` / `_RESULTS` / `_PYTHON` / `_FILES`），纯加法不删任何代码路径；评审换目录也能跑通。
+- `server/server_inference.py` 6 个 server 路径默认值脱敏：原 `/mnt/data0/LUO_Zheng/...` 改为 `<需设置 SEGMENTATION_SERVER_* 环境变量>`；`tests/backendState.test.py` 31 处 fixture 同步替换 `LUO_Zheng` → `user_eval` 并去 PowerShell `Set-Content -Encoding utf8` 引入的 UTF-8 BOM (`U+FEFF`)。
+- 新 planning 主题：`.planning/2026-06-13-doc-consistency-pass/` 4 份文档落地（explanation / findings / progress / task_plan）。
+- 本轮不动 nnUNetv2 推理、缓存复用 7 字段、SSE 协议、validation 字段、HTML 报告样式或影像量化逻辑；不修改本表中任何历史实验指标数值；AMOS 原生基线 `b3c528cc9e20`（mean Dice 0.924780）、FLARE22 自动 remap `a717dacf42d3`（mean Dice 0.926）、FLARE22 离线 remap `86b0153d0a73`（mean Dice 0.893127）仍是同一份数据。推荐基线表不变。
+
 ## 2026-05-26 GUI 拖动修复审核记录
 
 - 本轮矢状/冠状拖动卡顿修复只改变前端三视图渲染调度，不改变本文件中任何推理实验数值。

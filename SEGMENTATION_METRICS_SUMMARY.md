@@ -57,6 +57,14 @@
 - **新 planning 主题**：`.planning/2026-06-11-launch-guide-and-doc-sync/` 4 份文档落地。
 - 本轮不动 `surface_distances()` 2 EDT 实现、6 类指标计算路径或任何历史 baseline 数值；AMOS quality / FLARE22 自动 remap / FLARE22 离线 remap 三套历史基线（`b3c528cc9e20` mean Dice 0.924780、`a717dacf42d3` mean Dice 0.926、`86b0153d0a73` mean Dice 0.893127）保持不变。
 
+2026-06-13 增量 — 文档一致性巡检 + 提交包打包：
+
+- **9 份 md "4 端点 → 1 端点"措辞统一**：`tools/start_local_demo.py` 实际只采样 `/api/samples`（最多 15s）校验 4 例参考病例（AMOS 0117 / FLARE22 Tr 0009 / WORD / AbdomenCT-1K）已就绪；6-06 起的"4 端点 smoke test"措辞漂移 7 天没人发现。lesson：事实声明必须靠 source-grep 守护。
+- **评审在任意电脑极简运行手册**：新增 [`RUN_ON_OTHER_PC.md`](./RUN_ON_OTHER_PC.md)（4 章 + 6 个 FAQ），面向压缩包评审场景；主仓库 5 个本地 nnUNet 路径加 env var override（`SEGMENTATION_NNUNET_RAW` / `_PREPROCESSED` / `_RESULTS` / `_PYTHON` / `_FILES`），不再硬编码 `D:\BME2026\BME_CT_Seg\` 父目录布局。
+- **`server/server_inference.py` 6 个 server 路径默认值脱敏**：原 `/mnt/data0/LUO_Zheng/...` 改为 `<需设置 SEGMENTATION_SERVER_* 环境变量>`；`tests/backendState.test.py` 31 处 fixture 同步替换 `LUO_Zheng` → `user_eval` 并去 PowerShell `Set-Content -Encoding utf8` 引入的 UTF-8 BOM。
+- 新 planning 主题：`.planning/2026-06-13-doc-consistency-pass/` 4 份文档落地（explanation / findings / progress / task_plan）。
+- 不修改 `surface_distances()` 2 EDT / 6 类指标实现路径或任何历史 baseline 数值；本文件覆盖的 `b3c528cc9e20` mean Dice 0.924780 / `a717dacf42d3` mean Dice 0.926 / `86b0153d0a73` mean Dice 0.893127 三套基线保持不变。
+
 ## 可复用命令
 
 ```powershell

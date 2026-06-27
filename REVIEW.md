@@ -17,6 +17,14 @@
 - 新 planning 主题 `.planning/2026-06-11-launch-guide-and-doc-sync/` 4 份文档落地。
 - 本轮不动 nnUNetv2 推理、缓存复用 7 字段、SSE 协议、HTML 报告样式或影像量化逻辑；不改变历史 AMOS / FLARE baseline。
 
+### 2026-06-13 文档一致性巡检 + 提交包打包
+
+- **9 份 md "4 端点 → 1 端点"措辞统一**：`tools/start_local_demo.py` 实际只采样 `/api/samples`（最多 15s）校验 4 例参考病例（AMOS 0117 / FLARE22 Tr 0009 / WORD / AbdomenCT-1K）已就绪；6-06 起的"4 端点 smoke test"措辞漂移 7 天没人发现。lesson：事实声明必须靠 source-grep 守护。
+- **评审在任意电脑极简运行手册**：新增 [`RUN_ON_OTHER_PC.md`](./RUN_ON_OTHER_PC.md)（4 章 + 6 个 FAQ），面向压缩包评审场景；主仓库 5 个本地 nnUNet 路径加 env var override（`SEGMENTATION_NNUNET_RAW` / `_PREPROCESSED` / `_RESULTS` / `_PYTHON` / `_FILES`），不再硬编码 `D:\BME2026\BME_CT_Seg\` 父目录布局。
+- **`server/server_inference.py` 6 个 server 路径默认值脱敏**：原 `/mnt/data0/LUO_Zheng/...` 改为 `<需设置 SEGMENTATION_SERVER_* 环境变量>`；`tests/backendState.test.py` 31 处 fixture 同步替换 `LUO_Zheng` → `user_eval` 并去 PowerShell `Set-Content -Encoding utf8` 引入的 UTF-8 BOM。
+- 新 planning 主题：`.planning/2026-06-13-doc-consistency-pass/` 4 份文档落地（explanation / findings / progress / task_plan）。
+- 不修改任何推理 / 缓存 / SSE / validation / 报告代码；不改变历史 AMOS / FLARE baseline（`b3c528cc9e20` mean Dice 0.924780、`a717dacf42d3` mean Dice 0.926、`86b0153d0a73` mean Dice 0.893127）。
+
 ### 2026-06-06 演示当天 B1-B4 修复 + start_local_demo + server mode gating 收口
 
 **说明：** 6-06 commit `23e0c4d` 在 commit message 与文档里写了 B1 / B2 / B4 都修复了，但实际源码只动了 B3。同日 bug 扫描时通过 source-grep 守护发现 `23e0c4d` 虚标（代码里**没有** `createInferenceEventSource` 函数、没有 `onretry` / `retryCount` 字符串、`tests/imagingLogic.test.ts` 没有相应 source-grep 守护、`src/main.tsx` SSE onmessage 直接 `setProgress(parsed.progress)` 无 `!== undefined` 守护），同日 commit `76bb1ff` 真实补完。下方按"6-06 `23e0c4d` 真实完成 / 同日 `76bb1ff` 补完"两个时段分别记录。

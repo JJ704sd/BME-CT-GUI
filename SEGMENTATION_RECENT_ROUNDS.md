@@ -2,7 +2,7 @@
 
 > 本文档按时间滚动覆写，只保留最近三轮成功或具备诊断价值的推理数据。历史完整记录见 `SEGMENTATION_EXPERIMENT_COMPARISON.md`。
 
-最近更新：2026-06-11
+最近更新：2026-06-13
 
 ## 第 1 轮（最新）— 启动操作手册独立化 + 文档巡检同步
 
@@ -29,6 +29,34 @@
 | 新 planning 主题落地 | `.planning/2026-06-11-launch-guide-and-doc-sync/` 4 份文档（explanation / findings / progress / task_plan）记录本次启动操作手册独立化与文档巡检同步 |
 
 **结论：** 把"线下实时启动操作"从演示当天 checklist 中独立出来，让日常启动有最简文档可读、演示当天仍走 checklist、cache demo 仍走 runbook；9 份核心文档均已补 quickstart 索引；本轮不修改任何推理 / 缓存 / SSE / validation / 报告代码，不改变 AMOS / FLARE 历史 baseline。
+
+### 2026-06-13 增量 — 文档一致性巡检 + 提交包打包
+
+| 项目 | 值 |
+|---|---|
+| 日期 | 2026-06-13（commit `9d2d147`） |
+| 范围 | 9 份核心 md 的"4 端点 smoke test"措辞统一改为"启动后采样 `/api/samples`（最多 15s）校验 4 例参考病例（AMOS 0117 / FLARE22 Tr 0009 / WORD / AbdomenCT-1K）已就绪"；新增 `RUN_ON_OTHER_PC.md`（4 章 + 6 个 FAQ，面向评审在别人电脑上跑起来）；新 planning 主题 `.planning/2026-06-13-doc-consistency-pass/` 4 份文档 |
+| 关键发现 | `tools/start_local_demo.py:80-91 wait_for_samples()` 实际只 1 个端点采样；6-06 起的"4 端点"措辞漂移 7 天没人发现，因文档不在测试范围内。lesson：**事实声明必须靠 source-grep 守护** |
+| 代码侧辅助改动 | `server/main.py` 顶部 5 个本地 nnUNet 路径常量加 env var override（`SEGMENTATION_NNUNET_RAW` / `_PREPROCESSED` / `_RESULTS` / `_PYTHON` / `_FILES`），纯加法不删任何代码路径；`server/server_inference.py` 6 个 server 路径默认值脱敏作者个人路径 `/mnt/data0/LUO_Zheng/...` → `<需设置 SEGMENTATION_SERVER_* 环境变量>`；`tests/backendState.test.py` 31 处 fixture 替换 `LUO_Zheng` → `user_eval` 并去 PowerShell 引入的 UTF-8 BOM |
+| 文档侧改动 | 11 处编辑：ACCEPTANCE.md / AGENTS.md / README.md / README.zh-CN.md / REVIEW.md / CODE_MODULE_GUIDE.md / SEGMENTATION_EXPERIMENT_COMPARISON.md / SEGMENTATION_METRICS_SUMMARY.md / SEGMENTATION_RECENT_ROUNDS.md 各 1-5 处 |
+| 不变量回归 | AMOS / FLARE / cache_key 7 字段 / 6 类指标 / SSE / 报告样式 / validation 字段 / 影像量化逻辑全部不动；不修改 `tools/start_local_demo.py` 的 1 端点采样实现；AMOS baseline `b3c528cc9e20` mean_dice 0.924780、FLARE baseline `a717dacf42d3` mean Dice 0.926、FLARE cache hit `02da885c97d8` 0.001s 全部不变 |
+| 自动验证 | 11 处编辑后 `grep "4 端点"` 在根目录 md 0 命中；7 个 commit hash（`30b0068` / `5a937d5` / `5d84e24` / `645854e` / `af93e21` / `76bb1ff` / `23e0c4d`）全部在 `git log` 真实存在；`examples/reference_cases.json` 4 例 `amos_0117` / `flare22_tr_0009` / `word_case` / `abdomenct1k_case` 与所有 md 描述完全一致 |
+
+**问题描述：** 6-13 当天为了完成 BME2026「呼吸-消化系统疾病」赛道代码提交，把仓库打包成 `segmentation-submission-20260613/` 压缩包给评委。在打包过程中按"在别人电脑上能跑起来"标准做端到端实测，发现 9 份主仓库 md 的"4 端点 smoke test"描述与 `tools/start_local_demo.py` 实际 1 端点采样不一致。提交包评审机器不一定是默认 `D:\BME2026\BME_CT_Seg\` 父目录布局，4 个本地 nnUNet 路径硬编码 `PROJECT_ROOT / "nnUNet_*"` 会让评审换目录就报 `missing`。提交包缺一份"评审拿到包第一眼该按什么顺序操作"的极简运行手册。
+
+**修复要点：**
+
+| 修改项 | 说明 |
+|---|---|
+| `tools/start_local_demo.py` 保持 1 端点采样 | 不动代码实现；只把文档里"4 端点 smoke test"措辞统一改为"启动后采样 `/api/samples`（最多 15s）校验 4 例参考病例（AMOS 0117 / FLARE22 Tr 0009 / WORD / AbdomenCT-1K）已就绪" |
+| `server/main.py` 加 5 个 env var override | `SEGMENTATION_NNUNET_RAW` / `_PREPROCESSED` / `_RESULTS` / `_PYTHON` / `_FILES`；fallback 到原硬编码路径；纯加法不删任何代码路径 |
+| `server/server_inference.py` 6 个 server 路径脱敏 | 默认值 `/mnt/data0/LUO_Zheng/...` → `<需设置 SEGMENTATION_SERVER_* 环境变量>`；`evaluate_script` / `labels_dir` 占位符在 dataclass 构造时识别为 None |
+| `tests/backendState.test.py` 31 处 fixture 脱敏 + 去 BOM | `LUO_Zheng` → `user_eval`；PowerShell `Set-Content -Encoding utf8` 加的 UTF-8 BOM (`U+FEFF`) 改用 `[System.IO.File]::WriteAllText` 强制无 BOM 重写 |
+| 新增 `RUN_ON_OTHER_PC.md` | 4 章：准备清单 / 第 1 步装 venv / 第 2 步放数据 / 第 3 步启 GUI + 6 个 FAQ；包含 5 个本地 nnUNet 路径 env var 覆盖说明 |
+| 9 份 md 措辞统一 | 11 处编辑，全部 `Edit` 工具逐文件修改；`grep "4 端点"` 在根目录 md 0 命中 |
+| 新 planning 主题 | `.planning/2026-06-13-doc-consistency-pass/` 4 份文档落地（explanation / findings / progress / task_plan） |
+
+**结论：** 6-13 doc consistency pass 把 9 份 md 漂移的"4 端点"措辞收口为"1 端点采样 4 例参考病例校验"，加了 5 个本地 nnUNet env var override 让评审换目录也能跑通，6 个 server 路径默认值脱敏了作者姓名；不修改任何推理 / 缓存 / SSE / validation / 报告代码，不改变历史 AMOS / FLARE baseline。
 
 ---
 
